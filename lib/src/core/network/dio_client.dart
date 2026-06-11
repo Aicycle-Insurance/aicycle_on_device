@@ -171,6 +171,52 @@ class DioClient {
     );
   }
 
+  /// Downloads a file from an absolute [url] to [savePath].
+  ///
+  /// [onReceiveProgress] reports (received, total) bytes; total is -1 when
+  /// the server does not send a content-length header.
+  Future<void> download(
+    String url,
+    String savePath, {
+    void Function(int received, int total)? onReceiveProgress,
+  }) async {
+    try {
+      await _dio.download(url, savePath, onReceiveProgress: onReceiveProgress);
+    } on DioException catch (e) {
+      throw _handleDioError(e);
+    } catch (e) {
+      throw ServerException(e.toString());
+    }
+  }
+
+  /// Returns the size in bytes of the resource at [url] without
+  /// downloading it, or null when it cannot be determined.
+  Future<int?> getContentLength(String url) async {
+    try {
+      final response = await _dio.head(url);
+      final length = response.headers.value(Headers.contentLengthHeader);
+      final parsed = length != null ? int.tryParse(length) : null;
+      if (parsed != null) return parsed;
+    } catch (_) {
+      // HEAD not supported — fall through to ranged GET
+    }
+    try {
+      final response = await _dio.get(
+        url,
+        options: Options(
+          headers: {'Range': 'bytes=0-0'},
+          responseType: ResponseType.bytes,
+        ),
+      );
+      // content-range: "bytes 0-0/12345678"
+      final contentRange = response.headers.value('content-range');
+      final total = contentRange?.split('/').last;
+      return total != null ? int.tryParse(total) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Creates a FormData object for multipart requests.
   Future<FormData> createFormData(Map<String, dynamic> data) async {
     return FormData.fromMap(data);

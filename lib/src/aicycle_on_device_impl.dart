@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../aicycle_on_device.dart';
+import 'features/ai_model_manager/presentation/model_manager_screen.dart';
 
 class AICycleOnDevice extends StatefulWidget {
   const AICycleOnDevice({
@@ -41,12 +42,20 @@ class _AICycleOnDeviceState extends State<AICycleOnDevice> {
   @override
   void initState() {
     super.initState();
+    // Make config available to DioClient/LoggerService via AICycleOnDevice.config
+    AICycleOnDevice.configInternal = widget.aiCycleConfig;
     // Lock orientation to portrait when using the package
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   }
 
   @override
   Widget build(BuildContext context) {
-    return const Placeholder();
+    return ModelManagerScreen(
+      showBackButton: widget.aiCycleConfig.displayConfig.showBackButton,
+      onContinue: (selectedModels) {
+        // TODO: Điều hướng sang màn camera khi màn đó được xây dựng.
+        widget.onComplete?.call(selectedModels);
+      },
+    );
   }
 }
