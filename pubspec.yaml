@@ -1,0 +1,33 @@
+name: aicycle_on_device
+description: "An AICycle On-Device SDK for Flutter."
+version: 0.0.1
+homepage:
+
+environment:
+  sdk: ^3.6.1
+  flutter: ">=1.17.0"
+
+dependencies:
+  dio: ^5.9.2
+  flutter:
+    sdk: flutter
+  # for geocoding and geolocator
+  geocoding: ^4.0.0
+  geolocator: ^14.0.2
+
+  # for device orientation
+  native_device_orientation: ^2.1.0
+
+  path_provider: ^2.1.5
+
+  # utralytics yolo custom package
+  ultralytics_yolo:
+    git:
+      url: https://github.com/Aicycle-Insurance/yolo-flutter-app.git
+      ref: main
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+flutter:
