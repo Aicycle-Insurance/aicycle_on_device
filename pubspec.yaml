@@ -21,10 +21,7 @@ dependencies:
   path_provider: ^2.1.5
 
   # utralytics yolo custom package
-  ultralytics_yolo:
-    git:
-      url: https://github.com/Aicycle-Insurance/yolo-flutter-app.git
-      ref: main
+  aicycle_yolo: ^1.0.0
 
 dev_dependencies:
   flutter_test:
