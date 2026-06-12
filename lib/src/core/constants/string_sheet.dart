@@ -25,6 +25,11 @@ class StringSheet {
 
   static String missingTypes(String types) => 'Còn thiếu: $types';
 
+  // ----- Camera screen -----
+  static const preparingModels = 'Đang chuẩn bị mô hình...';
+
+  static String downloadingModel(String name) => 'Đang tải mô hình $name';
+
   // ----- Model list / card -----
   static const download = 'Tải về';
   static const deleteModelTooltip = 'Xoá mô hình';

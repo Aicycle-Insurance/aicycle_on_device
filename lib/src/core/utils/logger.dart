@@ -1,6 +1,6 @@
 import 'dart:developer' as developer;
 
-import '../../../aicycle_on_device.dart';
+import '../../config/config_holder.dart';
 
 class LoggerService {
   void d(String message) {
@@ -26,7 +26,8 @@ class LoggerService {
     StackTrace? stackTrace,
   ]) {
     try {
-      if (AICycleOnDevice.config.generalConfig.loggingEnabled) {
+      if (AICycleConfigHolder.isInitialized &&
+          AICycleConfigHolder.config.generalConfig.loggingEnabled) {
         developer.log(
           message,
           name: 'AiCycle',

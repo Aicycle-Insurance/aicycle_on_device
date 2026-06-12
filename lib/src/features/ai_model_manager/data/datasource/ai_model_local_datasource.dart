@@ -43,7 +43,19 @@ class AiModelLocalDataSource {
       final file = await _manifestFile();
       if (!await file.exists()) return ModelManifest.empty();
       final json = jsonDecode(await file.readAsString());
-      return ModelManifest.fromJson(json as Map<String, dynamic>);
+      final manifest = ModelManifest.fromJson(json as Map<String, dynamic>);
+      // Manifest lưu đường dẫn tương đối; resolve về tuyệt đối theo thư mục
+      // hiện tại vì đường dẫn sandbox (iOS) đổi sau mỗi lần cài lại app
+      final root = await _rootDir();
+      return manifest.copyWith(
+        downloaded: manifest.downloaded
+            .map(
+              (e) => e.copyWith(
+                filePath: '${root.path}/${_relativePathOf(e)}',
+              ),
+            )
+            .toList(),
+      );
     } catch (e) {
       throw CacheException('Failed to read model manifest: $e');
     }
@@ -52,10 +64,23 @@ class AiModelLocalDataSource {
   Future<void> _writeManifest(ModelManifest manifest) async {
     try {
       final file = await _manifestFile();
-      await file.writeAsString(jsonEncode(manifest.toJson()));
+      // Chỉ lưu đường dẫn tương đối để không phụ thuộc sandbox path
+      final normalized = manifest.copyWith(
+        downloaded: manifest.downloaded
+            .map((e) => e.copyWith(filePath: _relativePathOf(e)))
+            .toList(),
+      );
+      await file.writeAsString(jsonEncode(normalized.toJson()));
     } catch (e) {
       throw CacheException('Failed to write model manifest: $e');
     }
+  }
+
+  /// Đường dẫn tương đối trong thư mục model: `<type>/<tên file>`.
+  /// Chấp nhận cả path tuyệt đối (manifest phiên bản cũ) lẫn tương đối.
+  String _relativePathOf(DownloadedModelInfo info) {
+    final fileName = info.filePath.split('/').last;
+    return '${info.type.apiValue}/$fileName';
   }
 
   /// Đường dẫn file tạm dùng trong quá trình tải.

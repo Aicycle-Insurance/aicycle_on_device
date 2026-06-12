@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import '../../../../core/network/dio_client.dart';
 import '../../domain/entity/ai_model_type.dart';
 import '../model/ai_model.dart';
@@ -8,12 +10,18 @@ class AiModelRemoteDataSource {
 
   final DioClient _client;
 
-  /// GET /v2/model-edge-device?modelType=...
+  /// Hệ điều hành hiện tại gửi lên API để lấy link tải model tương ứng.
+  static final String _modelOs = Platform.isIOS ? 'ios' : 'android';
+
+  /// GET /v2/model-edge-device?modelType=...&modelOs=...
   /// baseUrl và token được DioClient tự gắn theo môi trường trong config.
   Future<List<AiModel>> getModels(AiModelType type) async {
     final data = await _client.get<Map<String, dynamic>>(
       '/v2/model-edge-device',
-      queryParameters: {'modelType': type.apiValue},
+      queryParameters: {
+        'modelType': type.apiValue,
+        'modelOs': _modelOs,
+      },
     );
     final records = data['records'] as List<dynamic>? ?? [];
     return records

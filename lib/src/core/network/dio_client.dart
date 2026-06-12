@@ -1,7 +1,8 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
-import '../../../aicycle_on_device.dart';
+import '../../config/aicycle_config.dart';
 import '../../config/aicycle_config_internal.dart';
+import '../../config/config_holder.dart';
 import '../error/exceptions.dart';
 import '../utils/logger.dart';
 
@@ -27,7 +28,7 @@ class DioClient {
         onRequest: (options, handler) {
           // 1. Automatically get baseUrl and token from config
           try {
-            final config = AICycleOnDevice.config;
+            final config = AICycleConfigHolder.config;
             options.baseUrl = config.baseUrl;
             options.headers['Authorization'] =
                 'Bearer ${config.generalConfig.apiToken}';

@@ -260,7 +260,7 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => AICycleOnDevice(
+        builder: (context) => AICycleOnDeviceCamera(
           aiCycleConfig: config,
           onComplete: (data) {
             if (data is Map<AiModelType, DownloadedModelInfo>) {

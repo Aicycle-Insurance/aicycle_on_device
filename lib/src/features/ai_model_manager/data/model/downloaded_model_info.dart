@@ -44,6 +44,19 @@ class DownloadedModelInfo {
     );
   }
 
+  DownloadedModelInfo copyWith({String? filePath}) {
+    return DownloadedModelInfo(
+      id: id,
+      modelName: modelName,
+      version: version,
+      type: type,
+      filePath: filePath ?? this.filePath,
+      sizeInBytes: sizeInBytes,
+      createdDate: createdDate,
+      downloadedAt: downloadedAt,
+    );
+  }
+
   factory DownloadedModelInfo.fromJson(Map<String, dynamic> json) {
     return DownloadedModelInfo(
       id: json['id'] as int,
