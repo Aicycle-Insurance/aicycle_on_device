@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 enum AiCycleEnvironment { develop, stage, production }
 
-enum AiCycleOrg { aicycle, partner, others }
+enum AiCycleOrg { aicycle, vbi, others }
 
 class AICycleConfig {
   /// Thông tin xe
@@ -17,12 +17,23 @@ class AICycleConfig {
   /// Cấu hình hiển thị
   final DisplayConfig displayConfig;
 
+  /// Cấu hình validate (vd: có bắt buộc chụp ảnh toàn cảnh 4 góc không)
+  final ValidateConfig validateConfig;
+
+  /// Cấu hình riêng cho VBI (bắt buộc nếu organization là VBI)
+  final VBIConfig? vbiConfig;
+
   AICycleConfig({
     required this.generalConfig,
     required this.modelConfig,
     required this.carInformation,
     this.displayConfig = const DisplayConfig(),
-  });
+    this.validateConfig = const ValidateConfig(),
+    this.vbiConfig,
+  }) : assert(
+          generalConfig.organization != AiCycleOrg.vbi || vbiConfig != null,
+          'vbiConfig is required when organization is vbi',
+        );
 }
 
 class CarInformation {
@@ -68,10 +79,10 @@ class CarInformation {
 }
 
 class GeneralConfig {
-  /// Token API
+  /// AICycle Token API (liên hệ AICycle để được cấp token)
   final String apiToken;
 
-  /// ID của hồ sơ
+  /// ID của hồ sơ (so_id_hs)
   final String documentId;
 
   /// Tên của hồ sơ
@@ -93,6 +104,15 @@ class GeneralConfig {
     this.environment = AiCycleEnvironment.develop,
     this.documentName,
     this.loggingEnabled = false,
+  });
+}
+
+class ValidateConfig {
+  /// Có bắt buộc chụp ảnh toàn cảnh cả 4 góc không?
+  final bool require4AnglePanoramicPhotos;
+
+  const ValidateConfig({
+    this.require4AnglePanoramicPhotos = false,
   });
 }
 
@@ -127,5 +147,31 @@ class DisplayConfig {
   const DisplayConfig({
     this.loadingWidget,
     this.showBackButton = false,
+  });
+}
+
+class VBIConfig {
+  final String authorityId;
+  final String signatureKey;
+  final String externalSessionId;
+  final String jobId;
+  final String maHangMuc;
+  final String tenHangMuc;
+  final String departmentId;
+  final String userId;
+  final String maTVV;
+  final String source;
+
+  VBIConfig({
+    required this.authorityId,
+    required this.signatureKey,
+    required this.externalSessionId,
+    required this.jobId,
+    required this.maHangMuc,
+    required this.tenHangMuc,
+    required this.departmentId,
+    required this.userId,
+    required this.maTVV,
+    required this.source,
   });
 }

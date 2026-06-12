@@ -36,7 +36,6 @@ class DioClient {
 
             switch (config.generalConfig.organization) {
               case AiCycleOrg.aicycle:
-              case AiCycleOrg.partner:
                 xApp = 'appDemo';
                 break;
               default:
