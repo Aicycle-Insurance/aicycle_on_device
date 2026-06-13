@@ -21,10 +21,14 @@ dependencies:
   path_provider: ^2.1.5
 
   # utralytics yolo custom package
-  aicycle_yolo: ^1.0.0
+  # aicycle_yolo: ^1.0.0
+  aicycle_yolo:
+    path: /Volumes/Transcend/yolo-flutter-app
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
 flutter:
+  assets:
+    - assets/images/

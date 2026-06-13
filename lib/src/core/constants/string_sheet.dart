@@ -31,8 +31,18 @@ class StringSheet {
 
   // ----- Camera screen -----
   static const preparingModels = 'Đang chuẩn bị mô hình...';
+  static const startCapture = 'Bắt đầu chụp ảnh xe';
+  static const captureGuide =
+      'Vui lòng chụp 01 ảnh toàn cảnh xe đảm bảo đủ ánh sáng và thấy rõ biển số như mẫu dưới đây';
 
   static String downloadingModel(String name) => 'Đang tải mô hình $name';
+
+  // ----- Camera exit dialog -----
+  static const exitCameraTitle = 'Thoát chụp ảnh?';
+  static const exitCameraContent =
+      'Các ảnh xe đã chụp sẽ không được lưu nếu bạn thoát ngay bây giờ.';
+  static const exitConfirm = 'Thoát';
+  static const carPhoto = 'Ảnh xe';
 
   // ----- Model list / card -----
   static const download = 'Tải về';

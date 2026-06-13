@@ -60,14 +60,17 @@ class CameraModelController extends ChangeNotifier {
   ) async {
     _config = config;
     _initialPaths = paths;
+    // TODO: remove this line and un-comment the folder creation block below when done testing UI flow
+    _folderReady = true;
+    await _prepareModels(paths);
 
-    if (SessionCache.instance.claimId != null) {
-      _folderReady = true;
-      notifyListeners();
-      await _prepareModels(paths);
-      return;
-    }
-    await _createFolder(paths);
+    // if (SessionCache.instance.claimId != null) {
+    //   _folderReady = true;
+    //   notifyListeners();
+    //   await _prepareModels(paths);
+    //   return;
+    // }
+    // await _createFolder(paths);
   }
 
   Future<void> retryFolder() async {
@@ -93,6 +96,9 @@ class CameraModelController extends ChangeNotifier {
       vehicleSpec: car.vehicleVersionName,
       licensePlate: car.licensePlate,
       vehicleType: car.vehicleType,
+      isClaim: true,
+      hasLicensePlate: car.licensePlate.isNotEmpty,
+      priceTypeId: int.tryParse(car.garageId),
     );
     result.fold(
       (failure) {

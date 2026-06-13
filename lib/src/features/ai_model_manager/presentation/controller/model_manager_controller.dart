@@ -156,8 +156,11 @@ class ModelManagerController extends ChangeNotifier {
       (failure) => onActionError?.call(failure.message),
       (info) {
         _downloadedById[info.id] = info;
-        // Tự chọn nếu loại này chưa có model nào được chọn
-        if (_selectedIds[model.type] == null) {
+        // Tự chọn nếu loại này chưa có model nào được chọn,
+        // hoặc model đang chọn chưa được tải về (id cũ không còn tồn tại)
+        final currentSelected = _selectedIds[model.type];
+        if (currentSelected == null ||
+            !_downloadedById.containsKey(currentSelected)) {
           _selectedIds[model.type] = model.id;
           _repository.selectModel(model);
         }

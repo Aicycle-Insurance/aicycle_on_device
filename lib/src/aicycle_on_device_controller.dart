@@ -33,6 +33,9 @@ class AICycleOnDeviceController extends ChangeNotifier {
       vehicleSpec: car.vehicleVersionName,
       licensePlate: car.licensePlate,
       vehicleType: car.vehicleType,
+      isClaim: true,
+      hasLicensePlate: car.licensePlate.isNotEmpty,
+      priceTypeId: int.tryParse(car.garageId),
     );
 
     result.fold(
