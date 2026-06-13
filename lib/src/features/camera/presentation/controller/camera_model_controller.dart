@@ -2,62 +2,122 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../../../../config/aicycle_config.dart';
+import '../../../../core/cache/session_cache.dart';
 import '../../../ai_model_manager/data/model/ai_model.dart';
 import '../../../ai_model_manager/domain/entity/ai_model_type.dart';
 import '../../../ai_model_manager/domain/repository/ai_model_repository.dart';
+import '../../../aicycle_folder/domain/repository/aicycle_folder_repository.dart';
 
-/// Đảm bảo đủ model trước khi mở camera.
-///
-/// Với loại nào chưa có sẵn đường dẫn model, controller luôn lấy
-/// version mới nhất từ server: nếu bản mới nhất đã được tải về máy
-/// thì dùng luôn, chưa có thì tải về rồi mới báo sẵn sàng.
 class CameraModelController extends ChangeNotifier {
-  CameraModelController(this._repository);
+  CameraModelController(this._modelRepository, this._folderRepository);
 
-  final AiModelRepository _repository;
+  final AiModelRepository _modelRepository;
+  final AICycleFolderRepository _folderRepository;
 
   Map<AiModelType, String?> _initialPaths = {};
+  AICycleConfig? _config;
+
   final Map<AiModelType, String> _modelPaths = {};
+
+  bool _folderReady = false;
+  String? _folderError;
+
   bool _isPreparing = true;
-  String? _error;
+  String? _modelError;
+
   AiModelType? _downloadingType;
   double _downloadProgress = 0;
 
-  /// Báo lỗi chuẩn bị model cho bên ngoài (vd: callback onError của SDK).
-  void Function(String message)? onPrepareError;
+  void Function(String message)? onError;
+
+  // ----- Public state -----
+
+  bool get folderReady => _folderReady;
+  String? get folderError => _folderError;
 
   bool get isPreparing => _isPreparing;
+  String? get modelError => _modelError;
 
-  String? get error => _error;
-
-  /// Chỉ sẵn sàng mở camera khi có đủ model cho cả 3 loại.
   bool get isReady =>
+      _folderReady &&
       !_isPreparing &&
-      _error == null &&
+      _modelError == null &&
       AiModelType.values.every(_modelPaths.containsKey);
 
-  /// Loại model đang được tải, null nếu không trong quá trình tải.
   AiModelType? get downloadingType => _downloadingType;
-
-  /// Tiến trình tải model hiện tại (0.0 → 1.0).
   double get downloadProgress => _downloadProgress;
-
-  /// Đường dẫn file model đã sẵn sàng cho [type].
   String? modelPathOf(AiModelType type) => _modelPaths[type];
 
-  /// Chuẩn bị model: giữ nguyên các path đã có, loại nào null
-  /// thì đảm bảo version mới nhất có trên máy.
-  Future<void> prepare(Map<AiModelType, String?> paths) async {
+  // ----- Init -----
+
+  /// Bước khởi tạo duy nhất mà view gọi.
+  /// Tự động bỏ qua tạo folder nếu claimId đã có trong SessionCache
+  /// (trường hợp đến từ màn quản lý model).
+  Future<void> init(
+    AICycleConfig config,
+    Map<AiModelType, String?> paths,
+  ) async {
+    _config = config;
+    _initialPaths = paths;
+
+    if (SessionCache.instance.claimId != null) {
+      _folderReady = true;
+      notifyListeners();
+      await _prepareModels(paths);
+      return;
+    }
+    await _createFolder(paths);
+  }
+
+  Future<void> retryFolder() async {
+    _folderError = null;
+    notifyListeners();
+    await _createFolder(_initialPaths);
+  }
+
+  Future<void> retryModels() => _prepareModels(_initialPaths);
+
+  // ----- Private -----
+
+  Future<void> _createFolder(Map<AiModelType, String?> paths) async {
+    final config = _config!;
+    final car = config.carInformation;
+    final result = await _folderRepository.createAICycleFolder(
+      externalClaimId: config.generalConfig.documentId,
+      claimName: config.generalConfig.documentName,
+      vehicleBrandId: car.vehicleBrandId,
+      brand: car.companyName,
+      model: car.modelName,
+      vehicleYear: car.manufacturingYear,
+      vehicleSpec: car.vehicleVersionName,
+      licensePlate: car.licensePlate,
+      vehicleType: car.vehicleType,
+    );
+    result.fold(
+      (failure) {
+        onError?.call(failure.message);
+        _folderError = failure.message;
+        _isPreparing = false;
+        notifyListeners();
+      },
+      (_) async {
+        _folderReady = true;
+        notifyListeners();
+        await _prepareModels(paths);
+      },
+    );
+  }
+
+  Future<void> _prepareModels(Map<AiModelType, String?> paths) async {
     _initialPaths = paths;
     _isPreparing = true;
-    _error = null;
+    _modelError = null;
     notifyListeners();
 
     try {
       for (final type in AiModelType.values) {
         final provided = paths[type];
-        // Path truyền vào chỉ dùng được khi file còn tồn tại trên máy,
-        // ngược lại tự tải version mới nhất
         if (provided != null && File(provided).existsSync()) {
           _modelPaths[type] = provided;
           continue;
@@ -65,8 +125,8 @@ class CameraModelController extends ChangeNotifier {
         _modelPaths[type] = await _ensureLatestModel(type);
       }
     } on _PrepareException catch (e) {
-      _error = e.message;
-      onPrepareError?.call(e.message);
+      _modelError = e.message;
+      onError?.call(e.message);
     } finally {
       _isPreparing = false;
       _downloadingType = null;
@@ -74,11 +134,8 @@ class CameraModelController extends ChangeNotifier {
     }
   }
 
-  /// Thử lại với đúng các path ban đầu.
-  Future<void> retry() => prepare(_initialPaths);
-
   Future<String> _ensureLatestModel(AiModelType type) async {
-    final models = (await _repository.getModels(type)).fold(
+    final models = (await _modelRepository.getModels(type)).fold(
       (failure) => throw _PrepareException(failure.message),
       (models) => models,
     );
@@ -87,15 +144,14 @@ class CameraModelController extends ChangeNotifier {
     }
     final latest = models.reduce(_newer);
 
-    // Bản mới nhất đã có trên máy → dùng luôn, không tải lại
-    final manifest = (await _repository.getLocalState()).fold(
+    final manifest = (await _modelRepository.getLocalState()).fold(
       (failure) => throw _PrepareException(failure.message),
       (manifest) => manifest,
     );
     final existing =
         manifest.downloaded.where((e) => e.id == latest.id).firstOrNull;
     if (existing != null) {
-      await _repository.selectModel(latest);
+      await _modelRepository.selectModel(latest);
       return existing.filePath;
     }
 
@@ -103,10 +159,9 @@ class CameraModelController extends ChangeNotifier {
     _downloadProgress = 0;
     notifyListeners();
 
-    final info = (await _repository.downloadModel(
+    final info = (await _modelRepository.downloadModel(
       latest,
       onProgress: (progress) {
-        // Chỉ rebuild khi tiến trình thay đổi đáng kể để tránh giật UI
         if (progress - _downloadProgress >= 0.01) {
           _downloadProgress = progress;
           notifyListeners();
@@ -120,19 +175,16 @@ class CameraModelController extends ChangeNotifier {
 
     _downloadingType = null;
 
-    // Tải bản mới thành công → xoá các version cũ cùng loại (best-effort)
     final oldVersions =
         manifest.downloaded.where((e) => e.type == type && e.id != latest.id);
     for (final old in oldVersions) {
-      await _repository.deleteModel(old.id);
+      await _modelRepository.deleteModel(old.id);
     }
 
-    await _repository.selectModel(latest);
+    await _modelRepository.selectModel(latest);
     return info.filePath;
   }
 
-  /// Model mới hơn: so sánh version theo từng phần số,
-  /// bằng nhau thì lấy bản có ngày tạo mới hơn.
   AiModel _newer(AiModel a, AiModel b) {
     final cmp = _compareVersions(a.version, b.version);
     if (cmp != 0) return cmp > 0 ? a : b;

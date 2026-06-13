@@ -21,23 +21,11 @@ class AICycleOnDeviceCamera extends StatefulWidget {
     this.carPartModelPath,
   });
 
-  /// Cấu hình SDK
   final AICycleConfig aiCycleConfig;
-
-  /// Callback when initialization fails
   final Function(String error)? onError;
-
-  /// Callback when initialization succeeds.
-  /// If provided, the widget will not automatically navigate to the default flow.
   final Function(dynamic data)? onComplete;
-
-  /// Đường dẫn đến model corner detection (nếu có)
   final String? carCornerModelPath;
-
-  /// Đường dẫn đến model damage detection (nếu có)
   final String? carDamageModelPath;
-
-  /// Đường dẫn đến model part detection (nếu có)
   final String? carPartModelPath;
 
   @override
@@ -45,29 +33,32 @@ class AICycleOnDeviceCamera extends StatefulWidget {
 }
 
 class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
-  late final CameraModelController _modelController;
+  late final CameraModelController _controller;
 
   @override
   void initState() {
     super.initState();
-    // Make config available package-wide (DioClient, LoggerService, camera, ...)
     AICycleConfigHolder.init(widget.aiCycleConfig);
-    // Lock orientation to portrait when using the package
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
-    // Path nào null sẽ được tự tải version mới nhất trước khi mở camera
-    _modelController = CameraModelController(sl.aiModelRepository)
-      ..onPrepareError = (message) => widget.onError?.call(message);
-    _modelController.prepare({
-      AiModelType.carCorner: widget.carCornerModelPath,
-      AiModelType.carDamage: widget.carDamageModelPath,
-      AiModelType.carPart: widget.carPartModelPath,
-    });
+    _controller = CameraModelController(
+      sl.aiModelRepository,
+      sl.aicycleFolderRepository,
+    )..onError = (message) => widget.onError?.call(message);
+
+    _controller.init(
+      widget.aiCycleConfig,
+      {
+        AiModelType.carCorner: widget.carCornerModelPath,
+        AiModelType.carDamage: widget.carDamageModelPath,
+        AiModelType.carPart: widget.carPartModelPath,
+      },
+    );
   }
 
   @override
   void dispose() {
-    _modelController.dispose();
+    _controller.dispose();
     super.dispose();
   }
 
@@ -75,21 +66,50 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
   Widget build(BuildContext context) {
     ScreenUtil.init(context);
     return AnimatedBuilder(
-      animation: _modelController,
+      animation: _controller,
       builder: (context, _) {
-        if (_modelController.isPreparing) return _buildPreparing();
-        // Chỉ mở camera khi đã đủ model cho cả 3 loại
-        if (_modelController.isReady) return _buildCamera();
+        if (_controller.folderError != null) {
+          return _buildError(
+            _controller.folderError!,
+            onRetry: _controller.retryFolder,
+          );
+        }
+        if (!_controller.folderReady) {
+          return _buildLoading(StringSheet.creatingFolder);
+        }
+        if (_controller.isPreparing) return _buildPreparing();
+        if (_controller.isReady) return _buildCamera();
         return _buildError(
-          _modelController.error ?? StringSheet.requirementHint,
+          _controller.modelError ?? StringSheet.requirementHint,
+          onRetry: _controller.retryModels,
         );
       },
     );
   }
 
+  Widget _buildLoading(String message) {
+    return Scaffold(
+      backgroundColor: AppColors.backgroundLight,
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(
+              strokeWidth: 3,
+              color: AppColors.primaryA500,
+              backgroundColor: AppColors.primaryA200,
+            ),
+            16.verticalSpace,
+            Text(message, style: AppTextStyles.base.s14.ink400Color),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildPreparing() {
-    final downloadingType = _modelController.downloadingType;
-    final progress = _modelController.downloadProgress;
+    final type = _controller.downloadingType;
+    final progress = _controller.downloadProgress;
     return Scaffold(
       backgroundColor: AppColors.backgroundLight,
       body: Center(
@@ -100,8 +120,7 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
               width: 48.w,
               height: 48.w,
               child: CircularProgressIndicator(
-                value:
-                    downloadingType != null && progress > 0 ? progress : null,
+                value: type != null && progress > 0 ? progress : null,
                 strokeWidth: 3,
                 color: AppColors.primaryA500,
                 backgroundColor: AppColors.primaryA200,
@@ -109,12 +128,12 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
             ),
             16.verticalSpace,
             Text(
-              downloadingType != null
-                  ? StringSheet.downloadingModel(downloadingType.displayName)
+              type != null
+                  ? StringSheet.downloadingModel(type.displayName)
                   : StringSheet.preparingModels,
               style: AppTextStyles.base.s14.ink400Color,
             ),
-            if (downloadingType != null) ...[
+            if (type != null) ...[
               4.verticalSpace,
               Text(
                 '${(progress * 100).round()}%',
@@ -127,7 +146,7 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
     );
   }
 
-  Widget _buildError(String message) {
+  Widget _buildError(String message, {required VoidCallback onRetry}) {
     return Scaffold(
       backgroundColor: AppColors.backgroundLight,
       body: Center(
@@ -144,15 +163,28 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
                 textAlign: TextAlign.center,
               ),
               16.verticalSpace,
-              FilledButton(
-                onPressed: _modelController.retry,
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.primaryA500,
-                ),
-                child: Text(
-                  StringSheet.retry,
-                  style: AppTextStyles.baseWhite.s14.w600(),
-                ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  OutlinedButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: Text(
+                      StringSheet.cancel,
+                      style: AppTextStyles.base.s14.w600(),
+                    ),
+                  ),
+                  12.horizontalSpace,
+                  FilledButton(
+                    onPressed: onRetry,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.primaryA500,
+                    ),
+                    child: Text(
+                      StringSheet.retry,
+                      style: AppTextStyles.baseWhite.s14.w600(),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -162,7 +194,6 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
   }
 
   Widget _buildCamera() {
-    // Model đã sẵn sàng: _modelController.modelPathOf(type)
     // TODO: Tích hợp camera + aicycle_yolo với các model path ở trên.
     return const Placeholder();
   }

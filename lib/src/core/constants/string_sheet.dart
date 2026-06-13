@@ -25,6 +25,10 @@ class StringSheet {
 
   static String missingTypes(String types) => 'Còn thiếu: $types';
 
+  // ----- Folder / session init -----
+  static const creatingFolder = 'Đang khởi tạo hồ sơ...';
+  static const folderError = 'Không thể khởi tạo hồ sơ';
+
   // ----- Camera screen -----
   static const preparingModels = 'Đang chuẩn bị mô hình...';
 
