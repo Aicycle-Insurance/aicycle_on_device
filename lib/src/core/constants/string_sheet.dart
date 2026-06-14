@@ -34,8 +34,20 @@ class StringSheet {
   static const startCapture = 'Bắt đầu chụp ảnh xe';
   static const captureGuide =
       'Vui lòng chụp 01 ảnh toàn cảnh xe đảm bảo đủ ánh sáng và thấy rõ biển số như mẫu dưới đây';
+  static const frontLeftGuide =
+      'Vui lòng di chuyển về góc chéo đầu xe bên ghế lái';
+  static const frontRightGuide =
+      'Vui lòng di chuyển về góc chéo đầu xe bên ghế phụ';
+  static const backLeftGuide =
+      'Vui lòng di chuyển về góc chéo cuối xe bên ghế lái';
+  static const backRightGuide =
+      'Vui lòng di chuyển về góc chéo cuối xe bên ghế phụ';
 
   static String downloadingModel(String name) => 'Đang tải mô hình $name';
+
+  // ----- Car progress ring dialog -----
+  static const cornerNeedsPhoto = 'Góc cần bổ sung ảnh';
+  static const cornerCaptured = 'Đã chụp thành công';
 
   // ----- Camera exit dialog -----
   static const exitCameraTitle = 'Thoát chụp ảnh?';

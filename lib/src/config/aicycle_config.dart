@@ -118,21 +118,20 @@ class ValidateConfig {
 
 class ModelConfig {
   /// Confidence threshold của model (giá trị từ 0.0 đến 1.0)
-  final double? confidenceThreshold;
+  final double confidenceThreshold;
 
   /// IOU threshold của model (giá trị từ 0.0 đến 1.0)
-  final double? iouThreshold;
+  final double iouThreshold;
 
   ModelConfig({
-    this.confidenceThreshold,
-    this.iouThreshold,
+    this.confidenceThreshold = 0.7,
+    this.iouThreshold = 0.7,
   })  : assert(
-          confidenceThreshold == null ||
-              (confidenceThreshold >= 0.0 && confidenceThreshold <= 1.0),
+          confidenceThreshold >= 0.0 && confidenceThreshold <= 1.0,
           'confidenceThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
         ),
         assert(
-          iouThreshold == null || (iouThreshold >= 0.0 && iouThreshold <= 1.0),
+          iouThreshold >= 0.0 && iouThreshold <= 1.0,
           'iouThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
         );
 }

@@ -14,6 +14,8 @@ import '../../../core/utils/screen_utils.dart';
 import 'controller/camera_controller.dart';
 import 'controller/camera_model_controller.dart';
 import 'widgets/camera_corner_bracket.dart';
+import 'widgets/car_progress_dialog.dart';
+import 'widgets/car_progress_ring.dart';
 import 'widgets/icon_button.dart';
 
 class AICycleOnDeviceCamera extends StatefulWidget {
@@ -242,6 +244,20 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
     );
   }
 
+  void _showCarProgressDialog() {
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.transparent,
+      builder: (_) => AnimatedBuilder(
+        animation: _cameraController,
+        builder: (_, __) => CarProgressDialog(
+          activeIndex: _cameraController.activeSegmentIndex,
+          completedIndices: _cameraController.completedSegments,
+        ),
+      ),
+    );
+  }
+
   Widget _buildCamera() {
     return PopScope(
       canPop: false,
@@ -267,6 +283,10 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
                 classifyModelPath:
                     _modelController.modelPathOf(AiModelType.carCorner)!,
                 controller: _cameraController.yoloController,
+                confidenceThreshold:
+                    widget.aiCycleConfig.modelConfig.confidenceThreshold,
+                iouThreshold: widget.aiCycleConfig.modelConfig.iouThreshold,
+                onStreamingData: _cameraController.onStreamingData,
               ),
               Positioned(
                 top: 83.h,
@@ -322,8 +342,9 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
                   width: double.infinity,
                   height: 115.h,
                   color: AppColors.black,
+                  padding: EdgeInsets.symmetric(horizontal: 16.w),
                   child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       if (_cameraController.capturedPhotos.isNotEmpty)
                         NativeDeviceOrientationReader(
@@ -366,19 +387,12 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
                           child: Icon(Icons.photo_library_outlined,
                               size: 24.r, color: AppColors.white),
                         ),
-                      CIconButton(
-                        onPressed: () async {
-                          final bytes = await _cameraController.capturePhoto();
-                          if (bytes != null) widget.onComplete?.call(bytes);
-                        },
-                        icon: Icon(
-                          Icons.circle,
-                          size: 64.r,
-                          color: _cameraController.isCapturing
-                              ? AppColors.primaryA200
-                              : AppColors.white,
+                      GestureDetector(
+                        onTap: () => _showCarProgressDialog(),
+                        child: CarProgressRing(
+                          activeIndex: _cameraController.activeSegmentIndex,
                         ),
-                      )
+                      ),
                     ],
                   ),
                 ),
