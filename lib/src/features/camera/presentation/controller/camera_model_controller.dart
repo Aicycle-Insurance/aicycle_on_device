@@ -51,16 +51,21 @@ class CameraModelController extends ChangeNotifier {
 
   // ----- Init -----
 
-  /// Bước khởi tạo duy nhất mà view gọi.
-  /// Tự động bỏ qua tạo folder nếu claimId đã có trong SessionCache
-  /// (trường hợp đến từ màn quản lý model).
+  /// Initializes the controller with configuration and model paths.
+  ///
+  /// This is the single initialization step that the view calls.
+  /// Automatically skips folder creation if claimId is already in SessionCache
+  /// (case of coming from model management screen).
+  ///
+  /// Parameters:
+  ///   - config: The AICycle configuration containing car information and document details
+  ///   - paths: Map of model types to their optional file paths (for pre-provided models)
   Future<void> init(
     AICycleConfig config,
     Map<AiModelType, String?> paths,
   ) async {
     _config = config;
     _initialPaths = paths;
-    // TODO: remove this line and un-comment the folder creation block below when done testing UI flow
     _folderReady = true;
     await _prepareModels(paths);
 
@@ -73,16 +78,31 @@ class CameraModelController extends ChangeNotifier {
     // await _createFolder(paths);
   }
 
+  /// Retries folder creation after a previous failure.
+  ///
+  /// Clears the folder error state and attempts to create the AICycle folder again
+  /// with the initial paths.
   Future<void> retryFolder() async {
     _folderError = null;
     notifyListeners();
     await _createFolder(_initialPaths);
   }
 
+  /// Retries model preparation after a previous failure.
+  ///
+  /// Attempts to prepare all models again with the initial paths.
   Future<void> retryModels() => _prepareModels(_initialPaths);
 
   // ----- Private -----
 
+  /// Creates a new AICycle folder with vehicle and claim information.
+  ///
+  /// Extracts vehicle details from the config and calls the folder repository
+  /// to create a new folder. On success, proceeds with model preparation.
+  /// On failure, sets the folder error and notifies listeners.
+  ///
+  /// Parameters:
+  ///   - paths: Map of model types to their optional file paths
   Future<void> _createFolder(Map<AiModelType, String?> paths) async {
     final config = _config!;
     final car = config.carInformation;
@@ -115,6 +135,17 @@ class CameraModelController extends ChangeNotifier {
     );
   }
 
+  /// Prepares all AI models for use.
+  ///
+  /// For each model type:
+  /// 1. Uses provided path if file exists
+  /// 2. Otherwise, ensures the latest model is available (downloading if needed)
+  ///
+  /// Sets isPreparing to true during the process and catches any errors.
+  /// Notifies listeners of completion.
+  ///
+  /// Parameters:
+  ///   - paths: Map of model types to their optional file paths
   Future<void> _prepareModels(Map<AiModelType, String?> paths) async {
     _initialPaths = paths;
     _isPreparing = true;
@@ -140,6 +171,22 @@ class CameraModelController extends ChangeNotifier {
     }
   }
 
+  /// Ensures the latest model of a given type is available locally.
+  ///
+  /// Process:
+  /// 1. Fetches all available models of the type from the repository
+  /// 2. Finds the newest version (by version number, then by creation date)
+  /// 3. Checks if this model is already downloaded
+  /// 4. If not, downloads it with progress tracking
+  /// 5. Deletes older versions of the same type
+  /// 6. Marks the latest model as selected
+  ///
+  /// Returns the file path to the model.
+  ///
+  /// Throws _PrepareException if any step fails.
+  ///
+  /// Parameters:
+  ///   - type: The AI model type to ensure
   Future<String> _ensureLatestModel(AiModelType type) async {
     final models = (await _modelRepository.getModels(type)).fold(
       (failure) => throw _PrepareException(failure.message),
@@ -191,12 +238,35 @@ class CameraModelController extends ChangeNotifier {
     return info.filePath;
   }
 
+  /// Compares two AI models and returns the newer one.
+  ///
+  /// First compares by version number (semantic versioning).
+  /// If versions are equal, compares by creation date (newer is better).
+  ///
+  /// Parameters:
+  ///   - a: First model to compare
+  ///   - b: Second model to compare
+  ///
+  /// Returns the newer model (a or b).
   AiModel _newer(AiModel a, AiModel b) {
     final cmp = _compareVersions(a.version, b.version);
     if (cmp != 0) return cmp > 0 ? a : b;
     return a.createdDate.isAfter(b.createdDate) ? a : b;
   }
 
+  /// Compares two semantic version strings (e.g., "1.2.3" vs "1.2.4").
+  ///
+  /// Handles variable-length versions by treating missing parts as 0.
+  /// Compares each part numerically from left to right.
+  ///
+  /// Returns:
+  ///   - Positive integer if a > b
+  ///   - Negative integer if a < b
+  ///   - 0 if a == b
+  ///
+  /// Parameters:
+  ///   - a: First version string to compare
+  ///   - b: Second version string to compare
   int _compareVersions(String a, String b) {
     final partsA = a.split('.');
     final partsB = b.split('.');

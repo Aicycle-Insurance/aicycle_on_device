@@ -31,7 +31,10 @@ class ExampleHomePage extends StatefulWidget {
 
 class _ExampleHomePageState extends State<ExampleHomePage> {
   // General Config
-  final _apiTokenController = TextEditingController(text: '');
+  final _apiTokenController = TextEditingController(
+    text:
+        '2ab770:62515e5fa0f44b7485951e54ce3e76a66f1d4c80ee6248bc809c9158a63e8cba',
+  );
   final _documentIdController = TextEditingController(text: 'doc-example-001');
   final _documentNameController = TextEditingController(text: 'Test Claim');
   AiCycleEnvironment _environment = AiCycleEnvironment.stage;
@@ -251,8 +254,8 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
         vehicleBrandId: _vehicleBrandIdController.text,
       ),
       modelConfig: ModelConfig(
-        confidenceThreshold: double.tryParse(_confidenceController.text),
-        iouThreshold: double.tryParse(_iouController.text),
+        confidenceThreshold: double.parse(_confidenceController.text),
+        iouThreshold: double.parse(_iouController.text),
       ),
       displayConfig: DisplayConfig(showBackButton: _showBackButton),
     );

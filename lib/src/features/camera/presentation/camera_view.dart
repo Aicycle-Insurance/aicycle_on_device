@@ -17,6 +17,7 @@ import 'widgets/camera_corner_bracket.dart';
 import 'widgets/car_progress_dialog.dart';
 import 'widgets/car_progress_ring.dart';
 import 'widgets/icon_button.dart';
+import 'widgets/tool_tip.dart';
 
 class AICycleOnDeviceCamera extends StatefulWidget {
   const AICycleOnDeviceCamera({
@@ -282,12 +283,16 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
                     _modelController.modelPathOf(AiModelType.carDamage)!,
                 classifyModelPath:
                     _modelController.modelPathOf(AiModelType.carCorner)!,
+                segmentModelPath:
+                    _modelController.modelPathOf(AiModelType.carPart)!,
                 controller: _cameraController.yoloController,
                 confidenceThreshold:
                     widget.aiCycleConfig.modelConfig.confidenceThreshold,
                 iouThreshold: widget.aiCycleConfig.modelConfig.iouThreshold,
                 onStreamingData: _cameraController.onStreamingData,
               ),
+
+              /// Overlay UI
               Positioned(
                 top: 83.h,
                 left: 0.w,
@@ -295,6 +300,25 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
                 bottom: 115.h,
                 child: CameraFrameCorners(),
               ),
+
+              /// Tooltip
+              if (_cameraController.message != null)
+                Positioned(
+                  right: 36.w,
+                  top: 140.h,
+                  bottom: 140.h,
+                  child: Center(
+                    child: RotatedBox(
+                      quarterTurns: 1,
+                      child: CameraToolTip(
+                        preffixIcon: _cameraController.message!.icon,
+                        message: _cameraController.message!.message,
+                        onCloseButtonPressed: () =>
+                            _cameraController.clearMessage(),
+                      ),
+                    ),
+                  ),
+                ),
               // Topbar
               Container(
                 width: double.infinity,
@@ -367,7 +391,9 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
                                       color: AppColors.white, width: 2),
                                   image: DecorationImage(
                                     image: MemoryImage(
-                                      _cameraController.capturedPhotos.last,
+                                      _cameraController.capturedPhotos.values
+                                          .expand((list) => list)
+                                          .last,
                                     ),
                                     fit: BoxFit.cover,
                                   ),

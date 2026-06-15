@@ -44,6 +44,11 @@ class StringSheet {
       'Vui lòng di chuyển về góc chéo cuối xe bên ghế phụ';
 
   static String downloadingModel(String name) => 'Đang tải mô hình $name';
+  static const moveBackGuide =
+      'Lùi camera ra xa để xe nằm trọn vẹn trong khung hình';
+  static const holdStillGuide =
+      'Hãy giữ yên điện thoại. Ảnh sẽ được chụp tự động';
+  static const captureSuccess = 'Chụp thành công';
 
   // ----- Car progress ring dialog -----
   static const cornerNeedsPhoto = 'Góc cần bổ sung ảnh';

@@ -1,3 +1,20 @@
+/*
+45_phai_sau
+45_phai_truoc
+45_trai_sau
+45_trai_truoc
+phai_can_canh
+phai_sau_toan_canh
+phai_toan_canh
+phai_truoc_toan_canh
+sau_toan_canh
+trai_can_canh
+trai_sau_toan_canh
+trai_toan_canh
+trai_truoc_toan_canh
+truoc_toan_canh
+*/
+
 /// Output từ model classify (YOLO classify).
 class ClassifyOutput {
   final double fps;
@@ -50,8 +67,8 @@ class Classification {
 
   factory Classification.fromJson(Map<String, dynamic> json) {
     return Classification(
-      top1: json['top1'] as String,
-      top1Confidence: (json['top1Confidence'] as num).toDouble(),
+      top1: (json['top1'] as String?) ?? '',
+      top1Confidence: (json['top1Confidence'] as num?)?.toDouble() ?? 0,
       top5: (json['top5'] as List<dynamic>)
           .map((e) =>
               ClassifyCandidate.fromJson(Map<String, dynamic>.from(e as Map)))
@@ -77,8 +94,8 @@ class ClassifyCandidate {
 
   factory ClassifyCandidate.fromJson(Map<String, dynamic> json) {
     return ClassifyCandidate(
-      name: json['name'] as String,
-      confidence: (json['confidence'] as num).toDouble(),
+      name: (json['name'] as String?) ?? '',
+      confidence: (json['confidence'] as num?)?.toDouble() ?? 0,
     );
   }
 

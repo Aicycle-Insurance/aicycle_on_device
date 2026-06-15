@@ -18,7 +18,7 @@ class CarProgressRing extends StatelessWidget {
     this.completedIndices = const {},
     this.size,
     this.activeColor = const Color(0xFFFFD53E),
-    this.completedColor = const Color(0xFF1CBB78),
+    this.completedColor = const Color(0xFF01D6A8),
     this.inactiveColor = const Color(0xFFCCCCCC),
   });
 

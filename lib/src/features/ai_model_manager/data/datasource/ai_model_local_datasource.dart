@@ -84,9 +84,12 @@ class AiModelLocalDataSource {
   }
 
   /// Đường dẫn file tạm dùng trong quá trình tải.
+  /// Giữ đuôi `.zip` nếu URL download là file zip để lưu đúng định dạng.
   Future<String> createTempFilePath(AiModel model) async {
     final tempDir = await getTemporaryDirectory();
-    return '${tempDir.path}/${model.id}_${model.modelName}.part';
+    final isZipUrl = model.modelDownloadUrl.toLowerCase().endsWith('.zip');
+    final suffix = isZipUrl ? '.zip' : '.part';
+    return '${tempDir.path}/${model.id}_${model.modelName}$suffix';
   }
 
   /// Chuyển file đã tải xong từ thư mục tạm vào bộ nhớ nội bộ
@@ -102,7 +105,12 @@ class AiModelLocalDataSource {
         await typeDir.create(recursive: true);
       }
 
-      final destPath = '${typeDir.path}/${model.id}_${model.modelName}';
+      // Giữ nguyên đuôi .zip nếu file tải về là zip
+      final isZip = tempPath.toLowerCase().endsWith('.zip');
+      final fileName =
+          isZip ? '${model.id}_${model.modelName}.zip' : '${model.id}_${model.modelName}';
+      final destPath = '${typeDir.path}/$fileName';
+
       final tempFile = File(tempPath);
       try {
         await tempFile.rename(destPath);
