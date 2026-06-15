@@ -26,9 +26,13 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Ứng dụng cần quyền camera để chụp ảnh xe phục vụ giám định.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Ứng dụng cần quyền vị trí để ghi nhận địa điểm giám định xe.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Ứng dụng cần quyền vị trí để ghi nhận địa điểm giám định xe.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
