@@ -5,6 +5,7 @@ import '../../../../core/constants/string_sheet.dart';
 import '../../data/model/camera_message.dart';
 import '../../data/model/car_angle.dart';
 import '../../data/model/classify_output.dart';
+import '../../data/model/detection_output.dart';
 import '../../data/model/sementation_output.dart';
 
 class CameraController extends ChangeNotifier {
@@ -25,6 +26,9 @@ class CameraController extends ChangeNotifier {
   /// Class names từ frame segment mới nhất.
   Set<String> _latestSegmentClasses = {};
 
+  /// Detections từ frame detect mới nhất.
+  List<DetectionResult> _latestDetections = [];
+
   bool get isTorchEnabled => _torchEnabled;
   bool get isCapturing => _isCapturing;
   Map<int, List<Uint8List>> get capturedPhotos => _capturedPhotos;
@@ -32,6 +36,7 @@ class CameraController extends ChangeNotifier {
   Set<int> get completedSegments => Set.unmodifiable(_completedSegments);
   CameraMessage? get message => _message;
   bool get showMessage => _showMessage;
+  List<DetectionResult> get latestDetections => _latestDetections;
 
   /// Processes streaming data from the YOLO model.
   ///
@@ -54,7 +59,10 @@ class CameraController extends ChangeNotifier {
       _latestSegmentClasses = output.detections.map((d) => d.className).toSet();
       updateMessage();
       return;
-    } else if (data['type'] == 'detect') {}
+    } else if (data['type'] == 'detect') {
+      final output = DetectionOutput.fromJson(Map<String, dynamic>.from(data));
+      _latestDetections = output.detections;
+    }
     notifyListeners();
   }
 
@@ -190,7 +198,10 @@ class CameraController extends ChangeNotifier {
   /// Ensures the torch is turned off before disposal.
   @override
   void dispose() {
-    if (_torchEnabled) yoloController.setTorch(false);
+    // stop() sends 'stop' to native synchronously via MethodChannel fire-and-forget.
+    // The native handler nils all CoreML predictors immediately, freeing GPU/ANE memory
+    // before _MultiTaskYOLOViewState.dispose() detaches the channel.
+    yoloController.stop();
     super.dispose();
   }
 }

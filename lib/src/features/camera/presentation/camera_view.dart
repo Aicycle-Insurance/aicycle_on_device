@@ -11,11 +11,13 @@ import '../../../core/themes/app_colors.dart';
 import '../../../core/themes/app_textstyle.dart';
 import '../../../core/utils/orientation_utils.dart';
 import '../../../core/utils/screen_utils.dart';
+import '../data/model/camera_message.dart';
 import 'controller/camera_controller.dart';
 import 'controller/camera_model_controller.dart';
 import 'widgets/camera_corner_bracket.dart';
 import 'widgets/car_progress_dialog.dart';
 import 'widgets/car_progress_ring.dart';
+import 'widgets/bounding_box_overlay.dart';
 import 'widgets/icon_button.dart';
 import 'widgets/tool_tip.dart';
 
@@ -292,13 +294,23 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
                 onStreamingData: _cameraController.onStreamingData,
               ),
 
+              /// Bounding boxes
+              Positioned.fill(
+                child: BoundingBoxOverlay(
+                  detections: _cameraController.latestDetections,
+                ),
+              ),
+
               /// Overlay UI
               Positioned(
                 top: 83.h,
                 left: 0.w,
                 right: 0.w,
                 bottom: 115.h,
-                child: CameraFrameCorners(),
+                child: CameraFrameCorners(
+                  isSuccess:
+                      _cameraController.message?.type == MessageType.loading,
+                ),
               ),
 
               /// Tooltip

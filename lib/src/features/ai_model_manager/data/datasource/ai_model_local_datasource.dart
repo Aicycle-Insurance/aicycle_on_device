@@ -84,12 +84,9 @@ class AiModelLocalDataSource {
   }
 
   /// Đường dẫn file tạm dùng trong quá trình tải.
-  /// Giữ đuôi `.zip` nếu URL download là file zip để lưu đúng định dạng.
   Future<String> createTempFilePath(AiModel model) async {
     final tempDir = await getTemporaryDirectory();
-    final isZipUrl = model.modelDownloadUrl.toLowerCase().endsWith('.zip');
-    final suffix = isZipUrl ? '.zip' : '.part';
-    return '${tempDir.path}/${model.id}_${model.modelName}$suffix';
+    return '${tempDir.path}/${model.id}_${model.modelName}.part';
   }
 
   /// Chuyển file đã tải xong từ thư mục tạm vào bộ nhớ nội bộ
@@ -105,10 +102,9 @@ class AiModelLocalDataSource {
         await typeDir.create(recursive: true);
       }
 
-      // Giữ nguyên đuôi .zip nếu file tải về là zip
-      final isZip = tempPath.toLowerCase().endsWith('.zip');
-      final fileName =
-          isZip ? '${model.id}_${model.modelName}.zip' : '${model.id}_${model.modelName}';
+      // Lưu với tên modelName (không thêm .zip) để path trong manifest
+      // khớp với tên sau khi YOLOModelResolver giải nén (.mlpackage directory).
+      final fileName = '${model.id}_${model.modelName}';
       final destPath = '${typeDir.path}/$fileName';
 
       final tempFile = File(tempPath);
@@ -148,9 +144,12 @@ class AiModelLocalDataSource {
           manifest.downloaded.where((e) => e.id == modelId).firstOrNull;
       if (target == null) return manifest;
 
-      final file = File(target.filePath);
-      if (await file.exists()) {
-        await file.delete();
+      // Path có thể là file (chưa giải nén) hoặc directory (đã giải nén bởi YOLOModelResolver)
+      final entity = FileSystemEntity.typeSync(target.filePath);
+      if (entity == FileSystemEntityType.file) {
+        await File(target.filePath).delete();
+      } else if (entity == FileSystemEntityType.directory) {
+        await Directory(target.filePath).delete(recursive: true);
       }
 
       final downloaded =

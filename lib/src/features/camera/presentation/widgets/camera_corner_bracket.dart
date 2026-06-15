@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/utils/screen_utils.dart';
+import '../../../../core/themes/app_colors.dart';
+
 /// Single L-shaped corner bracket drawn as a stroked path with a smooth
 /// rounded corner (quarter-circle arc). By default renders the top-left
 /// corner (horizontal arm goes right, vertical arm goes down). Flip with
@@ -95,18 +98,29 @@ class CameraFrameCorners extends StatelessWidget {
     this.strokeWidth = 4.0,
     this.color = const Color(0xFFFFD600),
     this.padding = 16.0,
+    this.isSuccess = false,
   });
 
   final double armLength;
   final double cornerRadius;
   final double strokeWidth;
   final Color color;
+  final bool isSuccess;
 
   /// Distance from the edge of [child] to each bracket corner.
   final double padding;
 
   @override
   Widget build(BuildContext context) {
+    if (isSuccess) {
+      return Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(24.r),
+            border: Border.all(color: AppColors.crack)),
+      );
+    }
     CameraCornerBracket bracket(bool fx, bool fy) => CameraCornerBracket(
           armLength: armLength,
           cornerRadius: cornerRadius,
