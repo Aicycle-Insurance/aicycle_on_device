@@ -1,6 +1,7 @@
 import 'package:aicycle_yolo/multi_task_yolo_view.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../../../core/cache/photo_session_cache.dart';
 import '../../../../core/constants/string_sheet.dart';
 import '../../data/model/camera_message.dart';
 import '../../data/model/car_angle.dart';
@@ -9,13 +10,15 @@ import '../../data/model/detection_output.dart';
 import '../../data/model/sementation_output.dart';
 
 class CameraController extends ChangeNotifier {
+  CameraController({required String sessionId}) : _sessionId = sessionId;
+
+  final String _sessionId;
   final yoloController = MultiTaskYOLOController();
 
   bool _torchEnabled = false;
   bool _isCapturing = false;
   Map<int, List<Uint8List>> _capturedPhotos = {};
   CameraMessage? _message;
-  bool _showMessage = false;
 
   /// Segment index (0–3) đang được detect, null nếu chưa nhận kết quả.
   int? _activeSegmentIndex;
@@ -35,8 +38,17 @@ class CameraController extends ChangeNotifier {
   int? get activeSegmentIndex => _activeSegmentIndex;
   Set<int> get completedSegments => Set.unmodifiable(_completedSegments);
   CameraMessage? get message => _message;
-  bool get showMessage => _showMessage;
   List<DetectionResult> get latestDetections => _latestDetections;
+
+  /// Restores previously captured photos from disk cache.
+  /// Call once after construction; notifies listeners when done.
+  Future<void> loadCachedPhotos() async {
+    final cached = await PhotoSessionCache.instance.loadSession(_sessionId);
+    if (cached.isEmpty) return;
+    _capturedPhotos = cached;
+    _completedSegments.addAll(cached.keys);
+    notifyListeners();
+  }
 
   /// Processes streaming data from the YOLO model.
   ///
@@ -89,10 +101,10 @@ class CameraController extends ChangeNotifier {
       final bytes = await yoloController.capturePhoto();
       if (_activeSegmentIndex != null) {
         _capturedPhotos.putIfAbsent(_activeSegmentIndex!, () => []).add(bytes);
-      }
-      // Đánh dấu segment hiện tại là đã chụp
-      if (_activeSegmentIndex != null) {
         _completedSegments.add(_activeSegmentIndex!);
+        // Persist to disk so photos survive app kill
+        PhotoSessionCache.instance
+            .savePhoto(_sessionId, _activeSegmentIndex!, bytes);
       }
       notifyListeners();
       return bytes;

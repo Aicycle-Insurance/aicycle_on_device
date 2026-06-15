@@ -1,3 +1,5 @@
+import '../../../../../aicycle_on_device.dart';
+import '../../../../config/config_holder.dart';
 import '../../../../core/cache/session_cache.dart';
 import '../../../../core/error/exceptions.dart';
 import '../../../../core/error/failures.dart';
@@ -25,6 +27,13 @@ class AICycleFolderRepositoryImpl implements AICycleFolderRepository {
     String? vehicleType,
     bool? hasLicensePlate,
   }) async {
+    /// Nếu là AICycle -> externalClaimId là claimId
+    if (AICycleConfigHolder.config.generalConfig.organization ==
+        AiCycleOrg.aicycle) {
+      final folder = await _remote.getClaimFolderById(externalClaimId);
+      return _cacheAndReturn(folder.claimId?.toString() ?? '');
+    }
+
     final data = {
       'externalClaimId': externalClaimId,
       'claimName': claimName,

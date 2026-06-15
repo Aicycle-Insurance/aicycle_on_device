@@ -66,16 +66,16 @@ class CameraModelController extends ChangeNotifier {
   ) async {
     _config = config;
     _initialPaths = paths;
-    _folderReady = true;
-    await _prepareModels(paths);
+    // _folderReady = true;
+    // await _prepareModels(paths);
 
-    // if (SessionCache.instance.claimId != null) {
-    //   _folderReady = true;
-    //   notifyListeners();
-    //   await _prepareModels(paths);
-    //   return;
-    // }
-    // await _createFolder(paths);
+    if (SessionCache.instance.claimId != null) {
+      _folderReady = true;
+      notifyListeners();
+      await _prepareModels(paths);
+      return;
+    }
+    await _createFolder(paths);
   }
 
   /// Retries folder creation after a previous failure.

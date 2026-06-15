@@ -5,6 +5,7 @@ import 'package:native_device_orientation/native_device_orientation.dart';
 
 import '../../../../aicycle_on_device.dart';
 import '../../../config/config_holder.dart';
+import '../../../core/cache/photo_session_cache.dart';
 import '../../../core/constants/string_sheet.dart';
 import '../../../core/di/injection.dart';
 import '../../../core/themes/app_colors.dart';
@@ -53,7 +54,9 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
     AICycleConfigHolder.init(widget.aiCycleConfig);
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
-    _cameraController = CameraController();
+    final sessionId = widget.aiCycleConfig.generalConfig.documentId;
+    _cameraController = CameraController(sessionId: sessionId)
+      ..loadCachedPhotos();
 
     _modelController = CameraModelController(
       sl.aiModelRepository,
@@ -113,6 +116,10 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
         ),
       ),
     );
+    if (confirmed == true) {
+      await PhotoSessionCache.instance
+          .clearSession(widget.aiCycleConfig.generalConfig.documentId);
+    }
     return confirmed ?? false;
   }
 
@@ -122,15 +129,15 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
     return AnimatedBuilder(
       animation: _modelController,
       builder: (context, _) {
-        // if (_modelController.folderError != null) {
-        //   return _buildError(
-        //     _modelController.folderError!,
-        //     onRetry: _modelController.retryFolder,
-        //   );
-        // }
-        // if (!_modelController.folderReady) {
-        //   return _buildLoading(StringSheet.creatingFolder);
-        // }
+        if (_modelController.folderError != null) {
+          return _buildError(
+            _modelController.folderError!,
+            onRetry: _modelController.retryFolder,
+          );
+        }
+        if (!_modelController.folderReady) {
+          return _buildLoading(StringSheet.creatingFolder);
+        }
         if (_modelController.isPreparing) return _buildPreparing();
         if (_modelController.isReady) return _buildCamera();
         return _buildError(
