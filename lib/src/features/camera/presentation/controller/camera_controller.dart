@@ -23,7 +23,13 @@ class CameraController extends ChangeNotifier {
   /// Segment index (0–3) đang được detect, null nếu chưa nhận kết quả.
   int? _activeSegmentIndex;
 
-  /// Các segment đã chụp xong.
+  /// Các segment đã chụp ảnh toàn cảnh và đang ở chế độ kiểm tra tổn thất.
+  final Set<int> _panoramicCapturedSegments = {};
+
+  /// Khi true, kết quả classify bị bỏ qua để giữ nguyên góc hiện tại.
+  bool _classificationLocked = false;
+
+  /// Các segment đã hoàn thành (user ấn "Chuyển góc").
   final Set<int> _completedSegments = {};
 
   /// Class names từ frame segment mới nhất.
@@ -39,6 +45,11 @@ class CameraController extends ChangeNotifier {
   Set<int> get completedSegments => Set.unmodifiable(_completedSegments);
   CameraMessage? get message => _message;
   List<DetectionResult> get latestDetections => _latestDetections;
+
+  /// True khi ảnh toàn cảnh đã chụp và đang ở chế độ kiểm tra tổn thất.
+  bool get isInspectionMode =>
+      _activeSegmentIndex != null &&
+      _panoramicCapturedSegments.contains(_activeSegmentIndex);
 
   /// Restores previously captured photos from disk cache.
   /// Call once after construction; notifies listeners when done.
@@ -60,6 +71,7 @@ class CameraController extends ChangeNotifier {
   /// Gọi từ [MultiTaskYOLOView.onStreamingData].
   void onStreamingData(Map<String, dynamic> data) {
     if (data['type'] == 'classify') {
+      if (_classificationLocked) return;
       final output = ClassifyOutput.fromJson(Map<String, dynamic>.from(data));
       final segment = CarAngle.segmentOf(output.classification.top1);
       if (segment == _activeSegmentIndex) return;
@@ -138,6 +150,7 @@ class CameraController extends ChangeNotifier {
       return;
     }
     if (_completedSegments.contains(_activeSegmentIndex)) return;
+    if (_panoramicCapturedSegments.contains(_activeSegmentIndex)) return;
     if (_isCapturing) return;
 
     _updateMessageSegment(_latestSegmentClasses, _activeSegmentIndex!);
@@ -199,10 +212,23 @@ class CameraController extends ChangeNotifier {
   /// Called when all required car parts are detected in the current segment.
   Future<void> _triggerAutoCapture() async {
     await capturePhoto();
+    if (_activeSegmentIndex != null) {
+      _panoramicCapturedSegments.add(_activeSegmentIndex!);
+    }
+    _classificationLocked = true;
     _setMessage(CameraMessage(
-      message: StringSheet.captureSuccess,
-      type: MessageType.success,
+      message: StringSheet.inspectDamageGuide,
+      type: MessageType.info,
     ));
+  }
+
+  /// Đánh dấu góc hiện tại hoàn thành và unlock classification sang góc tiếp theo.
+  void completeCurrentAngle() {
+    if (_activeSegmentIndex == null) return;
+    _completedSegments.add(_activeSegmentIndex!);
+    _panoramicCapturedSegments.remove(_activeSegmentIndex!);
+    _classificationLocked = false;
+    _setMessage(null);
   }
 
   /// Cleanup method called when the controller is disposed.

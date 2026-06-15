@@ -49,6 +49,9 @@ class StringSheet {
   static const holdStillGuide =
       'Hãy giữ yên điện thoại. Ảnh sẽ được chụp tự động';
   static const captureSuccess = 'Chụp thành công';
+  static const inspectDamageGuide =
+      'Đưa camera lại gần vị trí tổn thất.\nNếu không có tổn thất, hãy chuyển sang vị trí khác';
+  static const changeAngle = 'Chuyển góc';
 
   // ----- Car progress ring dialog -----
   static const cornerNeedsPhoto = 'Góc cần bổ sung ảnh';

@@ -22,6 +22,7 @@ class CameraGuideSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      width: 420.h,
       decoration: BoxDecoration(
         color: AppColors.white,
         borderRadius: BorderRadius.circular(16.r),
@@ -96,7 +97,7 @@ class _StartButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       width: double.infinity,
-      height: 52.w,
+      height: 40.w,
       child: FilledButton.icon(
         onPressed: onTap,
         style: FilledButton.styleFrom(

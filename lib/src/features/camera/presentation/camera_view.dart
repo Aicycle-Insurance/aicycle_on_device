@@ -5,7 +5,6 @@ import 'package:native_device_orientation/native_device_orientation.dart';
 
 import '../../../../aicycle_on_device.dart';
 import '../../../config/config_holder.dart';
-import '../../../core/cache/photo_session_cache.dart';
 import '../../../core/constants/string_sheet.dart';
 import '../../../core/di/injection.dart';
 import '../../../core/themes/app_colors.dart';
@@ -16,6 +15,7 @@ import '../data/model/camera_message.dart';
 import 'controller/camera_controller.dart';
 import 'controller/camera_model_controller.dart';
 import 'widgets/camera_corner_bracket.dart';
+import 'widgets/camera_guide_sheet.dart';
 import 'widgets/car_progress_dialog.dart';
 import 'widgets/car_progress_ring.dart';
 import 'widgets/bounding_box_overlay.dart';
@@ -47,6 +47,7 @@ class AICycleOnDeviceCamera extends StatefulWidget {
 class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
   late final CameraModelController _modelController;
   late final CameraController _cameraController;
+  bool _guideShown = false;
 
   @override
   void initState() {
@@ -78,6 +79,28 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
     _modelController.dispose();
     _cameraController.dispose();
     super.dispose();
+  }
+
+  void _maybeShowGuide() {
+    if (_guideShown) return;
+    _guideShown = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      showDialog<void>(
+        context: context,
+        builder: (_) => RotatedBox(
+          quarterTurns: 1,
+          child: Material(
+            color: Colors.transparent,
+            child: Center(
+              child: CameraGuideSheet(
+                onStart: () => Navigator.of(context).pop(),
+              ),
+            ),
+          ),
+        ),
+      );
+    });
   }
 
   Future<bool> _onWillPop() async {
@@ -139,7 +162,10 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
           return _buildLoading(StringSheet.creatingFolder);
         }
         if (_modelController.isPreparing) return _buildPreparing();
-        if (_modelController.isReady) return _buildCamera();
+        if (_modelController.isReady) {
+          _maybeShowGuide();
+          return _buildCamera();
+        }
         return _buildError(
           _modelController.modelError ?? StringSheet.requirementHint,
           onRetry: _modelController.retryModels,
@@ -324,7 +350,7 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
               if (_cameraController.message != null)
                 Positioned(
                   right: 36.w,
-                  top: 140.h,
+                  top: 105.h,
                   bottom: 140.h,
                   child: Center(
                     child: RotatedBox(
@@ -332,6 +358,10 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
                       child: CameraToolTip(
                         preffixIcon: _cameraController.message!.icon,
                         message: _cameraController.message!.message,
+                        showSecondaryButton: _cameraController.isInspectionMode,
+                        secondaryButtonLabel: StringSheet.changeAngle,
+                        onSecondaryButtonPressed:
+                            _cameraController.completeCurrentAngle,
                         onCloseButtonPressed: () =>
                             _cameraController.clearMessage(),
                       ),
@@ -436,6 +466,7 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
                         onTap: () => _showCarProgressDialog(),
                         child: CarProgressRing(
                           activeIndex: _cameraController.activeSegmentIndex,
+                          completedIndices: _cameraController.completedSegments,
                         ),
                       ),
                     ],

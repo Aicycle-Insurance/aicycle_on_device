@@ -116,6 +116,7 @@ class CameraFrameCorners extends StatelessWidget {
       return Container(
         width: double.infinity,
         height: double.infinity,
+        margin: EdgeInsets.all(padding),
         decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(24.r),
             border: Border.all(color: AppColors.crack)),

@@ -30,13 +30,12 @@ class CameraToolTip extends StatelessWidget {
   final bool showCloseButton;
   final VoidCallback? onCloseButtonPressed;
 
-  static final _buttonShape = RoundedRectangleBorder(
-    borderRadius: BorderRadius.circular(12),
-  );
+  static final _buttonShape =
+      RoundedRectangleBorder(borderRadius: BorderRadius.circular(8));
 
   static const _buttonPadding = EdgeInsets.symmetric(
-    horizontal: 20,
-    vertical: 12,
+    horizontal: 12,
+    vertical: 8,
   );
 
   @override
@@ -55,19 +54,22 @@ class CameraToolTip extends StatelessWidget {
               preffixIcon!,
               8.horizontalSpace,
             ],
-            Text(
-              message,
-              style: TextStyle(fontSize: 14.sp, color: AppColors.black),
+            Expanded(
+              child: Text(
+                message,
+                style: TextStyle(fontSize: 14.sp, color: AppColors.black),
+              ),
             ),
             if (showSecondaryButton && onSecondaryButtonPressed != null) ...[
               6.horizontalSpace,
               FilledButton(
                 onPressed: onSecondaryButtonPressed,
                 style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.backgroundNeutral,
-                  foregroundColor: AppColors.inkA500,
+                  backgroundColor: AppColors.transparent,
+                  foregroundColor: AppColors.transparent,
                   padding: _buttonPadding,
-                  shape: _buttonShape,
+                  shape: _buttonShape.copyWith(
+                      side: BorderSide(color: AppColors.divider)),
                   elevation: 0,
                 ),
                 child: Text(
@@ -95,12 +97,12 @@ class CameraToolTip extends StatelessWidget {
             ],
             if (showCloseButton) ...[
               6.horizontalSpace,
-              IconButton(
-                icon: Icon(
+              InkWell(
+                onTap: onCloseButtonPressed,
+                child: Icon(
                   Icons.clear_rounded,
-                  size: 16.r,
+                  size: 20.r,
                 ),
-                onPressed: onCloseButtonPressed,
               ),
             ],
           ],
