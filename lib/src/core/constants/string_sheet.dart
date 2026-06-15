@@ -77,6 +77,12 @@ class StringSheet {
   static const retry = 'Thử lại';
   static const emptyModels = 'Không có mô hình nào';
 
+  // ----- Result / upload screen -----
+  static String uploadingPhotos(int uploaded, int total) =>
+      'Đang tải lên ảnh $uploaded/$total';
+  static const fetchingResult = 'Đang lấy kết quả...';
+  static const unknownError = 'Đã xảy ra lỗi. Vui lòng thử lại';
+
   static const unknown = 'Không xác định';
 
   static String modelVersion(String version) => 'Phiên bản $version';

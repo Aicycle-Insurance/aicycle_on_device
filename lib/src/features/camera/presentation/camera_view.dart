@@ -10,6 +10,7 @@ import '../../../core/themes/app_colors.dart';
 import '../../../core/themes/app_textstyle.dart';
 import '../../../core/utils/screen_utils.dart';
 
+import '../../folder_result/presentation/result_view.dart';
 import '../data/model/camera_message.dart';
 import 'controller/camera_controller.dart';
 import 'controller/camera_model_controller.dart';
@@ -414,7 +415,16 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
                 completedSegments: _cameraController.completedSegments,
                 onShowProgress: _showCarProgressDialog,
                 showNextButton: _canGoNext(),
-                onNext: () => widget.onComplete?.call(null),
+                onNext: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => ResultView(
+                      sessionId: widget.aiCycleConfig.generalConfig.documentId,
+                      capturedPhotos: _cameraController.capturedPhotos,
+                      onAngleUploaded: _cameraController.removeUploadedPhotos,
+                      onComplete: widget.onComplete,
+                    ),
+                  ),
+                ),
               ),
             ],
           ),

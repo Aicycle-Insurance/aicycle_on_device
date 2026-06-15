@@ -59,6 +59,13 @@ class PhotoSessionCache {
     return result;
   }
 
+  /// Deletes all cached photos for a single [angleId] within [sessionId].
+  Future<void> clearAngle(String sessionId, int angleId) async {
+    final base = await getApplicationSupportDirectory();
+    final dir = Directory('${base.path}/$_rootDirName/$sessionId/$angleId');
+    if (dir.existsSync()) await dir.delete(recursive: true);
+  }
+
   /// Deletes all cached photos for [sessionId].
   Future<void> clearSession(String sessionId) async {
     final base = await getApplicationSupportDirectory();

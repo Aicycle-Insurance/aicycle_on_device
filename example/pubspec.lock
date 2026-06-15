@@ -11,9 +11,10 @@ packages:
   aicycle_yolo:
     dependency: transitive
     description:
-      path: "/Volumes/Transcend/yolo-flutter-app"
-      relative: false
-    source: path
+      name: aicycle_yolo
+      sha256: "603033f1b7178067d7afd9d23fd4b0a2ea3481a8fe6c7d3f0a98ec22ef49b5a2"
+      url: "https://pub.dev"
+    source: hosted
     version: "1.0.1"
   args:
     dependency: transitive

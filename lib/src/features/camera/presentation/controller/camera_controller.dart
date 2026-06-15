@@ -281,6 +281,16 @@ class CameraController extends ChangeNotifier {
     _startDamageTimer();
   }
 
+  /// Called by ResultController after an angle's photos are successfully uploaded.
+  /// Strips photos from memory and marks the angle completed so the progress
+  /// ring stays green when the user backs out from the result screen.
+  void removeUploadedPhotos(int angleId) {
+    _capturedPhotos.remove(angleId);
+    _completedSegments.add(angleId);
+    _panoramicCapturedSegments.remove(angleId);
+    notifyListeners();
+  }
+
   /// User pressed "Chuyển góc" (from panoramicGuide or continueOrChange).
   void completeCurrentAngle() {
     _damageTimer?.cancel();
