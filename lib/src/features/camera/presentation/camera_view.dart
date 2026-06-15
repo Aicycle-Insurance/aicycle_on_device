@@ -1,7 +1,6 @@
 import 'package:aicycle_yolo/multi_task_yolo_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:native_device_orientation/native_device_orientation.dart';
 
 import '../../../../aicycle_on_device.dart';
 import '../../../config/config_holder.dart';
@@ -9,17 +8,17 @@ import '../../../core/constants/string_sheet.dart';
 import '../../../core/di/injection.dart';
 import '../../../core/themes/app_colors.dart';
 import '../../../core/themes/app_textstyle.dart';
-import '../../../core/utils/orientation_utils.dart';
 import '../../../core/utils/screen_utils.dart';
+
 import '../data/model/camera_message.dart';
 import 'controller/camera_controller.dart';
 import 'controller/camera_model_controller.dart';
+import 'widgets/bounding_box_overlay.dart';
+import 'widgets/camera_bottom_bar.dart';
 import 'widgets/camera_corner_bracket.dart';
 import 'widgets/camera_guide_sheet.dart';
+import 'widgets/camera_top_bar.dart';
 import 'widgets/car_progress_dialog.dart';
-import 'widgets/car_progress_ring.dart';
-import 'widgets/bounding_box_overlay.dart';
-import 'widgets/icon_button.dart';
 import 'widgets/tool_tip.dart';
 
 class AICycleOnDeviceCamera extends StatefulWidget {
@@ -280,6 +279,43 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
     );
   }
 
+  Widget _buildTooltip() {
+    final phase = _cameraController.inspectionPhase;
+    final msg = _cameraController.message!;
+    return CameraToolTip(
+      preffixIcon: msg.icon,
+      message: msg.message,
+      // ── Close button ────────────────────────────────────────────────────
+      // Visible only on panoramicGuide. Pressing it starts damage scanning.
+      showCloseButton: phase == InspectionPhase.panoramicGuide,
+      onCloseButtonPressed: _cameraController.startDamageScanning,
+      // ── Secondary button ─────────────────────────────────────────────────
+      // detectionReady → "Thiếu tổn thất"
+      // panoramicGuide / continueOrChange → "Chuyển góc"
+      showSecondaryButton: phase == InspectionPhase.detectionReady ||
+          phase == InspectionPhase.panoramicGuide ||
+          phase == InspectionPhase.continueOrChange,
+      secondaryButtonLabel: phase == InspectionPhase.detectionReady
+          ? StringSheet.missingDamage
+          : StringSheet.changeAngle,
+      onSecondaryButtonPressed: phase == InspectionPhase.detectionReady
+          ? _cameraController.rejectDamage
+          : _cameraController.completeCurrentAngle,
+      // ── Primary button ("Xác nhận") — only during detectionReady ────────
+      showPrimaryButton: phase == InspectionPhase.detectionReady,
+      primaryButtonLabel: StringSheet.confirm,
+      onPrimaryButtonPressed: _cameraController.confirmDamage,
+    );
+  }
+
+  bool _canGoNext() {
+    final completed = _cameraController.completedSegments;
+    if (widget.aiCycleConfig.validateConfig.require4AnglePanoramicPhotos) {
+      return completed.length >= 4;
+    }
+    return completed.isNotEmpty;
+  }
+
   void _showCarProgressDialog() {
     showDialog<void>(
       context: context,
@@ -327,10 +363,12 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
                 onStreamingData: _cameraController.onStreamingData,
               ),
 
-              /// Bounding boxes
+              /// Bounding boxes — only during inspection phase
               Positioned.fill(
                 child: BoundingBoxOverlay(
-                  detections: _cameraController.latestDetections,
+                  detections: _cameraController.showBoundingBoxes
+                      ? _cameraController.latestDetections
+                      : const [],
                 ),
               ),
 
@@ -346,7 +384,7 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
                 ),
               ),
 
-              /// Tooltip
+              /// Tooltip — buttons depend on inspection phase
               if (_cameraController.message != null)
                 Positioned(
                   right: 36.w,
@@ -355,123 +393,28 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
                   child: Center(
                     child: RotatedBox(
                       quarterTurns: 1,
-                      child: CameraToolTip(
-                        preffixIcon: _cameraController.message!.icon,
-                        message: _cameraController.message!.message,
-                        showSecondaryButton: _cameraController.isInspectionMode,
-                        secondaryButtonLabel: StringSheet.changeAngle,
-                        onSecondaryButtonPressed:
-                            _cameraController.completeCurrentAngle,
-                        onCloseButtonPressed: () =>
-                            _cameraController.clearMessage(),
-                      ),
+                      child: _buildTooltip(),
                     ),
                   ),
                 ),
-              // Topbar
-              Container(
-                width: double.infinity,
-                height: 83.h,
-                color: AppColors.black,
-                padding: EdgeInsets.symmetric(horizontal: 16.w),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    CIconButton(
-                      onPressed: () async {
-                        final nav = Navigator.of(context);
-                        if (await _onWillPop()) nav.pop();
-                      },
-                      icon: Icon(
-                        Icons.clear_rounded,
-                        size: 24.r,
-                        color: AppColors.white,
-                      ),
-                    ),
-                    Text(
-                      StringSheet.carPhoto,
-                      style: AppTextStyles.baseWhite.s16.w600(),
-                    ),
-                    CIconButton(
-                      onPressed: _cameraController.toggleFlash,
-                      icon: Icon(
-                        _cameraController.isTorchEnabled
-                            ? Icons.flash_on_rounded
-                            : Icons.flash_off_rounded,
-                        size: 24.r,
-                        color: _cameraController.isTorchEnabled
-                            ? AppColors.primaryA500
-                            : AppColors.white,
-                      ),
-                    ),
-                  ],
-                ),
+              // Top bar
+              CameraTopBar(
+                isTorchEnabled: _cameraController.isTorchEnabled,
+                onClose: () async {
+                  final nav = Navigator.of(context);
+                  if (await _onWillPop()) nav.pop();
+                },
+                onToggleFlash: _cameraController.toggleFlash,
               ),
 
               // Bottom bar
-              Align(
-                alignment: Alignment.bottomCenter,
-                child: Container(
-                  width: double.infinity,
-                  height: 115.h,
-                  color: AppColors.black,
-                  padding: EdgeInsets.symmetric(horizontal: 16.w),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      if (_cameraController.capturedPhotos.isNotEmpty)
-                        NativeDeviceOrientationReader(
-                          useSensor: true,
-                          builder: (context) {
-                            final orientation =
-                                NativeDeviceOrientationReader.orientation(
-                                    context);
-                            final turns =
-                                OrientationUtils.getTurns(orientation);
-                            return AnimatedRotation(
-                              turns: turns,
-                              duration: const Duration(milliseconds: 300),
-                              child: Container(
-                                width: 48.w,
-                                height: 48.w,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(8.r),
-                                  border: Border.all(
-                                      color: AppColors.white, width: 2),
-                                  image: DecorationImage(
-                                    image: MemoryImage(
-                                      _cameraController.capturedPhotos.values
-                                          .expand((list) => list)
-                                          .last,
-                                    ),
-                                    fit: BoxFit.cover,
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                        )
-                      else
-                        Container(
-                          width: 48.w,
-                          height: 48.w,
-                          decoration: BoxDecoration(
-                            color: AppColors.white.withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(8.r),
-                          ),
-                          child: Icon(Icons.photo_library_outlined,
-                              size: 24.r, color: AppColors.white),
-                        ),
-                      GestureDetector(
-                        onTap: () => _showCarProgressDialog(),
-                        child: CarProgressRing(
-                          activeIndex: _cameraController.activeSegmentIndex,
-                          completedIndices: _cameraController.completedSegments,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+              CameraBottomBar(
+                capturedPhotos: _cameraController.capturedPhotos,
+                activeSegmentIndex: _cameraController.activeSegmentIndex,
+                completedSegments: _cameraController.completedSegments,
+                onShowProgress: _showCarProgressDialog,
+                showNextButton: _canGoNext(),
+                onNext: () => widget.onComplete?.call(null),
               ),
             ],
           ),

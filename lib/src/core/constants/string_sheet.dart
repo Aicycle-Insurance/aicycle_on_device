@@ -52,6 +52,12 @@ class StringSheet {
   static const inspectDamageGuide =
       'Đưa camera lại gần vị trí tổn thất.\nNếu không có tổn thất, hãy chuyển sang vị trí khác';
   static const changeAngle = 'Chuyển góc';
+  static const damageDetectedGuide =
+      'Các tổn thất đã được ghi nhận. Vui lòng kiểm tra và xác nhận';
+  static const missingDamage = 'Thiếu tổn thất';
+  static const confirm = 'Xác nhận';
+  static const continueOrChangeGuide =
+      'Tiếp tục di chuyển camera đến vùng có tổn thất khác hoặc chuyển góc';
 
   // ----- Car progress ring dialog -----
   static const cornerNeedsPhoto = 'Góc cần bổ sung ảnh';
