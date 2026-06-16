@@ -35,7 +35,10 @@ class _AICycleOnDeviceState extends State<AICycleOnDevice> {
     super.initState();
     AICycleConfigHolder.init(widget.aiCycleConfig);
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-    _controller = AICycleOnDeviceController(sl.aicycleFolderRepository);
+    _controller = AICycleOnDeviceController(
+      sl.aicycleFolderRepository,
+      sl.authRepository,
+    );
     _controller.init(widget.aiCycleConfig).then((_) {
       if (_controller.error != null) {
         widget.onError?.call(_controller.error!);

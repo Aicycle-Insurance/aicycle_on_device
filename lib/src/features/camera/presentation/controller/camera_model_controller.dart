@@ -8,12 +8,18 @@ import '../../../ai_model_manager/data/model/ai_model.dart';
 import '../../../ai_model_manager/domain/entity/ai_model_type.dart';
 import '../../../ai_model_manager/domain/repository/ai_model_repository.dart';
 import '../../../aicycle_folder/domain/repository/aicycle_folder_repository.dart';
+import '../../../auth/domain/repository/auth_repository.dart';
 
 class CameraModelController extends ChangeNotifier {
-  CameraModelController(this._modelRepository, this._folderRepository);
+  CameraModelController(
+    this._modelRepository,
+    this._folderRepository,
+    this._authRepository,
+  );
 
   final AiModelRepository _modelRepository;
   final AICycleFolderRepository _folderRepository;
+  final AuthRepository _authRepository;
 
   Map<AiModelType, String?> _initialPaths = {};
   AICycleConfig? _config;
@@ -75,7 +81,7 @@ class CameraModelController extends ChangeNotifier {
       await _prepareModels(paths);
       return;
     }
-    await _createFolder(paths);
+    await _initFolderFlow(paths);
   }
 
   /// Retries folder creation after a previous failure.
@@ -85,7 +91,31 @@ class CameraModelController extends ChangeNotifier {
   Future<void> retryFolder() async {
     _folderError = null;
     notifyListeners();
-    await _createFolder(_initialPaths);
+    await _initFolderFlow(_initialPaths);
+  }
+
+  /// Runs the baseUrlOnPremise-fetch + folder-creation flow.
+  ///
+  /// Fetches baseUrlOnPremise (skipped if already cached from a previous
+  /// screen, e.g. coming from the model manager screen) before creating
+  /// the AICycle folder, since [AICycleOnDeviceCamera] can also be used as
+  /// a standalone entry point.
+  Future<void> _initFolderFlow(Map<AiModelType, String?> paths) async {
+    if (SessionCache.instance.baseUrlOnPremise == null) {
+      final userResult = await _authRepository.fetchBaseUrlOnPremise();
+      final userError = userResult.fold(
+        (failure) => failure.message,
+        (_) => null,
+      );
+      if (userError != null) {
+        onError?.call(userError);
+        _folderError = userError;
+        _isPreparing = false;
+        notifyListeners();
+        return;
+      }
+    }
+    await _createFolder(paths);
   }
 
   /// Retries model preparation after a previous failure.

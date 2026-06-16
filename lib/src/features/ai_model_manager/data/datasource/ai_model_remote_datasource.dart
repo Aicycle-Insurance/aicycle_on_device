@@ -17,7 +17,7 @@ class AiModelRemoteDataSource {
   /// baseUrl và token được DioClient tự gắn theo môi trường trong config.
   Future<List<AiModel>> getModels(AiModelType type) async {
     final data = await _client.get<Map<String, dynamic>>(
-      '/v2/model-edge-device',
+      '/insurance/v2/model-edge-device',
       queryParameters: {
         'modelType': type.apiValue,
         'modelOs': _modelOs,

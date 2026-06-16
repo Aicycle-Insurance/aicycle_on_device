@@ -11,7 +11,7 @@ class AICycleFolderRemoteDataSource {
     Map<String, dynamic> data,
   ) async {
     final response = await _client.post<dynamic>(
-      '/claimfolders',
+      '/insurance/claimfolders',
       data: data,
     );
     return AICycleFolderModel.fromDynamic(response);
@@ -20,7 +20,7 @@ class AICycleFolderRemoteDataSource {
   /// GET /claimfolders?externalClaimId=...
   Future<AICycleFolderModel> getDuplicateFolder(String externalId) async {
     final response = await _client.get<dynamic>(
-      '/claimfolders',
+      '/insurance/claimfolders',
       queryParameters: {'externalClaimId': externalId},
     );
     return AICycleFolderModel.fromDynamic(response);
@@ -28,7 +28,8 @@ class AICycleFolderRemoteDataSource {
 
   /// GET /claimfolders/{claimId}
   Future<AICycleFolderModel> getClaimFolderById(String claimId) async {
-    final response = await _client.get<dynamic>('/claimfolders/$claimId');
+    final response =
+        await _client.get<dynamic>('/insurance/claimfolders/$claimId');
     return AICycleFolderModel.fromDynamic(response);
   }
 }

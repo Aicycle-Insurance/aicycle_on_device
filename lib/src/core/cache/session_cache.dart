@@ -7,7 +7,11 @@ class SessionCache {
 
   String? claimId;
 
+  /// `kvp.claimBuyMe.baseUrlOnPremise` lấy từ API `/bearer` lúc khởi tạo SDK.
+  String? baseUrlOnPremise;
+
   void clear() {
     claimId = null;
+    baseUrlOnPremise = null;
   }
 }

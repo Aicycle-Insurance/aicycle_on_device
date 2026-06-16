@@ -6,11 +6,11 @@ extension AiCycleConfigInternal on AICycleConfig {
   String get baseUrl {
     switch (generalConfig.environment) {
       case AiCycleEnvironment.develop:
-        return 'https://dev.api.aicycle.ai/insurance';
+        return 'https://dev.api.aicycle.ai';
       case AiCycleEnvironment.stage:
-        return 'https://stage.api.aicycle.ai/insurance';
+        return 'https://stage.api.aicycle.ai';
       case AiCycleEnvironment.production:
-        return 'https://api-aws-insurance.aicycle.ai';
+        return 'https://prod.api.aicycle.ai';
     }
   }
 
@@ -21,7 +21,7 @@ extension AiCycleConfigInternal on AICycleConfig {
       case AiCycleEnvironment.stage:
         return 'https://stage.api.aicycle.ai/admin';
       case AiCycleEnvironment.production:
-        return 'https://api-aws-admin.aicycle.ai';
+        return 'https://prod.api.aicycle.ai/admin';
     }
   }
 }

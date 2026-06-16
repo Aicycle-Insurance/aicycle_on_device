@@ -29,7 +29,8 @@ class DioClient {
           // 1. Automatically get baseUrl and token from config
           try {
             final config = AICycleConfigHolder.config;
-            options.baseUrl = config.baseUrl;
+            final String? customBaseUrl = options.extra['customBaseUrl'];
+            options.baseUrl = customBaseUrl ?? config.baseUrl;
             options.headers['Authorization'] =
                 'Bearer ${config.generalConfig.apiToken}';
             String? xApp;
@@ -138,17 +139,33 @@ class DioClient {
   }
 
   // Shorthand methods using safeCall
-  Future<T> get<T>(String path, {Map<String, dynamic>? queryParameters}) async {
-    return safeCall<T>(() => _dio.get(path, queryParameters: queryParameters));
+  Future<T> get<T>(
+    String path, {
+    Map<String, dynamic>? queryParameters,
+    String? customBaseUrl,
+  }) async {
+    return safeCall<T>(
+      () => _dio.get(
+        path,
+        queryParameters: queryParameters,
+        options: Options(extra: {'customBaseUrl': customBaseUrl}),
+      ),
+    );
   }
 
   Future<T> post<T>(
     String path, {
     dynamic data,
     Map<String, dynamic>? queryParameters,
+    String? customBaseUrl,
   }) async {
     return safeCall<T>(
-      () => _dio.post(path, data: data, queryParameters: queryParameters),
+      () => _dio.post(
+        path,
+        data: data,
+        queryParameters: queryParameters,
+        options: Options(extra: {'customBaseUrl': customBaseUrl}),
+      ),
     );
   }
 
