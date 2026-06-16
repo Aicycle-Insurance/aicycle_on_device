@@ -41,6 +41,10 @@ class CameraController extends ChangeNotifier {
   bool _torchEnabled = false;
   bool _isCapturing = false;
   Map<int, List<Uint8List>> _capturedPhotos = {};
+
+  /// Bumped every time a photo is actually captured — the view listens to
+  /// this to trigger a screen-blink (flash) effect.
+  int _captureFlashTick = 0;
   CameraMessage? _message;
 
   /// Segment index (0–3) đang được detect, null nếu chưa nhận kết quả.
@@ -75,6 +79,7 @@ class CameraController extends ChangeNotifier {
   int? get activeSegmentIndex => _activeSegmentIndex;
   Set<int> get completedSegments => Set.unmodifiable(_completedSegments);
   CameraMessage? get message => _message;
+  int get captureFlashTick => _captureFlashTick;
   List<DetectionResult> get latestDetections => _latestDetections;
   InspectionPhase? get inspectionPhase => _inspectionPhase;
 
@@ -110,8 +115,7 @@ class CameraController extends ChangeNotifier {
     } else if (data['type'] == 'segment') {
       final output =
           SegmentationOutput.fromJson(Map<String, dynamic>.from(data));
-      _latestSegmentClasses =
-          output.detections.map((d) => d.className).toSet();
+      _latestSegmentClasses = output.detections.map((d) => d.className).toSet();
       updateMessage();
       return;
     } else if (data['type'] == 'detect') {
@@ -138,11 +142,13 @@ class CameraController extends ChangeNotifier {
     _isCapturing = true;
     notifyListeners();
     try {
+      /// Chụp quá nhanh, người dùng chưa kịp đọc message -> delay 3s
+      await Future.delayed(const Duration(seconds: 3));
+      _captureFlashTick++;
+
       final bytes = await yoloController.capturePhoto();
       if (_activeSegmentIndex != null) {
-        _capturedPhotos
-            .putIfAbsent(_activeSegmentIndex!, () => [])
-            .add(bytes);
+        _capturedPhotos.putIfAbsent(_activeSegmentIndex!, () => []).add(bytes);
         PhotoSessionCache.instance
             .savePhoto(_sessionId, _activeSegmentIndex!, bytes);
       }
@@ -226,8 +232,7 @@ class CameraController extends ChangeNotifier {
 
   void _startDamageTimer() {
     _damageTimer?.cancel();
-    _damageTimer =
-        Timer(const Duration(seconds: 5), _onDamageTimerFired);
+    _damageTimer = Timer(const Duration(seconds: 5), _onDamageTimerFired);
   }
 
   void _onDamageTimerFired() {

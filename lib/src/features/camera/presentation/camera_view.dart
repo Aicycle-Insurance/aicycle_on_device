@@ -427,9 +427,68 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
                   ),
                 ),
               ),
+
+              /// Screen-blink (flash) effect — triggered on every photo capture.
+              Positioned.fill(
+                top: 83.h,
+                bottom: 115.h,
+                child: _CaptureFlashOverlay(
+                  flashTick: _cameraController.captureFlashTick,
+                ),
+              ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// White screen-blink shown briefly whenever [flashTick] changes — mimics a
+/// camera shutter flash at the exact moment a photo is captured.
+class _CaptureFlashOverlay extends StatefulWidget {
+  const _CaptureFlashOverlay({required this.flashTick});
+
+  final int flashTick;
+
+  @override
+  State<_CaptureFlashOverlay> createState() => _CaptureFlashOverlayState();
+}
+
+class _CaptureFlashOverlayState extends State<_CaptureFlashOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 120),
+      reverseDuration: const Duration(milliseconds: 180),
+    );
+  }
+
+  @override
+  void didUpdateWidget(_CaptureFlashOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.flashTick != oldWidget.flashTick) {
+      _controller.forward(from: 0).then((_) => _controller.reverse());
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: FadeTransition(
+        opacity: _controller,
+        child: Container(color: Colors.white),
       ),
     );
   }
