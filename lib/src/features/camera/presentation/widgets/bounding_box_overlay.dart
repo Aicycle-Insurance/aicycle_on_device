@@ -47,7 +47,9 @@ class _BoundingBoxPainter extends CustomPainter {
     final lw = size.height;
     final lh = size.width;
 
-    final boxPaint = Paint()..style = PaintingStyle.stroke..strokeWidth = 2;
+    final boxPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
 
     for (final d in detections) {
       final color = _colors[d.className] ?? _defaultColor;
@@ -61,41 +63,11 @@ class _BoundingBoxPainter extends CustomPainter {
       );
 
       canvas.drawRect(rect, boxPaint);
-
-      _drawLabel(canvas, d, rect, color);
     }
 
     canvas.restore();
   }
 
-  void _drawLabel(Canvas canvas, DetectionResult d, Rect rect, Color color) {
-    final label =
-        '${d.className} ${(d.confidence * 100).toStringAsFixed(0)}%';
-    final tp = TextPainter(
-      text: TextSpan(
-        text: label,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-
-    const padding = 3.0;
-    final bgRect = Rect.fromLTWH(
-      rect.left,
-      rect.top - tp.height - padding * 2,
-      tp.width + padding * 2,
-      tp.height + padding * 2,
-    );
-
-    canvas.drawRect(bgRect, Paint()..color = color);
-    tp.paint(canvas, Offset(rect.left + padding, bgRect.top + padding));
-  }
-
   @override
-  bool shouldRepaint(_BoundingBoxPainter old) =>
-      old.detections != detections;
+  bool shouldRepaint(_BoundingBoxPainter old) => old.detections != detections;
 }

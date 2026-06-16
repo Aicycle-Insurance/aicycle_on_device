@@ -5,7 +5,7 @@ import '../../../../core/themes/app_colors.dart';
 import '../../../../core/widgets/arrows_icon.dart';
 import '../../../../core/widgets/spinner_icon.dart';
 
-enum MessageType { guide, loading, info, error, success }
+enum MessageType { guide, loading, info, error, success, warning }
 
 class CameraMessage {
   final String message;
@@ -43,6 +43,9 @@ class CameraMessage {
         );
       case MessageType.error:
         return const Icon(Icons.error_outline, color: Colors.redAccent);
+      case MessageType.warning:
+        return Icon(Icons.warning_rounded,
+            color: AppColors.orangeA500, size: 24.r);
       case MessageType.success:
         return Container(
           width: 24.r,

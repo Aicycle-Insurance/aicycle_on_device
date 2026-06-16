@@ -374,17 +374,19 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
                 ),
               ),
 
-              /// Overlay UI
-              Positioned(
-                top: 83.h,
-                left: 0.w,
-                right: 0.w,
-                bottom: 115.h,
-                child: CameraFrameCorners(
-                  isSuccess:
-                      _cameraController.message?.type == MessageType.loading,
+              /// Overlay UI — yellow frame corners only while taking the
+              /// panoramic photo, not during damage detail inspection.
+              if (!_cameraController.isInspectionMode)
+                Positioned(
+                  top: 83.h,
+                  left: 0.w,
+                  right: 0.w,
+                  bottom: 115.h,
+                  child: CameraFrameCorners(
+                    isSuccess:
+                        _cameraController.message?.type == MessageType.loading,
+                  ),
                 ),
-              ),
 
               /// Tooltip — buttons depend on inspection phase
               if (_cameraController.message != null)

@@ -71,6 +71,11 @@ class CameraController extends ChangeNotifier {
   /// 5-second damage detection timer.
   Timer? _damageTimer;
 
+  /// One-shot timer: if no damage is detected within 10 s of unlocking
+  /// detection (right after the panoramic photo is taken), the current
+  /// angle is auto-completed.
+  Timer? _noDetectionTimer;
+
   // ── Getters ──────────────────────────────────────────────────────────────
 
   bool get isTorchEnabled => _torchEnabled;
@@ -224,10 +229,12 @@ class CameraController extends ChangeNotifier {
   // ── Inspection / damage flow ──────────────────────────────────────────────
 
   /// User pressed X on panoramicGuide → start 5 s damage scanning loop.
+  /// Also starts the 10 s no-detection timeout (detection is now unlocked).
   void startDamageScanning() {
     _inspectionPhase = InspectionPhase.scanning;
     _setMessage(null);
     _startDamageTimer();
+    _startNoDetectionTimer();
   }
 
   void _startDamageTimer() {
@@ -242,6 +249,7 @@ class CameraController extends ChangeNotifier {
     }
 
     if (_latestDetections.isNotEmpty) {
+      _noDetectionTimer?.cancel();
       _inspectionPhase = InspectionPhase.detectionReady;
       _setMessage(CameraMessage(
         message: StringSheet.damageDetectedGuide,
@@ -251,6 +259,30 @@ class CameraController extends ChangeNotifier {
       // No detections yet — keep scanning
       _startDamageTimer();
     }
+  }
+
+  /// 10 s after detection is unlocked (panoramic photo just captured), if
+  /// still no damage detected, show a warning and auto-complete the angle.
+  void _startNoDetectionTimer() {
+    _noDetectionTimer?.cancel();
+    _noDetectionTimer =
+        Timer(const Duration(seconds: 10), _onNoDetectionTimeout);
+  }
+
+  Future<void> _onNoDetectionTimeout() async {
+    if (_inspectionPhase != InspectionPhase.scanning) return;
+    if (_latestDetections.isNotEmpty) return;
+
+    _damageTimer?.cancel();
+    _setMessage(CameraMessage(
+      message: StringSheet.noDamageDetectedGuide,
+      type: MessageType.warning,
+    ));
+
+    await Future.delayed(const Duration(seconds: 5));
+    // Guard: angle may already have been completed/changed during the delay.
+    if (_inspectionPhase != InspectionPhase.scanning) return;
+    completeCurrentAngle();
   }
 
   /// User pressed "Thiếu tổn thất" — reset the 5 s timer.
@@ -300,6 +332,8 @@ class CameraController extends ChangeNotifier {
   void completeCurrentAngle() {
     _damageTimer?.cancel();
     _damageTimer = null;
+    _noDetectionTimer?.cancel();
+    _noDetectionTimer = null;
     if (_activeSegmentIndex == null) return;
     _completedSegments.add(_activeSegmentIndex!);
     _panoramicCapturedSegments.remove(_activeSegmentIndex!);
@@ -319,6 +353,7 @@ class CameraController extends ChangeNotifier {
   @override
   void dispose() {
     _damageTimer?.cancel();
+    _noDetectionTimer?.cancel();
     yoloController.stop();
     super.dispose();
   }
