@@ -31,10 +31,7 @@ class ExampleHomePage extends StatefulWidget {
 
 class _ExampleHomePageState extends State<ExampleHomePage> {
   // General Config
-  final _apiTokenController = TextEditingController(
-    text:
-        '2ab770:62515e5fa0f44b7485951e54ce3e76a66f1d4c80ee6248bc809c9158a63e8cba',
-  );
+  final _apiTokenController = TextEditingController(text: '');
   final _documentIdController = TextEditingController(text: 'doc-example-001');
   final _documentNameController = TextEditingController(text: 'Test Claim');
   AiCycleEnvironment _environment = AiCycleEnvironment.stage;
@@ -55,6 +52,18 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
   // Model Config
   final _confidenceController = TextEditingController(text: '0.25');
   final _iouController = TextEditingController(text: '0.45');
+
+  // VBI Config (chỉ bắt buộc khi Organization = vbi)
+  final _vbiAuthorityIdController = TextEditingController(text: '');
+  final _vbiSignatureKeyController = TextEditingController(text: '');
+  final _vbiExternalSessionIdController = TextEditingController(text: '');
+  final _vbiJobIdController = TextEditingController(text: '260601481');
+  final _vbiMaHangMucController = TextEditingController(text: 'TC00001');
+  final _vbiTenHangMucController = TextEditingController(text: 'Ảnh toàn cảnh');
+  final _vbiDepartmentIdController = TextEditingController(text: '000');
+  final _vbiUserIdController = TextEditingController(text: 'GIAPNH');
+  final _vbiMaTVVController = TextEditingController(text: 'TV000710');
+  final _vbiSourceController = TextEditingController(text: 'VBI4SALE_NEW');
 
   // Display Config
   bool _showBackButton = true;
@@ -94,6 +103,45 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
               _loggingEnabled,
               (val) => setState(() => _loggingEnabled = val),
             ),
+
+            if (_organization == AiCycleOrg.vbi) ...[
+              const Divider(height: 32),
+              _sectionTitle('VBI Configuration'),
+              _textField(
+                'Authority ID',
+                _vbiAuthorityIdController,
+                isRequired: true,
+              ),
+              _textField(
+                'Signature Key',
+                _vbiSignatureKeyController,
+                isRequired: true,
+              ),
+              _textField(
+                'External Session ID',
+                _vbiExternalSessionIdController,
+                isRequired: true,
+              ),
+              _textField('Job ID', _vbiJobIdController, isRequired: true),
+              _textField(
+                'Mã hạng mục',
+                _vbiMaHangMucController,
+                isRequired: true,
+              ),
+              _textField(
+                'Tên hạng mục',
+                _vbiTenHangMucController,
+                isRequired: true,
+              ),
+              _textField(
+                'Department ID',
+                _vbiDepartmentIdController,
+                isRequired: true,
+              ),
+              _textField('User ID', _vbiUserIdController, isRequired: true),
+              _textField('Mã TVV', _vbiMaTVVController, isRequired: true),
+              _textField('Source', _vbiSourceController, isRequired: true),
+            ],
 
             const Divider(height: 32),
             _sectionTitle('Car Information'),
@@ -233,6 +281,37 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
       return;
     }
 
+    VBIConfig? vbiConfig;
+    if (_organization == AiCycleOrg.vbi) {
+      if (_vbiAuthorityIdController.text.isEmpty ||
+          _vbiSignatureKeyController.text.isEmpty ||
+          _vbiExternalSessionIdController.text.isEmpty ||
+          _vbiJobIdController.text.isEmpty ||
+          _vbiMaHangMucController.text.isEmpty ||
+          _vbiTenHangMucController.text.isEmpty ||
+          _vbiDepartmentIdController.text.isEmpty ||
+          _vbiUserIdController.text.isEmpty ||
+          _vbiMaTVVController.text.isEmpty ||
+          _vbiSourceController.text.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please fill all required VBI fields')),
+        );
+        return;
+      }
+      vbiConfig = VBIConfig(
+        authorityId: _vbiAuthorityIdController.text,
+        signatureKey: _vbiSignatureKeyController.text,
+        externalSessionId: _vbiExternalSessionIdController.text,
+        jobId: _vbiJobIdController.text,
+        maHangMuc: _vbiMaHangMucController.text,
+        tenHangMuc: _vbiTenHangMucController.text,
+        departmentId: _vbiDepartmentIdController.text,
+        userId: _vbiUserIdController.text,
+        maTVV: _vbiMaTVVController.text,
+        source: _vbiSourceController.text,
+      );
+    }
+
     final config = AICycleConfig(
       generalConfig: GeneralConfig(
         apiToken: _apiTokenController.text,
@@ -258,6 +337,7 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
         iouThreshold: double.parse(_iouController.text),
       ),
       displayConfig: DisplayConfig(showBackButton: _showBackButton),
+      vbiConfig: vbiConfig,
     );
 
     Navigator.push(

@@ -10,19 +10,16 @@ class ResultRepositoryImpl implements ResultRepository {
 
   @override
   Future<void> uploadAnglePhoto({
-    required String sessionId,
     required int angleId,
     required Uint8List photoBytes,
     required int photoIndex,
   }) =>
       _dataSource.uploadAnglePhoto(
-        sessionId: sessionId,
         angleId: angleId,
         photoBytes: photoBytes,
         photoIndex: photoIndex,
       );
 
   @override
-  Future<dynamic> fetchResult({required String sessionId}) =>
-      _dataSource.fetchResult(sessionId: sessionId);
+  Future<dynamic> fetchResult() => _dataSource.fetchResult();
 }

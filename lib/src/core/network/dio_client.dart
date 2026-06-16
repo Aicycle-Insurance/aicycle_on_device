@@ -27,24 +27,30 @@ class DioClient {
       InterceptorsWrapper(
         onRequest: (options, handler) {
           // 1. Automatically get baseUrl and token from config
+          final skipDefaultAuth = options.extra['skipDefaultAuth'] == true;
           try {
             final config = AICycleConfigHolder.config;
             final String? customBaseUrl = options.extra['customBaseUrl'];
             options.baseUrl = customBaseUrl ?? config.baseUrl;
-            options.headers['Authorization'] =
-                'Bearer ${config.generalConfig.apiToken}';
-            String? xApp;
 
-            switch (config.generalConfig.organization) {
-              case AiCycleOrg.aicycle:
-                xApp = 'appDemo';
-                break;
-              default:
-                xApp = 'api';
-                break;
+            // Some endpoints (e.g. VBI's own server) use their own
+            // auth scheme and must not get AICycle's Authorization header.
+            if (!skipDefaultAuth) {
+              options.headers['Authorization'] =
+                  'Bearer ${config.generalConfig.apiToken}';
+              String? xApp;
+
+              switch (config.generalConfig.organization) {
+                case AiCycleOrg.aicycle:
+                  xApp = 'appDemo';
+                  break;
+                default:
+                  xApp = 'api';
+                  break;
+              }
+
+              options.headers['x-aicycle-application'] = xApp;
             }
-
-            options.headers['x-aicycle-application'] = xApp;
           } catch (_) {
             // Config not yet initialized
           }
@@ -158,13 +164,21 @@ class DioClient {
     dynamic data,
     Map<String, dynamic>? queryParameters,
     String? customBaseUrl,
+    Map<String, dynamic>? headers,
+    bool skipDefaultAuth = false,
   }) async {
     return safeCall<T>(
       () => _dio.post(
         path,
         data: data,
         queryParameters: queryParameters,
-        options: Options(extra: {'customBaseUrl': customBaseUrl}),
+        options: Options(
+          headers: headers,
+          extra: {
+            'customBaseUrl': customBaseUrl,
+            'skipDefaultAuth': skipDefaultAuth,
+          },
+        ),
       ),
     );
   }

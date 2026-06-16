@@ -59,7 +59,6 @@ class ResultController extends ChangeNotifier {
 
         for (int i = 0; i < photos.length; i++) {
           await _repository.uploadAnglePhoto(
-            sessionId: sessionId,
             angleId: angleId,
             photoBytes: photos[i],
             photoIndex: i,
@@ -76,7 +75,7 @@ class ResultController extends ChangeNotifier {
       _status = ResultStatus.fetchingResult;
       _notify();
 
-      _result = await _repository.fetchResult(sessionId: sessionId);
+      _result = await _repository.fetchResult();
       _status = ResultStatus.success;
       _notify();
     } catch (e) {
