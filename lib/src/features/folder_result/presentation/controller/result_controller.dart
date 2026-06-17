@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../../../../core/cache/photo_session_cache.dart';
+import '../../../../core/utils/gallery_helper.dart';
 import '../../domain/repository/result_repository.dart';
 
 enum ResultStatus { uploading, fetchingResult, success, error }
@@ -52,6 +55,10 @@ class ResultController extends ChangeNotifier {
     _errorMessage = null;
     _notify();
 
+    // Xin quyền thư viện ảnh sớm để khi lưu ảnh upload thành công không bị
+    // block bởi dialog xin quyền (no-op nếu savePhotoAfterShot = false).
+    await GalleryHelper.requestPermission();
+
     try {
       for (final entry in snapshot.entries) {
         final angleId = entry.key;
@@ -63,6 +70,8 @@ class ResultController extends ChangeNotifier {
             photoBytes: photos[i],
             photoIndex: i,
           );
+          // Upload thành công → lưu ảnh vào thư viện ảnh của thiết bị.
+          unawaited(GalleryHelper.saveBytes(photos[i]));
           _uploadedCount++;
           _notify();
         }
