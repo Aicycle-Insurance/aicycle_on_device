@@ -37,8 +37,9 @@ class AICycleFolderRepositoryImpl implements AICycleFolderRepository {
     final data = {
       'externalClaimId': externalClaimId,
       'claimName': claimName,
-      'vehicleBrandId': vehicleBrandId,
-      'priceTypeId': priceTypeId,
+      if (vehicleBrandId != null && vehicleBrandId.isNotEmpty)
+        'vehicleBrandId': vehicleBrandId,
+      if (priceTypeId != null) 'priceTypeId': priceTypeId,
       'isClaim': isClaim,
       'brand': brand,
       'model': model,

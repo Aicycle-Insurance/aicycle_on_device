@@ -130,7 +130,15 @@ class _ResultViewState extends State<ResultView> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       widget.onComplete?.call(_controller.result);
     });
-    return const SizedBox.expand();
+    return Scaffold(
+      appBar: AppBar(
+        centerTitle: true,
+        title: Text(StringSheet.carPhoto),
+      ),
+      body: Column(
+        children: [],
+      ),
+    );
   }
 
   Widget _buildError() {

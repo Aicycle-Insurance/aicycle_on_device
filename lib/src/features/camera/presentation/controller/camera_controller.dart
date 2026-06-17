@@ -16,19 +16,19 @@ enum InspectionPhase {
   /// Initial message: "Đưa camera lại gần tổn thất…" — X → scanning, Chuyển góc → done.
   panoramicGuide,
 
-  /// Waiting 5 s for detections. No tooltip shown.
+  /// Scanning for damage. Detection is event-driven: ngay khi có detection
+  /// → detectionReady. Sau 10 s không có detection → warning.
   scanning,
 
-  /// Detections found after 5 s — showing "Xác nhận / Thiếu tổn thất".
+  /// Detections found — showing "Xác nhận / Thiếu tổn thất". Sau 5 s không
+  /// bấm gì sẽ tự động chụp.
   detectionReady,
 
-  /// User tapped "Xác nhận" — capturing damage photo + loading spinner.
+  /// Đang chụp ảnh tổn thất (tự động hoặc do bấm "Xác nhận").
   capturingDamage,
 
-  /// Damage captured — showing success toast for 3 s.
-  captureSuccessful,
-
-  /// After success: "Tiếp tục… hoặc Chuyển góc" + 5 s cycle resumes.
+  /// Hiển thị message "Tiếp tục di chuyển camera…" trong 5 s rồi quay lại
+  /// scanning.
   continueOrChange,
 }
 
@@ -68,8 +68,9 @@ class CameraController extends ChangeNotifier {
   /// Current phase of the damage inspection sub-flow. null = not in inspection.
   InspectionPhase? _inspectionPhase;
 
-  /// 5-second damage detection timer.
-  Timer? _damageTimer;
+  /// 5s timer chạy ở detectionReady: hết 5s mà user không bấm gì thì tự
+  /// động chụp ảnh tổn thất.
+  Timer? _autoCaptureTimer;
 
   /// One-shot timer: if no damage is detected within 10 s of unlocking
   /// detection (right after the panoramic photo is taken), the current
@@ -116,7 +117,14 @@ class CameraController extends ChangeNotifier {
       final segment = CarAngle.segmentOf(output.classification.top1);
       if (segment == _activeSegmentIndex) return;
       _activeSegmentIndex = segment;
-      updateMessage();
+      // Góc này đã có ảnh toàn cảnh → bắt đầu luôn từ scanning, không cần
+      // chụp toàn cảnh lại.
+      if (_panoramicCapturedSegments.contains(segment)) {
+        _classificationLocked = true;
+        startDamageScanning();
+      } else {
+        updateMessage();
+      }
     } else if (data['type'] == 'segment') {
       final output =
           SegmentationOutput.fromJson(Map<String, dynamic>.from(data));
@@ -126,6 +134,8 @@ class CameraController extends ChangeNotifier {
     } else if (data['type'] == 'detect') {
       final output = DetectionOutput.fromJson(Map<String, dynamic>.from(data));
       _latestDetections = output.detections;
+      // Phát hiện tổn thất → hiển thị xác nhận ngay, không chờ timer 5s.
+      _maybeShowDetectionReady();
     }
     notifyListeners();
   }
@@ -217,6 +227,8 @@ class CameraController extends ChangeNotifier {
     await capturePhoto();
     if (_activeSegmentIndex != null) {
       _panoramicCapturedSegments.add(_activeSegmentIndex!);
+      // Chụp toàn cảnh xong là góc đó đã được tính hoàn thành.
+      _completedSegments.add(_activeSegmentIndex!);
     }
     _classificationLocked = true;
     _inspectionPhase = InspectionPhase.panoramicGuide;
@@ -228,41 +240,46 @@ class CameraController extends ChangeNotifier {
 
   // ── Inspection / damage flow ──────────────────────────────────────────────
 
-  /// User pressed X on panoramicGuide → start 5 s damage scanning loop.
-  /// Also starts the 10 s no-detection timeout (detection is now unlocked).
-  void startDamageScanning() {
+  /// Bắt đầu (hoặc quay lại) trạng thái scanning: detection chạy theo sự kiện,
+  /// đồng thời mở 10 s no-detection timeout.
+  void startDamageScanning() => _enterScanning();
+
+  void _enterScanning() {
+    _autoCaptureTimer?.cancel();
+    _autoCaptureTimer = null;
     _inspectionPhase = InspectionPhase.scanning;
     _setMessage(null);
-    _startDamageTimer();
     _startNoDetectionTimer();
   }
 
-  void _startDamageTimer() {
-    _damageTimer?.cancel();
-    _damageTimer = Timer(const Duration(seconds: 5), _onDamageTimerFired);
-  }
+  /// Khi đang quét mà phát hiện tổn thất → hiển thị xác nhận ngay lập tức.
+  /// An toàn khi gọi nhiều lần.
+  void _maybeShowDetectionReady() {
+    if (_latestDetections.isEmpty) return;
 
-  void _onDamageTimerFired() {
-    if (_inspectionPhase != InspectionPhase.scanning &&
-        _inspectionPhase != InspectionPhase.continueOrChange) {
-      return;
+    // Vừa chụp toàn cảnh xong (đang ở màn hướng dẫn) mà đã phát hiện tổn thất
+    // → vào scanning luôn, không cần user bấm X / Chuyển góc.
+    if (_inspectionPhase == InspectionPhase.panoramicGuide) {
+      _enterScanning();
     }
 
-    if (_latestDetections.isNotEmpty) {
-      _noDetectionTimer?.cancel();
-      _inspectionPhase = InspectionPhase.detectionReady;
-      _setMessage(CameraMessage(
-        message: StringSheet.damageDetectedGuide,
-        type: MessageType.info,
-      ));
-    } else {
-      // No detections yet — keep scanning
-      _startDamageTimer();
-    }
+    if (_inspectionPhase != InspectionPhase.scanning) return;
+
+    _noDetectionTimer?.cancel();
+    _noDetectionTimer = null;
+    _inspectionPhase = InspectionPhase.detectionReady;
+    _setMessage(CameraMessage(
+      message: StringSheet.damageDetectedGuide,
+      type: MessageType.info,
+    ));
+    // Sau 5 s không bấm gì → tự động chụp.
+    _autoCaptureTimer?.cancel();
+    _autoCaptureTimer = Timer(const Duration(seconds: 5), () {
+      if (_inspectionPhase == InspectionPhase.detectionReady) confirmDamage();
+    });
   }
 
-  /// 10 s after detection is unlocked (panoramic photo just captured), if
-  /// still no damage detected, show a warning and auto-complete the angle.
+  /// 10 s ở scanning mà không phát hiện tổn thất → cảnh báo rồi rời góc.
   void _startNoDetectionTimer() {
     _noDetectionTimer?.cancel();
     _noDetectionTimer =
@@ -273,7 +290,6 @@ class CameraController extends ChangeNotifier {
     if (_inspectionPhase != InspectionPhase.scanning) return;
     if (_latestDetections.isNotEmpty) return;
 
-    _damageTimer?.cancel();
     _setMessage(CameraMessage(
       message: StringSheet.noDamageDetectedGuide,
       type: MessageType.warning,
@@ -285,37 +301,40 @@ class CameraController extends ChangeNotifier {
     completeCurrentAngle();
   }
 
-  /// User pressed "Thiếu tổn thất" — reset the 5 s timer.
+  /// User pressed "Thiếu tổn thất" — không chụp, hiện message rồi về scanning.
   void rejectDamage() {
-    _inspectionPhase = InspectionPhase.scanning;
-    _setMessage(null);
-    _startDamageTimer();
+    _autoCaptureTimer?.cancel();
+    _autoCaptureTimer = null;
+    _showContinueThenScan();
   }
 
-  /// User pressed "Xác nhận" — capture damage photo, show success, then loop.
+  /// User pressed "Xác nhận" (hoặc auto sau 5 s) — chụp ảnh tổn thất, hiện
+  /// message "Tiếp tục di chuyển camera…" trong 5 s rồi quay lại scanning.
   Future<void> confirmDamage() async {
-    _damageTimer?.cancel();
+    _autoCaptureTimer?.cancel();
+    _autoCaptureTimer = null;
     _inspectionPhase = InspectionPhase.capturingDamage;
     _setMessage(CameraMessage(
         message: StringSheet.holdStillGuide, type: MessageType.loading));
 
     await capturePhoto();
 
-    _inspectionPhase = InspectionPhase.captureSuccessful;
-    _setMessage(CameraMessage(
-        message: StringSheet.captureSuccess, type: MessageType.success));
+    await _showContinueThenScan();
+  }
 
-    await Future.delayed(const Duration(seconds: 3));
-    // Guard: if the angle was completed during the delay, don't override.
-    if (_inspectionPhase != InspectionPhase.captureSuccessful) return;
-
+  /// Hiển thị message "Tiếp tục di chuyển camera…" trong 5 s rồi quay lại
+  /// scanning. Dùng chung cho cả "Xác nhận" và "Thiếu tổn thất".
+  Future<void> _showContinueThenScan() async {
     _inspectionPhase = InspectionPhase.continueOrChange;
     _setMessage(CameraMessage(
       message: StringSheet.continueOrChangeGuide,
       type: MessageType.info,
     ));
-    // Resume 5 s cycle from the "continue or change" state.
-    _startDamageTimer();
+
+    await Future.delayed(const Duration(seconds: 5));
+    // Guard: user có thể đã bấm "Chuyển góc" trong lúc chờ.
+    if (_inspectionPhase != InspectionPhase.continueOrChange) return;
+    _enterScanning();
   }
 
   /// Called by ResultController after an angle's photos are successfully uploaded.
@@ -328,18 +347,45 @@ class CameraController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// User pressed "Chuyển góc" (from panoramicGuide or continueOrChange).
+  /// User pressed "Chuyển góc" — thoát inspection, mở khoá classification.
+  /// Giữ angle trong [_panoramicCapturedSegments] để khi quay lại sẽ vào
+  /// thẳng scanning (không chụp toàn cảnh lại).
+  ///
+  /// Sau khi hoàn thành, hiển thị message điều hướng tới góc chưa hoàn thành
+  /// tiếp theo theo thứ tự 0 → 1 → 2 → 3 (bỏ qua góc đã completed). Nếu cả 4
+  /// góc đã completed thì không hiển thị message điều hướng.
   void completeCurrentAngle() {
-    _damageTimer?.cancel();
-    _damageTimer = null;
+    _autoCaptureTimer?.cancel();
+    _autoCaptureTimer = null;
     _noDetectionTimer?.cancel();
     _noDetectionTimer = null;
-    if (_activeSegmentIndex == null) return;
-    _completedSegments.add(_activeSegmentIndex!);
-    _panoramicCapturedSegments.remove(_activeSegmentIndex!);
+    final justCompleted = _activeSegmentIndex;
+    if (justCompleted != null) {
+      _completedSegments.add(justCompleted);
+    }
     _inspectionPhase = null;
     _classificationLocked = false;
-    _setMessage(null);
+
+    final nextSegment = _nextNavigationSegment(justCompleted);
+    if (nextSegment == null) {
+      _setMessage(null);
+    } else {
+      _setMessage(CameraMessage(
+        message: _segmentConfigs[nextSegment]?.$2 ?? '',
+        type: MessageType.guide,
+      ));
+    }
+  }
+
+  /// Góc chưa completed tiếp theo theo thứ tự vòng 0 → 1 → 2 → 3, bắt đầu sau
+  /// [from]. Trả về null nếu cả 4 góc đã completed.
+  int? _nextNavigationSegment(int? from) {
+    final start = from ?? -1;
+    for (int step = 1; step <= 4; step++) {
+      final idx = (start + step) % 4;
+      if (!_completedSegments.contains(idx)) return idx;
+    }
+    return null;
   }
 
   // ── Internal ──────────────────────────────────────────────────────────────
@@ -352,7 +398,7 @@ class CameraController extends ChangeNotifier {
 
   @override
   void dispose() {
-    _damageTimer?.cancel();
+    _autoCaptureTimer?.cancel();
     _noDetectionTimer?.cancel();
     yoloController.stop();
     super.dispose();
