@@ -16,6 +16,7 @@ import 'controller/camera_controller.dart';
 import 'controller/camera_model_controller.dart';
 import 'widgets/bounding_box_overlay.dart';
 import 'widgets/camera_bottom_bar.dart';
+import 'widgets/car_part_label_overlay.dart';
 import 'widgets/camera_corner_bracket.dart';
 import 'widgets/camera_guide_sheet.dart';
 import 'widgets/camera_top_bar.dart';
@@ -371,6 +372,14 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
                   detections: _cameraController.showBoundingBoxes
                       ? _cameraController.latestDetections
                       : const [],
+                ),
+              ),
+
+              /// Nhãn tên bộ phận — chỉ khi đang căn chỉnh ảnh toàn cảnh.
+              // if (!_cameraController.isInspectionMode)
+              Positioned.fill(
+                child: CarPartLabelOverlay(
+                  detections: _cameraController.latestSegmentDetections,
                 ),
               ),
 

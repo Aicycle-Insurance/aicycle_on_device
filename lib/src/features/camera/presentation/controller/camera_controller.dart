@@ -62,6 +62,10 @@ class CameraController extends ChangeNotifier {
   /// Class names từ frame segment mới nhất.
   Set<String> _latestSegmentClasses = {};
 
+  /// Chi tiết bộ phận (kèm bounding box) từ frame segment mới nhất —
+  /// dùng để vẽ nhãn tên bộ phận lên màn hình.
+  List<SegmentDetection> _latestSegmentDetections = [];
+
   /// Detections từ frame detect mới nhất.
   List<DetectionResult> _latestDetections = [];
 
@@ -87,6 +91,8 @@ class CameraController extends ChangeNotifier {
   CameraMessage? get message => _message;
   int get captureFlashTick => _captureFlashTick;
   List<DetectionResult> get latestDetections => _latestDetections;
+  List<SegmentDetection> get latestSegmentDetections =>
+      _latestSegmentDetections;
   InspectionPhase? get inspectionPhase => _inspectionPhase;
 
   /// True when actively inspecting for damage (panoramic already taken).
@@ -129,7 +135,9 @@ class CameraController extends ChangeNotifier {
       final output =
           SegmentationOutput.fromJson(Map<String, dynamic>.from(data));
       _latestSegmentClasses = output.detections.map((d) => d.className).toSet();
+      _latestSegmentDetections = output.detections;
       updateMessage();
+      notifyListeners();
       return;
     } else if (data['type'] == 'detect') {
       final output = DetectionOutput.fromJson(Map<String, dynamic>.from(data));
