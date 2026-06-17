@@ -57,7 +57,8 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
 
     final sessionId = widget.aiCycleConfig.generalConfig.documentId;
     _cameraController = CameraController(sessionId: sessionId)
-      ..loadCachedPhotos();
+      ..loadCachedPhotos()
+      ..requestGalleryPermission();
 
     _modelController = CameraModelController(
       sl.aiModelRepository,

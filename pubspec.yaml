@@ -22,6 +22,8 @@ dependencies:
 
   # utralytics yolo custom package
   aicycle_yolo: ^1.0.1
+  gallery_saver_plus: ^3.2.9
+  permission_handler: ^11.3.1
 
 dev_dependencies:
   flutter_test:

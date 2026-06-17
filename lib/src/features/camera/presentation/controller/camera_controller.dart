@@ -1,7 +1,12 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:aicycle_on_device/src/config/config_holder.dart';
 import 'package:aicycle_yolo/multi_task_yolo_view.dart';
 import 'package:flutter/foundation.dart';
+import 'package:gallery_saver_plus/gallery_saver.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../../../core/cache/photo_session_cache.dart';
 import '../../../../core/constants/string_sheet.dart';
@@ -167,6 +172,7 @@ class CameraController extends ChangeNotifier {
         PhotoSessionCache.instance
             .savePhoto(_sessionId, _activeSegmentIndex!, bytes);
       }
+      unawaited(_savePictureToGallery(bytes));
       notifyListeners();
       return bytes;
     } catch (_) {
@@ -394,6 +400,41 @@ class CameraController extends ChangeNotifier {
     if (_message == msg) return;
     _message = msg;
     notifyListeners();
+  }
+
+  /// Xin quyền truy cập thư viện ảnh ngay khi khởi tạo camera, để khi
+  /// đến lúc tự động chụp & lưu ảnh không bị block bởi dialog xin quyền.
+  Future<void> requestGalleryPermission() async {
+    if (!AICycleConfigHolder.config.generalConfig.savePhotoAfterShot) return;
+    try {
+      // iOS: photosAddOnly (NSPhotoLibraryAddUsageDescription).
+      // Android: storage (API ≤ 32) — bản mới không cần quyền để ghi DCIM.
+      final permission =
+          Platform.isIOS ? Permission.photosAddOnly : Permission.storage;
+      final status = await permission.status;
+      if (status.isDenied) {
+        await permission.request();
+      }
+    } catch (e) {
+      debugPrint('Failed to request gallery permission: $e');
+    }
+  }
+
+  /// Lưu ảnh đã chụp (JPEG bytes) vào thư viện ảnh của thiết bị.
+  Future<void> _savePictureToGallery(Uint8List bytes) async {
+    if (!AICycleConfigHolder.config.generalConfig.savePhotoAfterShot) return;
+    try {
+      final dir = await getTemporaryDirectory();
+      final file = File(
+        '${dir.path}/aicycle_${DateTime.now().microsecondsSinceEpoch}.jpg',
+      );
+      await file.writeAsBytes(bytes, flush: true);
+      await GallerySaver.saveImage(file.path);
+      // Dọn temp file sau khi đã lưu vào gallery.
+      if (await file.exists()) await file.delete();
+    } catch (e) {
+      debugPrint('Failed to save to gallery: $e');
+    }
   }
 
   @override

@@ -6,6 +6,9 @@
     <!-- Location: lấy vị trí và geocode địa chỉ khi giám định -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <!-- Lưu ảnh đã chụp vào thư viện (Android API ≤ 32) -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32"/>
 
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
 

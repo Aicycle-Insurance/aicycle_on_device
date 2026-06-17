@@ -97,6 +97,9 @@ class GeneralConfig {
   /// Tổ chức sử dụng SDK
   final AiCycleOrg organization;
 
+  /// Có lưu lại ảnh đã chụp vào gallery không
+  final bool savePhotoAfterShot;
+
   GeneralConfig({
     required this.apiToken,
     required this.documentId,
@@ -104,6 +107,7 @@ class GeneralConfig {
     this.environment = AiCycleEnvironment.develop,
     this.documentName,
     this.loggingEnabled = false,
+    this.savePhotoAfterShot = true,
   });
 }
 
