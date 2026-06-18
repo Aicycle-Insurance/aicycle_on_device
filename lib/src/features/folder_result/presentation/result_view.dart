@@ -8,6 +8,7 @@ import '../../../core/themes/app_textstyle.dart';
 import '../../../core/utils/screen_utils.dart';
 import 'controller/result_controller.dart';
 import 'widgets/result_card.dart';
+import 'widgets/step_line.dart';
 
 class ResultView extends StatefulWidget {
   const ResultView({
@@ -137,7 +138,22 @@ class _ResultViewState extends State<ResultView> {
       body: Column(
         children: [
           /// step line
-          SizedBox(height: 68.h),
+          Container(
+            height: 68.h,
+            padding: EdgeInsets.symmetric(horizontal: 50.h),
+            child: Center(
+              child: StepLine(
+                steps: [
+                  StepData(
+                    label: StringSheet.scenePhoto,
+                    activeIcon: Icons.check_rounded,
+                  ),
+                  StepData(label: StringSheet.damagePhoto)
+                ],
+                currentIndex: 1,
+              ),
+            ),
+          ),
           if (_controller.result != null && _controller.result!.isNotEmpty)
             Expanded(
               child: ListView.separated(

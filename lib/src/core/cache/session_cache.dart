@@ -7,11 +7,16 @@ class SessionCache {
 
   String? claimId;
 
+  /// `true` nếu folder đã có sẵn kết quả giám định trên server → bỏ qua bước
+  /// upload ảnh, gọi thẳng API lấy kết quả.
+  bool? resultsAvailable;
+
   /// `kvp.claimBuyMe.baseUrlOnPremise` lấy từ API `/bearer` lúc khởi tạo SDK.
   String? baseUrlOnPremise;
 
   void clear() {
     claimId = null;
+    resultsAvailable = null;
     baseUrlOnPremise = null;
   }
 }

@@ -6,6 +6,7 @@ import '../../../../core/error/failures.dart';
 import '../../../../core/utils/result.dart';
 import '../../domain/repository/aicycle_folder_repository.dart';
 import '../datasource/aicycle_folder_remote_datasource.dart';
+import '../model/aicycle_folder_model.dart';
 
 class AICycleFolderRepositoryImpl implements AICycleFolderRepository {
   AICycleFolderRepositoryImpl(this._remote);
@@ -31,7 +32,7 @@ class AICycleFolderRepositoryImpl implements AICycleFolderRepository {
     if (AICycleConfigHolder.config.generalConfig.organization ==
         AiCycleOrg.aicycle) {
       final folder = await _remote.getClaimFolderById(externalClaimId);
-      return _cacheAndReturn(folder.claimId?.toString() ?? '');
+      return _cacheAndReturn(folder);
     }
 
     final data = {
@@ -52,12 +53,12 @@ class AICycleFolderRepositoryImpl implements AICycleFolderRepository {
 
     try {
       final folder = await _remote.createAICycleFolder(data);
-      return _cacheAndReturn(folder.claimId?.toString() ?? '');
+      return _cacheAndReturn(folder);
     } catch (e) {
       if (e.toString().toLowerCase().contains('duplicate')) {
         try {
           final folder = await _remote.getDuplicateFolder(externalClaimId);
-          return _cacheAndReturn(folder.claimId?.toString() ?? '');
+          return _cacheAndReturn(folder);
         } catch (inner) {
           return FailureResult(_mapError(inner));
         }
@@ -66,8 +67,10 @@ class AICycleFolderRepositoryImpl implements AICycleFolderRepository {
     }
   }
 
-  Success<String, Failure> _cacheAndReturn(String claimId) {
+  Success<String, Failure> _cacheAndReturn(AICycleFolderModel folder) {
+    final claimId = folder.claimId?.toString() ?? '';
     SessionCache.instance.claimId = claimId;
+    SessionCache.instance.resultsAvailable = folder.resultsAvailable;
     return Success(claimId);
   }
 

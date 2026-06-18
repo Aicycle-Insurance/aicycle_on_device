@@ -105,20 +105,23 @@ class _AddPhotoButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: CustomPaint(
-        painter: _DashedBorderPainter(
-          color: AppColors.inkA300,
-          radius: 8.r,
-        ),
-        child: SizedBox(
-          width: 68.r,
-          height: 68.r,
-          child: Icon(
-            Icons.photo_camera_outlined,
-            size: 32.r,
-            color: AppColors.inkA500,
+    return Padding(
+      padding: EdgeInsets.only(left: 2),
+      child: GestureDetector(
+        onTap: onTap,
+        child: CustomPaint(
+          painter: _DashedBorderPainter(
+            color: AppColors.inkA300,
+            radius: 8.r,
+          ),
+          child: SizedBox(
+            width: 68.r,
+            height: 68.r,
+            child: Icon(
+              Icons.photo_camera_outlined,
+              size: 32.r,
+              color: AppColors.inkA500,
+            ),
           ),
         ),
       ),
@@ -222,7 +225,7 @@ class _DashedBorderPainter extends CustomPainter {
 
   static const double dashWidth = 4;
   static const double dashGap = 4;
-  static const double strokeWidth = 1.2;
+  static const double strokeWidth = 2;
 
   @override
   void paint(Canvas canvas, Size size) {

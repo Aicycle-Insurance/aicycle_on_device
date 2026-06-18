@@ -98,4 +98,7 @@ class StringSheet {
   static String sizeLabel(String size) => 'Kích thước: $size';
   static String versionCount(int count) => '$count phiên bản';
   static String selectedVersion(String version) => 'Đã chọn v$version';
+
+  static const scenePhoto = 'Ảnh hiện trường';
+  static const damagePhoto = 'Ảnh thiệt hại';
 }

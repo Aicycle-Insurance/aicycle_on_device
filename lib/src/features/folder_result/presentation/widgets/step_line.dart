@@ -48,60 +48,73 @@ class StepLine extends StatelessWidget {
     return StepState.inactive;
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final children = <Widget>[];
-    for (int i = 0; i < steps.length; i++) {
-      children.add(_StepNode(data: steps[i], state: _stateFor(i)));
-      if (i != steps.length - 1) {
-        // Đường nối tô đậm khi bước bên trái đã hoàn thành.
-        final filled = i < currentIndex;
-        children.add(
-          Expanded(
-            child: Padding(
-              padding: EdgeInsets.only(bottom: 22.h),
-              child: Container(
-                height: 2.h,
-                color: filled ? AppColors.primaryA500 : AppColors.inkA200,
-              ),
-            ),
-          ),
-        );
-      }
-    }
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: children,
-    );
+  /// Canh nhãn: bước đầu canh trái, bước cuối canh phải, giữa thì căn giữa —
+  /// để mỗi nhãn nằm ngay dưới vòng tròn tương ứng.
+  TextAlign _labelAlign(int index) {
+    if (index == 0) return TextAlign.left;
+    if (index == steps.length - 1) return TextAlign.right;
+    return TextAlign.center;
   }
-}
-
-class _StepNode extends StatelessWidget {
-  const _StepNode({required this.data, required this.state});
-
-  final StepData data;
-  final StepState state;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _buildCircle(),
-        6.verticalSpace,
-        SizedBox(
-          width: 72.w,
-          child: Text(
-            data.label,
-            textAlign: TextAlign.center,
-            style: state == StepState.active
-                ? AppTextStyles.base.s12.w600().setColor(AppColors.primaryA500)
-                : AppTextStyles.base.s12.w400().setColor(AppColors.inkA400),
-          ),
+        // Hàng vòng tròn + đường nối — đường nằm giữa theo chiều dọc vòng tròn.
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            for (int i = 0; i < steps.length; i++) ...[
+              _StepCircle(data: steps[i], state: _stateFor(i)),
+              if (i != steps.length - 1)
+                Expanded(
+                  child: Container(
+                    height: 2.h,
+                    color: i < currentIndex
+                        ? AppColors.primaryA500
+                        : AppColors.inkA200,
+                  ),
+                ),
+            ],
+          ],
+        ),
+        4.verticalSpace,
+        // Hàng nhãn — mỗi nhãn 1 dòng, canh dưới step tương ứng.
+        Row(
+          children: [
+            for (int i = 0; i < steps.length; i++)
+              Expanded(
+                child: Text(
+                  steps[i].label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: _labelAlign(i),
+                  style: _stateFor(i) == StepState.active
+                      ? AppTextStyles.base.s12
+                          .w600()
+                          .setColor(AppColors.primaryA500)
+                      : AppTextStyles.base.s12
+                          .w400()
+                          .setColor(AppColors.inkA400),
+                ),
+              ),
+          ],
         ),
       ],
     );
+  }
+}
+
+class _StepCircle extends StatelessWidget {
+  const _StepCircle({required this.data, required this.state});
+
+  final StepData data;
+  final StepState state;
+
+  @override
+  Widget build(BuildContext context) {
+    return _buildCircle();
   }
 
   Widget _buildCircle() {
@@ -113,7 +126,7 @@ class _StepNode extends StatelessWidget {
           alignment: Alignment.center,
           decoration: const BoxDecoration(
             shape: BoxShape.circle,
-            color: AppColors.primaryA200,
+            color: AppColors.primaryA300,
           ),
           child: Icon(
             Icons.check_rounded,

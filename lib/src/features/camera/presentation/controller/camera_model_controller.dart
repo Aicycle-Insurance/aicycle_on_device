@@ -72,8 +72,6 @@ class CameraModelController extends ChangeNotifier {
   ) async {
     _config = config;
     _initialPaths = paths;
-    // _folderReady = true;
-    // await _prepareModels(paths);
 
     if (SessionCache.instance.claimId != null) {
       _folderReady = true;

@@ -25,10 +25,12 @@ class ResultRemoteDataSource {
     required int photoIndex,
   }) async {
     final config = AICycleConfigHolder.config;
-    final sessionId =
-        config.vbiConfig?.externalSessionId ?? config.generalConfig.documentId;
+    final sessionId = config.generalConfig.documentId;
     final formData = FormData.fromMap({
-      'externalSessionId': sessionId,
+      if (config.generalConfig.organization == AiCycleOrg.aicycle)
+        'claimFolderId': sessionId,
+      if (config.generalConfig.organization != AiCycleOrg.aicycle)
+        'externalSessionId': sessionId,
       'img': MultipartFile.fromBytes(
         photoBytes,
         filename: '${angleId}_$photoIndex.jpg',
@@ -110,11 +112,11 @@ class ResultRemoteDataSource {
   /// GET insurance/v2/claimfolders/$sessionId/external-segment-result
   Future<List<VehiclePartModel>> fetchResult() async {
     final config = AICycleConfigHolder.config;
-    final sessionId =
-        config.vbiConfig?.externalSessionId ?? config.generalConfig.documentId;
-    final list = await _client.get<List<dynamic>>(
-      '/insurance/v2/claimfolders/$sessionId/external-segment-result',
-    );
+    final sessionId = config.generalConfig.documentId;
+    final endPoint = config.generalConfig.organization == AiCycleOrg.aicycle
+        ? '/insurance/v2/claimfolders/$sessionId/segment-classify-result'
+        : '/insurance/v2/claimfolders/$sessionId/external-segment-result';
+    final list = await _client.get<List<dynamic>>(endPoint);
     return list
         .whereType<Map<String, dynamic>>()
         .map(VehiclePartModel.fromJson)

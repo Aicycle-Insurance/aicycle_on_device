@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import '../../../../aicycle_on_device.dart';
 import '../../../config/config_holder.dart';
+import '../../../core/cache/session_cache.dart';
 import '../../../core/constants/string_sheet.dart';
 import '../../../core/di/injection.dart';
 import '../../../core/themes/app_colors.dart';
@@ -49,6 +50,7 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
   late final CameraModelController _modelController;
   late final CameraController _cameraController;
   bool _guideShown = false;
+  bool _jumpedToResult = false;
 
   @override
   void initState() {
@@ -83,8 +85,40 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
     super.dispose();
   }
 
+  /// Khi folder đã có sẵn kết quả: push thẳng ResultView (giữ camera phía dưới
+  /// để nút "Thêm ảnh tổn thất" có thể pop về chụp thêm). Chỉ chạy một lần.
+  void _maybeJumpToResult() {
+    if (_jumpedToResult) return;
+    _jumpedToResult = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.of(context).push(
+        // Không animation để không lộ cảnh chuyển giữa loading camera và
+        // loading của ResultView (tránh nháy).
+        PageRouteBuilder<void>(
+          pageBuilder: (_, __, ___) => ResultView(
+            sessionId: widget.aiCycleConfig.generalConfig.documentId,
+            capturedPhotos: const {},
+            onComplete: widget.onComplete,
+          ),
+          transitionDuration: Duration.zero,
+          reverseTransitionDuration: Duration.zero,
+        ),
+      ).then((_) {
+        // User pop khỏi ResultView (vd bấm "Thêm ảnh tổn thất") → từ giờ là
+        // chụp mới, không skip upload nữa, và hiện camera.
+        if (!mounted) return;
+        SessionCache.instance.resultsAvailable = false;
+        setState(() {});
+      });
+    });
+  }
+
   void _maybeShowGuide() {
     if (_guideShown) return;
+    // Luồng jump-thẳng-result (folder đã có kết quả) thì không hiện guide:
+    // tránh dialog đè lên ResultView, và khi quay lại chụp thêm cũng không cần.
+    if (_jumpedToResult) return;
     _guideShown = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -162,6 +196,13 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
         }
         if (!_modelController.folderReady) {
           return _buildLoading(StringSheet.creatingFolder);
+        }
+        // Folder đã có sẵn kết quả → lần đầu vào nhảy thẳng sang ResultView,
+        // bỏ qua bước chuẩn bị model + chụp ảnh.
+        if (!_jumpedToResult &&
+            SessionCache.instance.resultsAvailable == true) {
+          _maybeJumpToResult();
+          return _buildLoading(StringSheet.fetchingResult);
         }
         if (_modelController.isPreparing) return _buildPreparing();
         if (_modelController.isReady) {
@@ -312,6 +353,9 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
   }
 
   bool _canGoNext() {
+    // Folder đã có sẵn kết quả (đã từng jump sang result) → luôn cho phép quay
+    // lại màn result, kể cả khi chưa chụp thêm góc nào.
+    if (_jumpedToResult) return true;
     final completed = _cameraController.completedSegments;
     if (widget.aiCycleConfig.validateConfig.require4AnglePanoramicPhotos) {
       return completed.length >= 4;
