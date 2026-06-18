@@ -360,9 +360,16 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
                 segmentModelPath:
                     _modelController.modelPathOf(AiModelType.carPart)!,
                 controller: _cameraController.yoloController,
-                confidenceThreshold:
-                    widget.aiCycleConfig.modelConfig.confidenceThreshold,
-                iouThreshold: widget.aiCycleConfig.modelConfig.iouThreshold,
+                segmentConfidenceThreshold:
+                    widget.aiCycleConfig.modelConfig.segmentConfThreshold,
+                segmentIouThreshold:
+                    widget.aiCycleConfig.modelConfig.segmentIouThreshold,
+                classifyConfidenceThreshold:
+                    widget.aiCycleConfig.modelConfig.classifyConfThreshold,
+                detectConfidenceThreshold:
+                    widget.aiCycleConfig.modelConfig.detectConfThreshold,
+                detectIouThreshold:
+                    widget.aiCycleConfig.modelConfig.detectIouThreshold,
                 onStreamingData: _cameraController.onStreamingData,
               ),
 

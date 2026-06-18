@@ -30,6 +30,12 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            // AGP 9 bật R8 minify mặc định, làm hỏng WorkManager/Room (androidx.work)
+            // -> app trắng màn. Tắt minify để release chạy như debug.
+            // Khi cần tối ưu cho production: bật lại isMinifyEnabled = true và dùng
+            // proguardFiles(...) với proguard-rules.pro (xem file đó).
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }

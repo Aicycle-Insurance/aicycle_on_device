@@ -12,10 +12,10 @@ packages:
     dependency: transitive
     description:
       name: aicycle_yolo
-      sha256: "603033f1b7178067d7afd9d23fd4b0a2ea3481a8fe6c7d3f0a98ec22ef49b5a2"
+      sha256: "23922f1b164816d0a084f5c4fe49fb88f88266877e9e382c0bd0b298bb3d6ea0"
       url: "https://pub.dev"
     source: hosted
-    version: "1.0.1"
+    version: "1.0.2"
   args:
     dependency: transitive
     description:

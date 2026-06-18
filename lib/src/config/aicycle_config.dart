@@ -121,22 +121,46 @@ class ValidateConfig {
 }
 
 class ModelConfig {
-  /// Confidence threshold của model (giá trị từ 0.0 đến 1.0)
-  final double confidenceThreshold;
+  /// Confidence threshold của model segmentaion (giá trị từ 0.0 đến 1.0)
+  final double segmentConfThreshold;
 
-  /// IOU threshold của model (giá trị từ 0.0 đến 1.0)
-  final double iouThreshold;
+  /// IOU threshold của model segmentation (giá trị từ 0.0 đến 1.0)
+  final double segmentIouThreshold;
+
+  /// Confidence threshold của model classification (giá trị từ 0.0 đến 1.0)
+  final double classifyConfThreshold;
+
+  /// Confidence threshold của model detection (giá trị từ 0.0 đến 1.0)
+  final double detectConfThreshold;
+
+  /// IOU threshold của model detection (giá trị từ 0.0 đến 1.0)
+  final double detectIouThreshold;
 
   ModelConfig({
-    this.confidenceThreshold = 0.7,
-    this.iouThreshold = 0.7,
+    this.segmentConfThreshold = 0.25,
+    this.segmentIouThreshold = 0.45,
+    this.classifyConfThreshold = 0.25,
+    this.detectConfThreshold = 0.25,
+    this.detectIouThreshold = 0.45,
   })  : assert(
-          confidenceThreshold >= 0.0 && confidenceThreshold <= 1.0,
-          'confidenceThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
+          segmentConfThreshold >= 0.0 && segmentConfThreshold <= 1.0,
+          'segmentationConfThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
         ),
         assert(
-          iouThreshold >= 0.0 && iouThreshold <= 1.0,
-          'iouThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
+          segmentIouThreshold >= 0.0 && segmentIouThreshold <= 1.0,
+          'segmentationIouThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
+        ),
+        assert(
+          classifyConfThreshold >= 0.0 && classifyConfThreshold <= 1.0,
+          'classifyConfThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
+        ),
+        assert(
+          detectConfThreshold >= 0.0 && detectConfThreshold <= 1.0,
+          'detectionConfThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
+        ),
+        assert(
+          detectIouThreshold >= 0.0 && detectIouThreshold <= 1.0,
+          'detectionIouThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
         );
 }
 
