@@ -1,29 +1,23 @@
-import 'package:aicycle_yolo/multi_task_yolo_view.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../../../aicycle_on_device.dart';
 import '../../../config/config_holder.dart';
-import '../../../core/cache/session_cache.dart';
 import '../../../core/constants/string_sheet.dart';
 import '../../../core/di/injection.dart';
 import '../../../core/themes/app_colors.dart';
 import '../../../core/themes/app_textstyle.dart';
 import '../../../core/utils/screen_utils.dart';
-
 import '../../folder_result/presentation/result_view.dart';
-import '../data/model/camera_message.dart';
-import 'controller/camera_controller.dart';
+import 'camera_screen.dart';
 import 'controller/camera_model_controller.dart';
-import 'widgets/bounding_box_overlay.dart';
-import 'widgets/camera_bottom_bar.dart';
-import 'widgets/car_part_label_overlay.dart';
-import 'widgets/camera_corner_bracket.dart';
-import 'widgets/camera_guide_sheet.dart';
-import 'widgets/camera_top_bar.dart';
-import 'widgets/car_progress_dialog.dart';
-import 'widgets/tool_tip.dart';
 
+/// Màn bootstrap của SDK: khởi tạo cấu hình, tạo/lấy hồ sơ (folder) và chuẩn bị
+/// model, sau đó điều hướng:
+/// - Folder đã có sẵn kết quả ([SessionCache.resultsAvailable]) → vào thẳng
+///   [ResultView] (bỏ qua tải model + chụp ảnh).
+/// - Ngược lại → tải model rồi vào [CameraScreen].
+///
+/// Đây là điểm vào public của SDK; host push widget này.
 class AICycleOnDeviceCamera extends StatefulWidget {
   const AICycleOnDeviceCamera({
     super.key,
@@ -48,19 +42,12 @@ class AICycleOnDeviceCamera extends StatefulWidget {
 
 class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
   late final CameraModelController _modelController;
-  late final CameraController _cameraController;
-  bool _guideShown = false;
-  bool _jumpedToResult = false;
+  bool _routed = false;
 
   @override
   void initState() {
     super.initState();
     AICycleConfigHolder.init(widget.aiCycleConfig);
-    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-
-    final sessionId = widget.aiCycleConfig.generalConfig.documentId;
-    _cameraController = CameraController(sessionId: sessionId)
-      ..loadCachedPhotos();
 
     _modelController = CameraModelController(
       sl.aiModelRepository,
@@ -81,105 +68,57 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
   @override
   void dispose() {
     _modelController.dispose();
-    _cameraController.dispose();
     super.dispose();
   }
 
-  /// Khi folder đã có sẵn kết quả: push thẳng ResultView (giữ camera phía dưới
-  /// để nút "Thêm ảnh tổn thất" có thể pop về chụp thêm). Chỉ chạy một lần.
-  void _maybeJumpToResult() {
-    if (_jumpedToResult) return;
-    _jumpedToResult = true;
+  /// Điều hướng đúng một lần sang màn tiếp theo, thay thế chính bootstrap này
+  /// (không animation để chuyển tiếp liền mạch từ splash).
+  void _routeOnce(WidgetBuilder builder) {
+    if (_routed) return;
+    _routed = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      Navigator.of(context).push(
-        // Không animation để không lộ cảnh chuyển giữa loading camera và
-        // loading của ResultView (tránh nháy).
+      Navigator.of(context).pushReplacement(
         PageRouteBuilder<void>(
-          pageBuilder: (_, __, ___) => ResultView(
-            sessionId: widget.aiCycleConfig.generalConfig.documentId,
-            capturedPhotos: const {},
-            onComplete: widget.onComplete,
-          ),
+          pageBuilder: (ctx, _, __) => builder(ctx),
           transitionDuration: Duration.zero,
           reverseTransitionDuration: Duration.zero,
-        ),
-      ).then((_) {
-        // User pop khỏi ResultView (vd bấm "Thêm ảnh tổn thất") → từ giờ là
-        // chụp mới, không skip upload nữa, và hiện camera.
-        if (!mounted) return;
-        SessionCache.instance.resultsAvailable = false;
-        setState(() {});
-      });
-    });
-  }
-
-  void _maybeShowGuide() {
-    if (_guideShown) return;
-    // Luồng jump-thẳng-result (folder đã có kết quả) thì không hiện guide:
-    // tránh dialog đè lên ResultView, và khi quay lại chụp thêm cũng không cần.
-    if (_jumpedToResult) return;
-    _guideShown = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      showDialog<void>(
-        context: context,
-        builder: (_) => RotatedBox(
-          quarterTurns: 1,
-          child: Material(
-            color: Colors.transparent,
-            child: Center(
-              child: CameraGuideSheet(
-                onStart: () => Navigator.of(context).pop(),
-              ),
-            ),
-          ),
         ),
       );
     });
   }
 
-  Future<bool> _onWillPop() async {
-    if (_cameraController.capturedPhotos.isEmpty) return true;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => RotatedBox(
-        quarterTurns: 1,
-        child: AlertDialog(
-          title: Text(
-            StringSheet.exitCameraTitle,
-            style: AppTextStyles.base.s16.w600(),
+  Widget _buildCameraRoute(BuildContext _) => CameraScreen(
+        aiCycleConfig: widget.aiCycleConfig,
+        carCornerModelPath: _modelController.modelPathOf(AiModelType.carCorner)!,
+        carDamageModelPath: _modelController.modelPathOf(AiModelType.carDamage)!,
+        carPartModelPath: _modelController.modelPathOf(AiModelType.carPart)!,
+        onComplete: widget.onComplete,
+      );
+
+  Widget _buildResultRoute(BuildContext _) {
+    // Model đã tải xong ở bootstrap → giữ lại path để "Thêm ảnh tổn thất" vào
+    // thẳng camera, không cần tải lại.
+    final cornerPath = _modelController.modelPathOf(AiModelType.carCorner)!;
+    final damagePath = _modelController.modelPathOf(AiModelType.carDamage)!;
+    final partPath = _modelController.modelPathOf(AiModelType.carPart)!;
+    return ResultView(
+      sessionId: widget.aiCycleConfig.generalConfig.documentId,
+      capturedPhotos: const {},
+      onComplete: widget.onComplete,
+      // "Thêm ảnh tổn thất": vào camera (paths đã sẵn), thay thế màn result.
+      onAddPhoto: (resultCtx) => Navigator.of(resultCtx).pushReplacement(
+        MaterialPageRoute<void>(
+          builder: (_) => CameraScreen(
+            aiCycleConfig: widget.aiCycleConfig,
+            carCornerModelPath: cornerPath,
+            carDamageModelPath: damagePath,
+            carPartModelPath: partPath,
+            onComplete: widget.onComplete,
           ),
-          content: Text(
-            StringSheet.exitCameraContent,
-            style: AppTextStyles.base.s14.ink400Color,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: Text(
-                StringSheet.cancel,
-                style: AppTextStyles.base.s14.w600(),
-              ),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: Text(
-                StringSheet.exitConfirm,
-                style: AppTextStyles.base.s14.w600().copyWith(
-                      color: AppColors.redA400,
-                    ),
-              ),
-            ),
-          ],
         ),
       ),
     );
-    if (confirmed == true) {
-      await PhotoSessionCache.instance
-          .clearSession(widget.aiCycleConfig.generalConfig.documentId);
-    }
-    return confirmed ?? false;
   }
 
   @override
@@ -197,17 +136,15 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
         if (!_modelController.folderReady) {
           return _buildLoading(StringSheet.creatingFolder);
         }
-        // Folder đã có sẵn kết quả → lần đầu vào nhảy thẳng sang ResultView,
-        // bỏ qua bước chuẩn bị model + chụp ảnh.
-        if (!_jumpedToResult &&
-            SessionCache.instance.resultsAvailable == true) {
-          _maybeJumpToResult();
-          return _buildLoading(StringSheet.fetchingResult);
-        }
         if (_modelController.isPreparing) return _buildPreparing();
         if (_modelController.isReady) {
-          _maybeShowGuide();
-          return _buildCamera();
+          // Model đã sẵn sàng → định tuyến: folder có kết quả thì vào thẳng
+          // ResultView, ngược lại vào CameraScreen. Model luôn được tải để
+          // khi quay lại camera (vd "Thêm ảnh tổn thất") đã sẵn dùng.
+          _routeOnce(_modelController.resultsAvailable
+              ? _buildResultRoute
+              : _buildCameraRoute);
+          return _buildLoading(StringSheet.preparingModels);
         }
         return _buildError(
           _modelController.modelError ?? StringSheet.requirementHint,
@@ -319,238 +256,6 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildTooltip() {
-    final phase = _cameraController.inspectionPhase;
-    final msg = _cameraController.message!;
-    return CameraToolTip(
-      preffixIcon: msg.icon,
-      message: msg.message,
-      // ── Close button ────────────────────────────────────────────────────
-      // Visible only on panoramicGuide. Pressing it starts damage scanning.
-      showCloseButton: phase == InspectionPhase.panoramicGuide,
-      onCloseButtonPressed: _cameraController.startDamageScanning,
-      // ── Secondary button ─────────────────────────────────────────────────
-      // detectionReady → "Thiếu tổn thất"
-      // panoramicGuide / continueOrChange → "Chuyển góc"
-      showSecondaryButton: phase == InspectionPhase.detectionReady ||
-          phase == InspectionPhase.panoramicGuide ||
-          phase == InspectionPhase.continueOrChange,
-      secondaryButtonLabel: phase == InspectionPhase.detectionReady
-          ? StringSheet.missingDamage
-          : StringSheet.changeAngle,
-      onSecondaryButtonPressed: phase == InspectionPhase.detectionReady
-          ? _cameraController.rejectDamage
-          : _cameraController.completeCurrentAngle,
-      // ── Primary button ("Xác nhận") — only during detectionReady ────────
-      showPrimaryButton: phase == InspectionPhase.detectionReady,
-      primaryButtonLabel: StringSheet.confirm,
-      onPrimaryButtonPressed: _cameraController.confirmDamage,
-    );
-  }
-
-  bool _canGoNext() {
-    // Folder đã có sẵn kết quả (đã từng jump sang result) → luôn cho phép quay
-    // lại màn result, kể cả khi chưa chụp thêm góc nào.
-    if (_jumpedToResult) return true;
-    final completed = _cameraController.completedSegments;
-    if (widget.aiCycleConfig.validateConfig.require4AnglePanoramicPhotos) {
-      return completed.length >= 4;
-    }
-    return completed.isNotEmpty;
-  }
-
-  void _showCarProgressDialog() {
-    showDialog<void>(
-      context: context,
-      barrierColor: Colors.transparent,
-      builder: (_) => AnimatedBuilder(
-        animation: _cameraController,
-        builder: (_, __) => CarProgressDialog(
-          activeIndex: _cameraController.activeSegmentIndex,
-          completedIndices: _cameraController.completedSegments,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCamera() {
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, _) async {
-        if (didPop) return;
-        final nav = Navigator.of(context);
-        if (await _onWillPop()) nav.pop();
-      },
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        appBar: AppBar(
-          toolbarHeight: 0,
-          backgroundColor: AppColors.black,
-          systemOverlayStyle: SystemUiOverlayStyle.light,
-        ),
-        body: AnimatedBuilder(
-          animation: _cameraController,
-          builder: (context, _) => Stack(
-            children: [
-              MultiTaskYOLOView(
-                detectModelPath:
-                    _modelController.modelPathOf(AiModelType.carDamage)!,
-                classifyModelPath:
-                    _modelController.modelPathOf(AiModelType.carCorner)!,
-                secondDetectModelPath:
-                    _modelController.modelPathOf(AiModelType.carPart)!,
-                controller: _cameraController.yoloController,
-                secondDetectConfidenceThreshold:
-                    widget.aiCycleConfig.modelConfig.carPartConfThreshold,
-                secondDetectIouThreshold:
-                    widget.aiCycleConfig.modelConfig.carPartIouThreshold,
-                classifyConfidenceThreshold:
-                    widget.aiCycleConfig.modelConfig.carCornerConfThreshold,
-                detectConfidenceThreshold:
-                    widget.aiCycleConfig.modelConfig.carDamageConfThreshold,
-                detectIouThreshold:
-                    widget.aiCycleConfig.modelConfig.carDamageIouThreshold,
-                onStreamingData: _cameraController.onStreamingData,
-              ),
-
-              /// Bounding boxes — only during inspection phase
-              Positioned.fill(
-                child: BoundingBoxOverlay(
-                  detections: _cameraController.showBoundingBoxes
-                      ? _cameraController.latestDetections
-                      : const [],
-                ),
-              ),
-
-              /// Nhãn tên bộ phận — chỉ khi đang căn chỉnh ảnh toàn cảnh.
-              // if (!_cameraController.isInspectionMode)
-              Positioned.fill(
-                child: CarPartLabelOverlay(
-                  detections: _cameraController.latestCarPartDetections,
-                ),
-              ),
-
-              /// Overlay UI — yellow frame corners only while taking the
-              /// panoramic photo, not during damage detail inspection.
-              if (!_cameraController.isInspectionMode)
-                Positioned(
-                  top: 83.h,
-                  left: 0.w,
-                  right: 0.w,
-                  bottom: 115.h,
-                  child: CameraFrameCorners(
-                    isSuccess:
-                        _cameraController.message?.type == MessageType.loading,
-                  ),
-                ),
-
-              /// Tooltip — buttons depend on inspection phase
-              if (_cameraController.message != null)
-                Positioned(
-                  right: 36.w,
-                  top: 105.h,
-                  bottom: 140.h,
-                  child: Center(
-                    child: RotatedBox(
-                      quarterTurns: 1,
-                      child: _buildTooltip(),
-                    ),
-                  ),
-                ),
-              // Top bar
-              CameraTopBar(
-                isTorchEnabled: _cameraController.isTorchEnabled,
-                onClose: () async {
-                  final nav = Navigator.of(context);
-                  if (await _onWillPop()) nav.pop();
-                },
-                onToggleFlash: _cameraController.toggleFlash,
-              ),
-
-              // Bottom bar
-              CameraBottomBar(
-                capturedPhotos: _cameraController.capturedPhotos,
-                activeSegmentIndex: _cameraController.activeSegmentIndex,
-                completedSegments: _cameraController.completedSegments,
-                onShowProgress: _showCarProgressDialog,
-                showNextButton: _canGoNext(),
-                onNext: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => ResultView(
-                      sessionId: widget.aiCycleConfig.generalConfig.documentId,
-                      capturedPhotos: _cameraController.capturedPhotos,
-                      onAngleUploaded: _cameraController.removeUploadedPhotos,
-                      onComplete: widget.onComplete,
-                    ),
-                  ),
-                ),
-              ),
-
-              /// Screen-blink (flash) effect — triggered on every photo capture.
-              Positioned.fill(
-                top: 83.h,
-                bottom: 115.h,
-                child: _CaptureFlashOverlay(
-                  flashTick: _cameraController.captureFlashTick,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// White screen-blink shown briefly whenever [flashTick] changes — mimics a
-/// camera shutter flash at the exact moment a photo is captured.
-class _CaptureFlashOverlay extends StatefulWidget {
-  const _CaptureFlashOverlay({required this.flashTick});
-
-  final int flashTick;
-
-  @override
-  State<_CaptureFlashOverlay> createState() => _CaptureFlashOverlayState();
-}
-
-class _CaptureFlashOverlayState extends State<_CaptureFlashOverlay>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 120),
-      reverseDuration: const Duration(milliseconds: 180),
-    );
-  }
-
-  @override
-  void didUpdateWidget(_CaptureFlashOverlay oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.flashTick != oldWidget.flashTick) {
-      _controller.forward(from: 0).then((_) => _controller.reverse());
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: FadeTransition(
-        opacity: _controller,
-        child: Container(color: Colors.white),
       ),
     );
   }

@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../../../core/cache/photo_session_cache.dart';
-import '../../../../core/cache/session_cache.dart';
 import '../../../../core/utils/gallery_helper.dart';
 import '../../domain/entity/inspection_result.dart';
 import '../../domain/repository/result_repository.dart';
@@ -45,13 +44,6 @@ class ResultController extends ChangeNotifier {
       _totalCount == 0 ? 0 : _uploadedCount / _totalCount;
 
   Future<void> start() async {
-    // Folder đã có sẵn kết quả trên server → bỏ qua upload + lưu ảnh, gọi
-    // thẳng API lấy kết quả.
-    if (SessionCache.instance.resultsAvailable == true) {
-      await _fetchResultOnly();
-      return;
-    }
-
     // Snapshot at call time — camera may add photos while we upload.
     final snapshot = {
       for (final e in capturedPhotos.entries)
@@ -59,6 +51,14 @@ class ResultController extends ChangeNotifier {
     };
 
     _totalCount = snapshot.values.fold(0, (sum, list) => sum + list.length);
+
+    // Không có ảnh nào để upload (vd folder đã có sẵn kết quả) → lấy kết quả
+    // luôn, bỏ qua upload + xin quyền + lưu gallery.
+    if (_totalCount == 0) {
+      await _fetchResultOnly();
+      return;
+    }
+
     _uploadedCount = 0;
     _status = ResultStatus.uploading;
     _errorMessage = null;

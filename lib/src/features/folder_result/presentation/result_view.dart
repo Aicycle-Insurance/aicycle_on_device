@@ -17,6 +17,7 @@ class ResultView extends StatefulWidget {
     required this.capturedPhotos,
     this.onAngleUploaded,
     this.onComplete,
+    this.onAddPhoto,
   });
 
   final String sessionId;
@@ -28,6 +29,11 @@ class ResultView extends StatefulWidget {
   /// so a repeated "next" press won't re-upload them.
   final void Function(int angleId)? onAngleUploaded;
   final Function(dynamic result)? onComplete;
+
+  /// Hành vi nút "Thêm ảnh tổn thất". Mặc định (null) là pop về màn trước
+  /// (camera). Bootstrap có thể truyền hành vi khác (vd push lại camera khi
+  /// folder đã có sẵn kết quả).
+  final void Function(BuildContext context)? onAddPhoto;
 
   @override
   State<ResultView> createState() => _ResultViewState();
@@ -51,6 +57,15 @@ class _ResultViewState extends State<ResultView> {
   void dispose() {
     _controller.dispose();
     super.dispose();
+  }
+
+  /// "Thêm ảnh tổn thất": dùng hành vi do nơi push truyền vào, mặc định pop.
+  void _addPhoto() {
+    if (widget.onAddPhoto != null) {
+      widget.onAddPhoto!(context);
+    } else {
+      Navigator.of(context).pop();
+    }
   }
 
   @override
@@ -161,7 +176,7 @@ class _ResultViewState extends State<ResultView> {
                 itemBuilder: (context, index) {
                   return ResultCard(
                     item: _controller.result![index],
-                    onAddPhoto: () => Navigator.pop(context),
+                    onAddPhoto: _addPhoto,
                   );
                 },
                 separatorBuilder: (context, index) {
@@ -187,7 +202,7 @@ class _ResultViewState extends State<ResultView> {
             // Thêm ảnh tổn thất → quay lại camera để chụp thêm.
             Expanded(
               child: FilledButton(
-                onPressed: () => Navigator.of(context).pop(),
+                onPressed: _addPhoto,
                 style: FilledButton.styleFrom(
                   backgroundColor: AppColors.primaryA500,
                   padding: EdgeInsets.symmetric(vertical: 14.h),

@@ -31,12 +31,13 @@ class ExampleHomePage extends StatefulWidget {
 
 class _ExampleHomePageState extends State<ExampleHomePage> {
   // General Config
-  final _apiTokenController = TextEditingController(text: '');
-  final _documentIdController = TextEditingController(text: 'doc-example-001');
+  final _apiTokenController = TextEditingController();
+  final _documentIdController = TextEditingController();
   final _documentNameController = TextEditingController(text: 'Test Claim');
   AiCycleEnvironment _environment = AiCycleEnvironment.stage;
   AiCycleOrg _organization = AiCycleOrg.aicycle;
   bool _loggingEnabled = true;
+  bool _savePhoto = true;
 
   // Car Information
   final _companyNameController = TextEditingController(text: 'toyota');
@@ -50,20 +51,24 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
   final _vehicleBrandIdController = TextEditingController(text: '');
 
   // Model Config
-  final _confidenceController = TextEditingController(text: '0.25');
-  final _iouController = TextEditingController(text: '0.45');
+  // Ngưỡng riêng cho từng model (để trống = dùng mặc định của SDK).
+  final _carPartConfController = TextEditingController(text: '0.1');
+  final _carPartIouController = TextEditingController(text: '0.45');
+  final _carCornerConfController = TextEditingController(text: '0.1');
+  final _carDamageConfController = TextEditingController(text: '0.1');
+  final _carDamageIouController = TextEditingController(text: '0.45');
 
   // VBI Config (chỉ bắt buộc khi Organization = vbi)
-  final _vbiAuthorityIdController = TextEditingController(text: '');
-  final _vbiSignatureKeyController = TextEditingController(text: '');
-  final _vbiExternalSessionIdController = TextEditingController(text: '');
-  final _vbiJobIdController = TextEditingController(text: '260601481');
-  final _vbiMaHangMucController = TextEditingController(text: 'TC00001');
-  final _vbiTenHangMucController = TextEditingController(text: 'Ảnh toàn cảnh');
-  final _vbiDepartmentIdController = TextEditingController(text: '000');
-  final _vbiUserIdController = TextEditingController(text: 'GIAPNH');
-  final _vbiMaTVVController = TextEditingController(text: 'TV000710');
-  final _vbiSourceController = TextEditingController(text: 'VBI4SALE_NEW');
+  final _vbiAuthorityIdController = TextEditingController();
+  final _vbiSignatureKeyController = TextEditingController();
+  final _vbiExternalSessionIdController = TextEditingController();
+  final _vbiJobIdController = TextEditingController();
+  final _vbiMaHangMucController = TextEditingController();
+  final _vbiTenHangMucController = TextEditingController();
+  final _vbiDepartmentIdController = TextEditingController();
+  final _vbiUserIdController = TextEditingController();
+  final _vbiMaTVVController = TextEditingController();
+  final _vbiSourceController = TextEditingController();
 
   // Display Config
   bool _showBackButton = true;
@@ -102,6 +107,11 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
               'Enable Logging',
               _loggingEnabled,
               (val) => setState(() => _loggingEnabled = val),
+            ),
+            _switchTile(
+              'Save Photo',
+              _savePhoto,
+              (val) => setState(() => _savePhoto = val),
             ),
 
             if (_organization == AiCycleOrg.vbi) ...[
@@ -158,13 +168,28 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
             const Divider(height: 32),
             _sectionTitle('Model Configuration'),
             _textField(
-              'Confidence Threshold (0.0 - 1.0)',
-              _confidenceController,
+              'Car Part Conf Threshold (0.0 - 1.0)',
+              _carPartConfController,
               isNumber: true,
             ),
             _textField(
-              'IOU Threshold (0.0 - 1.0)',
-              _iouController,
+              'Car Part IOU Threshold (0.0 - 1.0)',
+              _carPartIouController,
+              isNumber: true,
+            ),
+            _textField(
+              'Car Corner Conf Threshold (0.0 - 1.0)',
+              _carCornerConfController,
+              isNumber: true,
+            ),
+            _textField(
+              'Car Damage Conf Threshold (0.0 - 1.0)',
+              _carDamageConfController,
+              isNumber: true,
+            ),
+            _textField(
+              'Car Damage IOU Threshold (0.0 - 1.0)',
+              _carDamageIouController,
               isNumber: true,
             ),
 
@@ -320,6 +345,7 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
         environment: _environment,
         organization: _organization,
         loggingEnabled: _loggingEnabled,
+        savePhotoAfterShot: _savePhoto,
       ),
       carInformation: CarInformation(
         companyName: _companyNameController.text,
@@ -333,8 +359,11 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
         vehicleBrandId: _vehicleBrandIdController.text,
       ),
       modelConfig: ModelConfig(
-        confidenceThreshold: double.parse(_confidenceController.text),
-        iouThreshold: double.parse(_iouController.text),
+        carPartConfThreshold: double.parse(_carPartConfController.text),
+        carPartIouThreshold: double.parse(_carPartIouController.text),
+        carCornerConfThreshold: double.parse(_carCornerConfController.text),
+        carDamageConfThreshold: double.parse(_carDamageConfController.text),
+        carDamageIouThreshold: double.parse(_carDamageIouController.text),
       ),
       displayConfig: DisplayConfig(showBackButton: _showBackButton),
       vbiConfig: vbiConfig,

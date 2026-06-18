@@ -48,27 +48,22 @@ class StepLine extends StatelessWidget {
     return StepState.inactive;
   }
 
-  /// Canh nhãn: bước đầu canh trái, bước cuối canh phải, giữa thì căn giữa —
-  /// để mỗi nhãn nằm ngay dưới vòng tròn tương ứng.
-  TextAlign _labelAlign(int index) {
-    if (index == 0) return TextAlign.left;
-    if (index == steps.length - 1) return TextAlign.right;
-    return TextAlign.center;
-  }
-
   @override
   Widget build(BuildContext context) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Hàng vòng tròn + đường nối — đường nằm giữa theo chiều dọc vòng tròn.
+        // Hàng vòng tròn: spacer flex-1 hai đầu + đoạn line flex-2 giữa các
+        // tròn → tâm mỗi tròn rơi đúng tâm ô nhãn bên dưới, line vẫn chạm tròn.
         Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
+            const Spacer(),
             for (int i = 0; i < steps.length; i++) ...[
               _StepCircle(data: steps[i], state: _stateFor(i)),
               if (i != steps.length - 1)
                 Expanded(
+                  flex: 2,
                   child: Container(
                     height: 2.h,
                     color: i < currentIndex
@@ -77,10 +72,11 @@ class StepLine extends StatelessWidget {
                   ),
                 ),
             ],
+            const Spacer(),
           ],
         ),
         4.verticalSpace,
-        // Hàng nhãn — mỗi nhãn 1 dòng, canh dưới step tương ứng.
+        // Hàng nhãn — mỗi nhãn 1 ô bằng nhau, căn giữa dưới vòng tròn.
         Row(
           children: [
             for (int i = 0; i < steps.length; i++)
@@ -89,7 +85,7 @@ class StepLine extends StatelessWidget {
                   steps[i].label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  textAlign: _labelAlign(i),
+                  textAlign: TextAlign.center,
                   style: _stateFor(i) == StepState.active
                       ? AppTextStyles.base.s12
                           .w600()
