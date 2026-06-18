@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../../../core/cache/photo_session_cache.dart';
 import '../../../../core/utils/gallery_helper.dart';
+import '../../domain/entity/inspection_result.dart';
 import '../../domain/repository/result_repository.dart';
 
 enum ResultStatus { uploading, fetchingResult, success, error }
@@ -29,14 +30,14 @@ class ResultController extends ChangeNotifier {
   ResultStatus _status = ResultStatus.uploading;
   int _uploadedCount = 0;
   int _totalCount = 0;
-  dynamic _result;
+  List<VehiclePart>? _result;
   String? _errorMessage;
   bool _disposed = false;
 
   ResultStatus get status => _status;
   int get uploadedCount => _uploadedCount;
   int get totalCount => _totalCount;
-  dynamic get result => _result;
+  List<VehiclePart>? get result => _result;
   String? get errorMessage => _errorMessage;
 
   double get uploadProgress =>

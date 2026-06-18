@@ -85,6 +85,9 @@ class StringSheet {
       'Đang tải lên ảnh $uploaded/$total';
   static const fetchingResult = 'Đang lấy kết quả...';
   static const unknownError = 'Đã xảy ra lỗi. Vui lòng thử lại';
+  static const noDamageFound = 'Không phát hiện vết hỏng';
+  static const addDamagePhoto = 'Thêm ảnh tổn thất';
+  static const done = 'Xong';
 
   static const unknown = 'Không xác định';
 

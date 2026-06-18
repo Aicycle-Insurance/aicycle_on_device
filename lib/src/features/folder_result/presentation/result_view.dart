@@ -7,6 +7,7 @@ import '../../../core/themes/app_colors.dart';
 import '../../../core/themes/app_textstyle.dart';
 import '../../../core/utils/screen_utils.dart';
 import 'controller/result_controller.dart';
+import 'widgets/result_card.dart';
 
 class ResultView extends StatefulWidget {
   const ResultView({
@@ -126,17 +127,113 @@ class _ResultViewState extends State<ResultView> {
   }
 
   Widget _buildResult() {
-    // Notify the host app, then show placeholder.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      widget.onComplete?.call(_controller.result);
-    });
     return Scaffold(
+      backgroundColor: AppColors.divider,
       appBar: AppBar(
         centerTitle: true,
         title: Text(StringSheet.carPhoto),
+        backgroundColor: AppColors.white,
       ),
       body: Column(
-        children: [],
+        children: [
+          /// step line
+          SizedBox(height: 68.h),
+          if (_controller.result != null && _controller.result!.isNotEmpty)
+            Expanded(
+              child: ListView.separated(
+                itemCount: _controller.result!.length,
+                itemBuilder: (context, index) {
+                  return ResultCard(
+                    item: _controller.result![index],
+                    onAddPhoto: () => Navigator.pop(context),
+                  );
+                },
+                separatorBuilder: (context, index) {
+                  return SizedBox(height: 8.h);
+                },
+              ),
+            )
+          else
+            Expanded(child: _buildEmpty()),
+        ],
+      ),
+      bottomNavigationBar: _buildBottomBar(),
+    );
+  }
+
+  Widget _buildBottomBar() {
+    return Container(
+      color: AppColors.white,
+      child: SafeArea(
+        minimum: EdgeInsets.fromLTRB(16.w, 8.h, 16.w, 12.h),
+        child: Row(
+          children: [
+            // Thêm ảnh tổn thất → quay lại camera để chụp thêm.
+            Expanded(
+              child: FilledButton(
+                onPressed: () => Navigator.of(context).pop(),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.primaryA500,
+                  padding: EdgeInsets.symmetric(vertical: 14.h),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(28.r),
+                  ),
+                ),
+                child: Text(
+                  StringSheet.addDamagePhoto,
+                  style: AppTextStyles.baseWhite.s14.w600(),
+                ),
+              ),
+            ),
+            12.horizontalSpace,
+            // Xong → báo host hoàn tất rồi đóng màn kết quả.
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () {
+                  List<Map<String, dynamic>> result =
+                      _controller.result?.map((e) => e.toJson()).toList() ?? [];
+                  widget.onComplete?.call(result);
+                },
+                style: OutlinedButton.styleFrom(
+                  padding: EdgeInsets.symmetric(vertical: 14.h),
+                  side: BorderSide(color: AppColors.primaryA500),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(28.r),
+                  ),
+                ),
+                child: Text(
+                  StringSheet.done,
+                  style: AppTextStyles.base.s14.w600().copyWith(
+                        color: AppColors.primaryA500,
+                      ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmpty() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.check_circle_outline,
+            size: 48.w,
+            color: AppColors.greenA500,
+          ),
+          12.verticalSpace,
+          Text(
+            StringSheet.noDamageFound,
+            style: AppTextStyles.base.s16.w600().copyWith(
+                  color: AppColors.inkA500,
+                ),
+            textAlign: TextAlign.center,
+          ),
+        ],
       ),
     );
   }
