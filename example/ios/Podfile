@@ -46,6 +46,11 @@ post_install do |installer|
         # permission_handler: chỉ bật quyền thêm ảnh vào thư viện.
         'PERMISSION_PHOTOS_ADD_ONLY=1',
       ]
+
+      # Xcode 16 bật User Script Sandboxing mặc định cho Pods, chặn các
+      # build-phase script (vd chmod/chown) → "unable to spawn process
+      # '/usr/sbin/chown'". Tắt sandbox cho Pods để build được.
+      config.build_settings['ENABLE_USER_SCRIPT_SANDBOXING'] = 'NO'
     end
   end
 end

@@ -7,6 +7,7 @@ import '../../../../config/config_holder.dart';
 import '../../../../core/cache/session_cache.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../../../core/utils/location_services.dart';
+import '../model/result_model.dart';
 
 class ResultRemoteDataSource {
   ResultRemoteDataSource(this._client);
@@ -107,12 +108,16 @@ class ResultRemoteDataSource {
   }
 
   /// GET insurance/v2/claimfolders/$sessionId/external-segment-result
-  Future<dynamic> fetchResult() async {
+  Future<List<VehiclePartModel>> fetchResult() async {
     final config = AICycleConfigHolder.config;
     final sessionId =
         config.vbiConfig?.externalSessionId ?? config.generalConfig.documentId;
-    return _client.get<dynamic>(
+    final list = await _client.get<List<dynamic>>(
       '/insurance/v2/claimfolders/$sessionId/external-segment-result',
     );
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(VehiclePartModel.fromJson)
+        .toList();
   }
 }

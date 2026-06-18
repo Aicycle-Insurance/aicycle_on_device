@@ -36,6 +36,8 @@
 	<string>Ứng dụng cần quyền vị trí để ghi nhận địa điểm giám định xe.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Ứng dụng cần quyền lưu ảnh xe đã chụp vào thư viện ảnh.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Ứng dụng cần quyền truy cập thư viện ảnh để lưu và chọn ảnh xe phục vụ giám định.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

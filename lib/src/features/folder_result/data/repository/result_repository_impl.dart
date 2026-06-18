@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import '../../domain/entity/inspection_result.dart';
 import '../../domain/repository/result_repository.dart';
 import '../datasource/result_remote_datasource.dart';
 
@@ -21,5 +22,8 @@ class ResultRepositoryImpl implements ResultRepository {
       );
 
   @override
-  Future<dynamic> fetchResult() => _dataSource.fetchResult();
+  Future<List<VehiclePart>> fetchResult() async {
+    final models = await _dataSource.fetchResult();
+    return models.map((e) => e.toEntity()).toList();
+  }
 }
