@@ -121,45 +121,45 @@ class ValidateConfig {
 }
 
 class ModelConfig {
-  /// Confidence threshold của model segmentaion (giá trị từ 0.0 đến 1.0)
-  final double segmentConfThreshold;
+  /// Confidence threshold của model car part detection (giá trị từ 0.0 đến 1.0)
+  final double carPartConfThreshold;
 
-  /// IOU threshold của model segmentation (giá trị từ 0.0 đến 1.0)
-  final double segmentIouThreshold;
+  /// IOU threshold của model car part detection (giá trị từ 0.0 đến 1.0)
+  final double carPartIouThreshold;
 
   /// Confidence threshold của model classification (giá trị từ 0.0 đến 1.0)
-  final double classifyConfThreshold;
+  final double carCornerConfThreshold;
 
   /// Confidence threshold của model detection (giá trị từ 0.0 đến 1.0)
-  final double detectConfThreshold;
+  final double carDamageConfThreshold;
 
   /// IOU threshold của model detection (giá trị từ 0.0 đến 1.0)
-  final double detectIouThreshold;
+  final double carDamageIouThreshold;
 
   ModelConfig({
-    this.segmentConfThreshold = 0.25,
-    this.segmentIouThreshold = 0.45,
-    this.classifyConfThreshold = 0.25,
-    this.detectConfThreshold = 0.25,
-    this.detectIouThreshold = 0.45,
+    this.carPartConfThreshold = 0.25,
+    this.carPartIouThreshold = 0.45,
+    this.carCornerConfThreshold = 0.25,
+    this.carDamageConfThreshold = 0.25,
+    this.carDamageIouThreshold = 0.45,
   })  : assert(
-          segmentConfThreshold >= 0.0 && segmentConfThreshold <= 1.0,
-          'segmentationConfThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
+          carPartConfThreshold >= 0.0 && carPartConfThreshold <= 1.0,
+          'carPartConfThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
         ),
         assert(
-          segmentIouThreshold >= 0.0 && segmentIouThreshold <= 1.0,
-          'segmentationIouThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
+          carPartIouThreshold >= 0.0 && carPartIouThreshold <= 1.0,
+          'carPartIouThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
         ),
         assert(
-          classifyConfThreshold >= 0.0 && classifyConfThreshold <= 1.0,
+          carCornerConfThreshold >= 0.0 && carCornerConfThreshold <= 1.0,
           'classifyConfThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
         ),
         assert(
-          detectConfThreshold >= 0.0 && detectConfThreshold <= 1.0,
+          carDamageConfThreshold >= 0.0 && carDamageConfThreshold <= 1.0,
           'detectionConfThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
         ),
         assert(
-          detectIouThreshold >= 0.0 && detectIouThreshold <= 1.0,
+          carDamageIouThreshold >= 0.0 && carDamageIouThreshold <= 1.0,
           'detectionIouThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
         );
 }

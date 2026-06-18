@@ -9,7 +9,6 @@ import '../../data/model/camera_message.dart';
 import '../../data/model/car_angle.dart';
 import '../../data/model/classify_output.dart';
 import '../../data/model/detection_output.dart';
-import '../../data/model/sementation_output.dart';
 
 /// Sub-states of the damage inspection flow (active when panoramic photo is taken).
 enum InspectionPhase {
@@ -59,12 +58,12 @@ class CameraController extends ChangeNotifier {
   /// Angles fully completed (user pressed "Chuyển góc").
   final Set<int> _completedSegments = {};
 
-  /// Class names từ frame segment mới nhất.
-  Set<String> _latestSegmentClasses = {};
+  /// Class names bộ phận từ frame car-part detect (model thứ 2) mới nhất.
+  Set<String> _latestCarPartClasses = {};
 
-  /// Chi tiết bộ phận (kèm bounding box) từ frame segment mới nhất —
+  /// Chi tiết bộ phận (kèm bounding box) từ frame car-part detect mới nhất —
   /// dùng để vẽ nhãn tên bộ phận lên màn hình.
-  List<SegmentDetection> _latestSegmentDetections = [];
+  List<DetectionResult> _latestCarPartDetections = [];
 
   /// Detections từ frame detect mới nhất.
   List<DetectionResult> _latestDetections = [];
@@ -91,8 +90,8 @@ class CameraController extends ChangeNotifier {
   CameraMessage? get message => _message;
   int get captureFlashTick => _captureFlashTick;
   List<DetectionResult> get latestDetections => _latestDetections;
-  List<SegmentDetection> get latestSegmentDetections =>
-      _latestSegmentDetections;
+  List<DetectionResult> get latestCarPartDetections =>
+      _latestCarPartDetections;
   InspectionPhase? get inspectionPhase => _inspectionPhase;
 
   /// True when actively inspecting for damage (panoramic already taken).
@@ -117,7 +116,13 @@ class CameraController extends ChangeNotifier {
   // ── Streaming data ────────────────────────────────────────────────────────
 
   void onStreamingData(Map<String, dynamic> data) {
-    if (data['type'] == 'classify') {
+    final type = data['type'];
+    // Hai model detect đều trả type=='detect'; phân biệt bằng modelId:
+    //   'detect'  -> car damage (model chính)
+    //   'detect2' -> car part   (model thứ 2)
+    final modelId = data['modelId'];
+    if (type == 'classify') {
+      // carCorner — phân loại góc xe.
       if (_classificationLocked) return;
       final output = ClassifyOutput.fromJson(Map<String, dynamic>.from(data));
       final segment = CarAngle.segmentOf(output.classification.top1);
@@ -131,15 +136,16 @@ class CameraController extends ChangeNotifier {
       } else {
         updateMessage();
       }
-    } else if (data['type'] == 'segment') {
-      final output =
-          SegmentationOutput.fromJson(Map<String, dynamic>.from(data));
-      _latestSegmentClasses = output.detections.map((d) => d.className).toSet();
-      _latestSegmentDetections = output.detections;
+    } else if (type == 'detect' && modelId == 'detect2') {
+      // carPart — model detect bộ phận, dùng để căn ảnh toàn cảnh.
+      final output = DetectionOutput.fromJson(Map<String, dynamic>.from(data));
+      _latestCarPartClasses = output.detections.map((d) => d.className).toSet();
+      _latestCarPartDetections = output.detections;
       updateMessage();
       notifyListeners();
       return;
-    } else if (data['type'] == 'detect') {
+    } else if (type == 'detect') {
+      // carDamage — model detect tổn thất (model chính).
       final output = DetectionOutput.fromJson(Map<String, dynamic>.from(data));
       _latestDetections = output.detections;
       // Phát hiện tổn thất → hiển thị xác nhận ngay, không chờ timer 5s.
@@ -202,7 +208,7 @@ class CameraController extends ChangeNotifier {
     if (_completedSegments.contains(_activeSegmentIndex)) return;
     if (_panoramicCapturedSegments.contains(_activeSegmentIndex)) return;
     if (_isCapturing) return;
-    _updateMessageSegment(_latestSegmentClasses, _activeSegmentIndex!);
+    _updateMessageSegment(_latestCarPartClasses, _activeSegmentIndex!);
   }
 
   void clearMessage() => _setMessage(null);

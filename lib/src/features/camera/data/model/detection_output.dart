@@ -1,4 +1,3 @@
-import 'sementation_output.dart';
 /*
 Móp, bẹp(thụng)
 Vỡ, nứt
@@ -75,4 +74,43 @@ class DetectionResult {
   @override
   String toString() =>
       'DetectionResult(className: $className, confidence: $confidence)';
+}
+
+class NormalizedBox {
+  final double left;
+  final double top;
+  final double right;
+  final double bottom;
+
+  const NormalizedBox({
+    required this.left,
+    required this.top,
+    required this.right,
+    required this.bottom,
+  });
+
+  double get width => right - left;
+  double get height => bottom - top;
+  double get centerX => (left + right) / 2;
+  double get centerY => (top + bottom) / 2;
+
+  factory NormalizedBox.fromJson(Map<String, dynamic> json) {
+    return NormalizedBox(
+      left: (json['left'] as num).toDouble(),
+      top: (json['top'] as num).toDouble(),
+      right: (json['right'] as num).toDouble(),
+      bottom: (json['bottom'] as num).toDouble(),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'left': left,
+        'top': top,
+        'right': right,
+        'bottom': bottom,
+      };
+
+  @override
+  String toString() =>
+      'NormalizedBox(left: $left, top: $top, right: $right, bottom: $bottom)';
 }

@@ -357,19 +357,19 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
                     _modelController.modelPathOf(AiModelType.carDamage)!,
                 classifyModelPath:
                     _modelController.modelPathOf(AiModelType.carCorner)!,
-                segmentModelPath:
+                secondDetectModelPath:
                     _modelController.modelPathOf(AiModelType.carPart)!,
                 controller: _cameraController.yoloController,
-                segmentConfidenceThreshold:
-                    widget.aiCycleConfig.modelConfig.segmentConfThreshold,
-                segmentIouThreshold:
-                    widget.aiCycleConfig.modelConfig.segmentIouThreshold,
+                secondDetectConfidenceThreshold:
+                    widget.aiCycleConfig.modelConfig.carPartConfThreshold,
+                secondDetectIouThreshold:
+                    widget.aiCycleConfig.modelConfig.carPartIouThreshold,
                 classifyConfidenceThreshold:
-                    widget.aiCycleConfig.modelConfig.classifyConfThreshold,
+                    widget.aiCycleConfig.modelConfig.carCornerConfThreshold,
                 detectConfidenceThreshold:
-                    widget.aiCycleConfig.modelConfig.detectConfThreshold,
+                    widget.aiCycleConfig.modelConfig.carDamageConfThreshold,
                 detectIouThreshold:
-                    widget.aiCycleConfig.modelConfig.detectIouThreshold,
+                    widget.aiCycleConfig.modelConfig.carDamageIouThreshold,
                 onStreamingData: _cameraController.onStreamingData,
               ),
 
@@ -386,7 +386,7 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
               // if (!_cameraController.isInspectionMode)
               Positioned.fill(
                 child: CarPartLabelOverlay(
-                  detections: _cameraController.latestSegmentDetections,
+                  detections: _cameraController.latestCarPartDetections,
                 ),
               ),
 

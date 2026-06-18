@@ -2,9 +2,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../../data/model/sementation_output.dart';
+import '../../data/model/detection_output.dart';
 
-/// Vẽ nhãn tên bộ phận lên trên các vùng segment.
+/// Vẽ nhãn tên bộ phận lên trên các vùng bộ phận detect được.
 ///
 /// Chỉ hiển thị các bộ phận nằm trong [_partDisplayNames]; tên thô từ model
 /// được ánh xạ sang tên hiển thị rút gọn. Bộ phận không nằm trong danh sách
@@ -12,9 +12,9 @@ import '../../data/model/sementation_output.dart';
 class CarPartLabelOverlay extends StatelessWidget {
   const CarPartLabelOverlay({super.key, required this.detections});
 
-  final List<SegmentDetection> detections;
+  final List<DetectionResult> detections;
 
-  /// Ánh xạ tên thô (model segment) → tên hiển thị rút gọn.
+  /// Ánh xạ tên thô (model car part detect) → tên hiển thị rút gọn.
   /// Chỉ những bộ phận có trong map này mới được hiển thị nhãn.
   static const Map<String, String> _partDisplayNames = {
     'Ba đờ sốc trước': 'Ba đờ sốc trước',
@@ -41,7 +41,7 @@ class CarPartLabelOverlay extends StatelessWidget {
 class _CarPartLabelPainter extends CustomPainter {
   _CarPartLabelPainter(this.detections);
 
-  final List<SegmentDetection> detections;
+  final List<DetectionResult> detections;
 
   @override
   void paint(Canvas canvas, Size size) {
