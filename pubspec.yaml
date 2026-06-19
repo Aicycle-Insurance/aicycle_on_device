@@ -25,6 +25,9 @@ dependencies:
   gallery_saver_plus: ^3.2.9
   permission_handler: ^11.3.1
 
+  # giữ màn hình sáng khi camera đang stream
+  wakelock_plus: ^1.6.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -1,6 +1,7 @@
 import 'package:aicycle_yolo/multi_task_yolo_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../../../aicycle_on_device.dart';
 import '../../../core/constants/string_sheet.dart';
@@ -51,6 +52,8 @@ class _CameraScreenState extends State<CameraScreen> {
   void initState() {
     super.initState();
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    // Giữ màn hình sáng trong suốt lúc camera đang stream.
+    WakelockPlus.enable();
 
     final sessionId = widget.aiCycleConfig.generalConfig.documentId;
     _cameraController = CameraController(sessionId: sessionId)
@@ -61,6 +64,8 @@ class _CameraScreenState extends State<CameraScreen> {
 
   @override
   void dispose() {
+    // Cho phép màn hình tự tắt trở lại khi rời camera.
+    WakelockPlus.disable();
     _cameraController.dispose();
     super.dispose();
   }
