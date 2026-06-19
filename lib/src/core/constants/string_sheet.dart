@@ -88,6 +88,7 @@ class StringSheet {
   static const noDamageFound = 'Không phát hiện vết hỏng';
   static const addDamagePhoto = 'Thêm ảnh tổn thất';
   static const done = 'Xong';
+  static const viewResult = 'Xem kết quả';
 
   static const unknown = 'Không xác định';
 

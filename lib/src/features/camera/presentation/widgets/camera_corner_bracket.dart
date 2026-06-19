@@ -93,7 +93,7 @@ class _CornerPainter extends CustomPainter {
 class CameraFrameCorners extends StatelessWidget {
   const CameraFrameCorners({
     super.key,
-    this.armLength = 32.0,
+    this.armLength = 100.0,
     this.cornerRadius = 16.0,
     this.strokeWidth = 4.0,
     this.color = const Color(0xFFFFD600),

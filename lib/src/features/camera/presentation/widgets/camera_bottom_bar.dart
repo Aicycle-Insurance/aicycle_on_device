@@ -15,16 +15,16 @@ class CameraBottomBar extends StatelessWidget {
     required this.activeSegmentIndex,
     required this.completedSegments,
     required this.onShowProgress,
-    this.showNextButton = false,
-    this.onNext,
+    this.onCapture,
   });
 
   final Map<int, List<Uint8List>> capturedPhotos;
   final int? activeSegmentIndex;
   final Set<int> completedSegments;
   final VoidCallback onShowProgress;
-  final bool showNextButton;
-  final VoidCallback? onNext;
+
+  /// Chụp ảnh thủ công (nút shutter).
+  final VoidCallback? onCapture;
 
   @override
   Widget build(BuildContext context) {
@@ -39,7 +39,7 @@ class CameraBottomBar extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             _buildThumbnail(),
-            if (showNextButton) _buildNextButton() else SizedBox(width: 48.w),
+            _buildShutterButton(),
             GestureDetector(
               onTap: onShowProgress,
               child: CarProgressRing(
@@ -53,20 +53,26 @@ class CameraBottomBar extends StatelessWidget {
     );
   }
 
-  Widget _buildNextButton() {
+  /// Nút chụp thủ công kiểu shutter: vòng trắng ngoài + tròn trắng trong.
+  Widget _buildShutterButton() {
     return GestureDetector(
-      onTap: onNext,
+      onTap: onCapture,
       child: Container(
         width: 66.w,
         height: 66.w,
         decoration: BoxDecoration(
-          color: AppColors.primaryA500,
           shape: BoxShape.circle,
+          border: Border.all(color: AppColors.white, width: 3),
         ),
-        child: Icon(
-          Icons.arrow_downward_rounded,
-          color: AppColors.white,
-          size: 34.r,
+        child: Center(
+          child: Container(
+            width: 52.w,
+            height: 52.w,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: AppColors.white,
+            ),
+          ),
         ),
       ),
     );

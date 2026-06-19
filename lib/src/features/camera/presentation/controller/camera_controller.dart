@@ -90,8 +90,7 @@ class CameraController extends ChangeNotifier {
   CameraMessage? get message => _message;
   int get captureFlashTick => _captureFlashTick;
   List<DetectionResult> get latestDetections => _latestDetections;
-  List<DetectionResult> get latestCarPartDetections =>
-      _latestCarPartDetections;
+  List<DetectionResult> get latestCarPartDetections => _latestCarPartDetections;
   InspectionPhase? get inspectionPhase => _inspectionPhase;
 
   /// True when actively inspecting for damage (panoramic already taken).
@@ -166,20 +165,27 @@ class CameraController extends ChangeNotifier {
 
   /// Captures a JPEG frame, stores it in memory and on disk.
   /// Does NOT modify [_completedSegments] — completion is via [completeCurrentAngle].
-  Future<Uint8List?> capturePhoto() async {
+  Future<Uint8List?> capturePhoto({
+    bool immediate = false,
+    int? segment,
+    bool flashTick = true,
+  }) async {
     if (_isCapturing) return null;
     _isCapturing = true;
     notifyListeners();
     try {
-      /// Chụp quá nhanh, người dùng chưa kịp đọc message -> delay 3s
-      await Future.delayed(const Duration(seconds: 3));
-      _captureFlashTick++;
+      /// Chụp tự động quá nhanh, người dùng chưa kịp đọc message -> delay 3s.
+      /// Chụp thủ công ([immediate]) thì chụp ngay.
+      if (!immediate) await Future.delayed(const Duration(seconds: 3));
+      if (flashTick) {
+        _captureFlashTick++;
+      }
 
       final bytes = await yoloController.capturePhoto();
-      if (_activeSegmentIndex != null) {
-        _capturedPhotos.putIfAbsent(_activeSegmentIndex!, () => []).add(bytes);
-        PhotoSessionCache.instance
-            .savePhoto(_sessionId, _activeSegmentIndex!, bytes);
+      final seg = segment ?? _activeSegmentIndex;
+      if (seg != null) {
+        _capturedPhotos.putIfAbsent(seg, () => []).add(bytes);
+        PhotoSessionCache.instance.savePhoto(_sessionId, seg, bytes);
       }
       notifyListeners();
       return bytes;
@@ -190,6 +196,11 @@ class CameraController extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  /// Chụp thủ công bằng nút shutter: chụp ngay, lưu vào góc đang active (mặc
+  /// định góc 0 nếu chưa phân loại được góc).
+  Future<void> manualCapture() =>
+      capturePhoto(immediate: true, segment: _activeSegmentIndex ?? 0);
 
   // ── Panoramic message logic ───────────────────────────────────────────────
 
@@ -289,7 +300,9 @@ class CameraController extends ChangeNotifier {
     // Sau 5 s không bấm gì → tự động chụp.
     _autoCaptureTimer?.cancel();
     _autoCaptureTimer = Timer(const Duration(seconds: 5), () {
-      if (_inspectionPhase == InspectionPhase.detectionReady) confirmDamage();
+      if (_inspectionPhase == InspectionPhase.detectionReady) {
+        confirmDamage(flashTick: false);
+      }
     });
   }
 
@@ -324,14 +337,12 @@ class CameraController extends ChangeNotifier {
 
   /// User pressed "Xác nhận" (hoặc auto sau 5 s) — chụp ảnh tổn thất, hiện
   /// message "Tiếp tục di chuyển camera…" trong 5 s rồi quay lại scanning.
-  Future<void> confirmDamage() async {
+  Future<void> confirmDamage({bool flashTick = true}) async {
     _autoCaptureTimer?.cancel();
     _autoCaptureTimer = null;
     _inspectionPhase = InspectionPhase.capturingDamage;
-    _setMessage(CameraMessage(
-        message: StringSheet.holdStillGuide, type: MessageType.loading));
 
-    await capturePhoto();
+    await capturePhoto(immediate: true, flashTick: flashTick);
 
     await _showContinueThenScan();
   }

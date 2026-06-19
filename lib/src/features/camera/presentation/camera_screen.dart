@@ -5,11 +5,9 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../../../aicycle_on_device.dart';
 import '../../../core/constants/string_sheet.dart';
-import '../../../core/di/injection.dart';
 import '../../../core/themes/app_colors.dart';
 import '../../../core/themes/app_textstyle.dart';
 import '../../../core/utils/screen_utils.dart';
-import '../../folder_result/presentation/controller/result_controller.dart';
 import '../data/model/camera_message.dart';
 import 'controller/camera_controller.dart';
 import 'widgets/bounding_box_overlay.dart';
@@ -20,6 +18,7 @@ import 'widgets/camera_guide_sheet.dart';
 import 'widgets/camera_top_bar.dart';
 import 'widgets/car_progress_dialog.dart';
 import 'widgets/tool_tip.dart';
+import 'widgets/view_result_button.dart';
 
 /// Màn camera thuần — chụp ảnh giám định. Nhận các đường dẫn model đã được
 /// chuẩn bị sẵn (folder + tải model do màn bootstrap [AICycleOnDeviceCamera]
@@ -32,6 +31,7 @@ class CameraScreen extends StatefulWidget {
     required this.carDamageModelPath,
     required this.carPartModelPath,
     this.onComplete,
+    this.onViewResult,
   });
 
   final AICycleConfig aiCycleConfig;
@@ -39,6 +39,10 @@ class CameraScreen extends StatefulWidget {
   final String carDamageModelPath;
   final String carPartModelPath;
   final Function()? onComplete;
+
+  /// Bấm "Xem kết quả": trả ảnh đã chụp lên bootstrap để chuyển sang pha upload
+  /// (bootstrap sẽ gỡ camera này khỏi cây → giải phóng tài nguyên).
+  final void Function(Map<int, List<Uint8List>> photos)? onViewResult;
 
   @override
   State<CameraScreen> createState() => _CameraScreenState();
@@ -183,134 +187,15 @@ class _CameraScreenState extends State<CameraScreen> {
     );
   }
 
-  /// Nhấn "Next": upload toàn bộ ảnh (kèm loading), KHÔNG gọi API lấy kết quả,
-  /// rồi báo host qua [onComplete] và thoát màn camera. Màn ResultView đã được
-  /// loại khỏi flow (vẫn giữ file).
-  Future<void> _uploadAndComplete() async {
-    final uploadController = ResultController(
-      sessionId: widget.aiCycleConfig.generalConfig.documentId,
-      capturedPhotos: _cameraController.capturedPhotos,
-      repository: sl.resultRepository,
-      onAngleUploaded: _cameraController.removeUploadedPhotos,
-      fetchResultAfterUpload: false,
-    );
-
-    final navigator = Navigator.of(context);
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => PopScope(
-        canPop: false,
-        child: RotatedBox(
-          quarterTurns: 1,
-          child: Center(
-            child: AnimatedBuilder(
-              animation: uploadController,
-              builder: (_, __) => _buildUploadingCard(uploadController),
-            ),
-          ),
-        ),
-      ),
-    );
-
-    await uploadController.start();
-    if (!mounted) {
-      uploadController.dispose();
-      return;
-    }
-    navigator.pop(); // đóng dialog loading
-
-    if (uploadController.status == ResultStatus.error) {
-      final message = uploadController.errorMessage;
-      uploadController.dispose();
-      _showUploadError(message);
-      return;
-    }
-    uploadController.dispose();
-
-    // Upload xong → báo host (không có kết quả vì đã bỏ bước fetch) rồi thoát.
-    widget.onComplete?.call();
-    navigator.pop();
-  }
-
-  Widget _buildUploadingCard(ResultController controller) {
-    return Material(
-      color: Colors.transparent,
-      child: Container(
-        padding: EdgeInsets.all(24.r),
-        decoration: BoxDecoration(
-          color: AppColors.white,
-          borderRadius: BorderRadius.circular(16.r),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              width: 48.w,
-              height: 48.w,
-              child: CircularProgressIndicator(
-                value: controller.uploadProgress > 0
-                    ? controller.uploadProgress
-                    : null,
-                strokeWidth: 4,
-                color: AppColors.primaryA500,
-                backgroundColor: AppColors.primaryA200,
-              ),
-            ),
-            16.verticalSpace,
-            Text(
-              StringSheet.uploadingPhotos(
-                controller.uploadedCount,
-                controller.totalCount,
-              ),
-              style: AppTextStyles.base.s14.ink400Color,
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showUploadError(String? message) {
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => RotatedBox(
-        quarterTurns: 1,
-        child: AlertDialog(
-          title: Text(
-            StringSheet.unknownError,
-            style: AppTextStyles.base.s16.w600(),
-          ),
-          content: Text(
-            message ?? StringSheet.unknownError,
-            style: AppTextStyles.base.s14.ink400Color,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: Text(
-                StringSheet.cancel,
-                style: AppTextStyles.base.s14.w600(),
-              ),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                _uploadAndComplete();
-              },
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.primaryA500,
-              ),
-              child: Text(
-                StringSheet.retry,
-                style: AppTextStyles.baseWhite.s14.w600(),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+  /// "Xem kết quả": trả ảnh đã chụp lên bootstrap để chuyển sang pha upload.
+  /// Bootstrap sẽ gỡ CameraScreen này khỏi cây → dispose → camera idle/giải
+  /// phóng tài nguyên.
+  void _goToResult() {
+    final photos = {
+      for (final e in _cameraController.capturedPhotos.entries)
+        e.key: List<Uint8List>.from(e.value),
+    };
+    widget.onViewResult?.call(photos);
   }
 
   @override
@@ -402,15 +287,25 @@ class _CameraScreenState extends State<CameraScreen> {
                 onToggleFlash: _cameraController.toggleFlash,
               ),
 
-              // Bottom bar
+              // Bottom bar (thumbnail + nút chụp thủ công + progress ring)
               CameraBottomBar(
                 capturedPhotos: _cameraController.capturedPhotos,
                 activeSegmentIndex: _cameraController.activeSegmentIndex,
                 completedSegments: _cameraController.completedSegments,
                 onShowProgress: _showCarProgressDialog,
-                showNextButton: _canGoNext(),
-                onNext: _uploadAndComplete,
+                onCapture: _cameraController.manualCapture,
               ),
+
+              /// Nút "Xem kết quả" (2 bước chống chạm nhầm) — góc dưới phải.
+              if (_canGoNext())
+                Positioned(
+                  left: 24.w,
+                  bottom: 130.h,
+                  child: RotatedBox(
+                    quarterTurns: 1,
+                    child: ViewResultButton(onPressed: _goToResult),
+                  ),
+                ),
 
               /// Screen-blink (flash) effect — triggered on every photo capture.
               Positioned.fill(

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import '../../../../aicycle_on_device.dart';
@@ -9,6 +11,7 @@ import '../../../core/themes/app_textstyle.dart';
 import '../../../core/utils/screen_utils.dart';
 import 'camera_screen.dart';
 import 'controller/camera_model_controller.dart';
+import 'upload_view.dart';
 
 /// Màn bootstrap của SDK: khởi tạo cấu hình, tạo/lấy hồ sơ (folder) và chuẩn bị
 /// model, sau đó vào [CameraScreen].
@@ -38,7 +41,10 @@ class AICycleOnDeviceCamera extends StatefulWidget {
 
 class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
   late final CameraModelController _modelController;
-  bool _routed = false;
+
+  /// Khi != null: đang ở pha upload (đã bấm "Xem kết quả"). CameraScreen bị gỡ
+  /// khỏi cây widget → camera dispose (idle/giải phóng), bootstrap hiện UploadView.
+  Map<int, List<Uint8List>>? _uploadPhotos;
 
   @override
   void initState() {
@@ -67,24 +73,7 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
     super.dispose();
   }
 
-  /// Điều hướng đúng một lần sang màn tiếp theo, thay thế chính bootstrap này
-  /// (không animation để chuyển tiếp liền mạch từ splash).
-  void _routeOnce(WidgetBuilder builder) {
-    if (_routed) return;
-    _routed = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        PageRouteBuilder<void>(
-          pageBuilder: (ctx, _, __) => builder(ctx),
-          transitionDuration: Duration.zero,
-          reverseTransitionDuration: Duration.zero,
-        ),
-      );
-    });
-  }
-
-  Widget _buildCameraRoute(BuildContext _) => CameraScreen(
+  Widget _buildCamera() => CameraScreen(
         aiCycleConfig: widget.aiCycleConfig,
         carCornerModelPath:
             _modelController.modelPathOf(AiModelType.carCorner)!,
@@ -92,6 +81,9 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
             _modelController.modelPathOf(AiModelType.carDamage)!,
         carPartModelPath: _modelController.modelPathOf(AiModelType.carPart)!,
         onComplete: widget.onComplete,
+        // Bấm "Xem kết quả" → chuyển sang pha upload: CameraScreen bị gỡ khỏi
+        // cây (camera idle/giải phóng), bootstrap render UploadView.
+        onViewResult: (photos) => setState(() => _uploadPhotos = photos),
       );
 
   @override
@@ -111,10 +103,16 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
         }
         if (_modelController.isPreparing) return _buildPreparing();
         if (_modelController.isReady) {
-          // Model tải xong → vào thẳng CameraScreen. Màn ResultView đã được bỏ
-          // khỏi flow; Next ở camera sẽ upload rồi gọi onComplete.
-          _routeOnce(_buildCameraRoute);
-          return _buildLoading(StringSheet.preparingModels);
+          // Đang upload → hiện UploadView (camera đã được gỡ → idle).
+          if (_uploadPhotos != null) {
+            return UploadView(
+              sessionId: widget.aiCycleConfig.generalConfig.documentId,
+              capturedPhotos: _uploadPhotos!,
+              onComplete: widget.onComplete,
+            );
+          }
+          // Model tải xong → CameraScreen. ResultView đã bỏ khỏi flow.
+          return _buildCamera();
         }
         return _buildError(
           _modelController.modelError ?? StringSheet.requirementHint,
