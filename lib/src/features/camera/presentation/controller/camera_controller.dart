@@ -332,7 +332,7 @@ class CameraController extends ChangeNotifier {
   void rejectDamage() {
     _autoCaptureTimer?.cancel();
     _autoCaptureTimer = null;
-    _showContinueThenScan();
+    _showContinueThenScan(confirm: false);
   }
 
   /// User pressed "Xác nhận" (hoặc auto sau 5 s) — chụp ảnh tổn thất, hiện
@@ -344,15 +344,17 @@ class CameraController extends ChangeNotifier {
 
     await capturePhoto(immediate: true, flashTick: flashTick);
 
-    await _showContinueThenScan();
+    await _showContinueThenScan(confirm: true);
   }
 
   /// Hiển thị message "Tiếp tục di chuyển camera…" trong 5 s rồi quay lại
   /// scanning. Dùng chung cho cả "Xác nhận" và "Thiếu tổn thất".
-  Future<void> _showContinueThenScan() async {
+  Future<void> _showContinueThenScan({required bool confirm}) async {
     _inspectionPhase = InspectionPhase.continueOrChange;
     _setMessage(CameraMessage(
-      message: StringSheet.continueOrChangeGuide,
+      message: confirm
+          ? StringSheet.continueOrChangeGuide
+          : StringSheet.moveCameraToMissing,
       type: MessageType.info,
     ));
 

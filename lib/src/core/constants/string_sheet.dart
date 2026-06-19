@@ -58,6 +58,8 @@ class StringSheet {
   static const confirm = 'Xác nhận';
   static const continueOrChangeGuide =
       'Tiếp tục di chuyển camera đến vùng có tổn thất khác hoặc chuyển góc';
+  static const moveCameraToMissing =
+      'Hãy đưa camera lại gần vị trí tổn thất còn thiếu';
   static const noDamageDetectedGuide =
       'Tổn thất chưa được nhận diện. Vui lòng chụp vị trí khác, '
       'ảnh còn thiếu sẽ được bổ sung trước khi kết thúc';
