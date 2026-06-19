@@ -55,10 +55,6 @@ class CameraModelController extends ChangeNotifier {
   double get downloadProgress => _downloadProgress;
   String? modelPathOf(AiModelType type) => _modelPaths[type];
 
-  /// `true` nếu folder đã có sẵn kết quả trên server → không cần tải model,
-  /// bootstrap sẽ vào thẳng màn kết quả.
-  bool get resultsAvailable => SessionCache.instance.resultsAvailable == true;
-
   // ----- Init -----
 
   /// Initializes the controller with configuration and model paths.

@@ -21,7 +21,7 @@ class AICycleOnDevice extends StatefulWidget {
 
   final AICycleConfig aiCycleConfig;
   final Function(String error)? onError;
-  final Function(dynamic data)? onComplete;
+  final Function()? onComplete;
 
   @override
   State<AICycleOnDevice> createState() => _AICycleOnDeviceState();

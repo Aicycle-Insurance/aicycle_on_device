@@ -7,15 +7,11 @@ import '../../../core/di/injection.dart';
 import '../../../core/themes/app_colors.dart';
 import '../../../core/themes/app_textstyle.dart';
 import '../../../core/utils/screen_utils.dart';
-import '../../folder_result/presentation/result_view.dart';
 import 'camera_screen.dart';
 import 'controller/camera_model_controller.dart';
 
 /// Màn bootstrap của SDK: khởi tạo cấu hình, tạo/lấy hồ sơ (folder) và chuẩn bị
-/// model, sau đó điều hướng:
-/// - Folder đã có sẵn kết quả ([SessionCache.resultsAvailable]) → vào thẳng
-///   [ResultView] (bỏ qua tải model + chụp ảnh).
-/// - Ngược lại → tải model rồi vào [CameraScreen].
+/// model, sau đó vào [CameraScreen].
 ///
 /// Đây là điểm vào public của SDK; host push widget này.
 class AICycleOnDeviceCamera extends StatefulWidget {
@@ -31,7 +27,7 @@ class AICycleOnDeviceCamera extends StatefulWidget {
 
   final AICycleConfig aiCycleConfig;
   final Function(String error)? onError;
-  final Function(dynamic data)? onComplete;
+  final Function()? onComplete;
   final String? carCornerModelPath;
   final String? carDamageModelPath;
   final String? carPartModelPath;
@@ -90,36 +86,13 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
 
   Widget _buildCameraRoute(BuildContext _) => CameraScreen(
         aiCycleConfig: widget.aiCycleConfig,
-        carCornerModelPath: _modelController.modelPathOf(AiModelType.carCorner)!,
-        carDamageModelPath: _modelController.modelPathOf(AiModelType.carDamage)!,
+        carCornerModelPath:
+            _modelController.modelPathOf(AiModelType.carCorner)!,
+        carDamageModelPath:
+            _modelController.modelPathOf(AiModelType.carDamage)!,
         carPartModelPath: _modelController.modelPathOf(AiModelType.carPart)!,
         onComplete: widget.onComplete,
       );
-
-  Widget _buildResultRoute(BuildContext _) {
-    // Model đã tải xong ở bootstrap → giữ lại path để "Thêm ảnh tổn thất" vào
-    // thẳng camera, không cần tải lại.
-    final cornerPath = _modelController.modelPathOf(AiModelType.carCorner)!;
-    final damagePath = _modelController.modelPathOf(AiModelType.carDamage)!;
-    final partPath = _modelController.modelPathOf(AiModelType.carPart)!;
-    return ResultView(
-      sessionId: widget.aiCycleConfig.generalConfig.documentId,
-      capturedPhotos: const {},
-      onComplete: widget.onComplete,
-      // "Thêm ảnh tổn thất": vào camera (paths đã sẵn), thay thế màn result.
-      onAddPhoto: (resultCtx) => Navigator.of(resultCtx).pushReplacement(
-        MaterialPageRoute<void>(
-          builder: (_) => CameraScreen(
-            aiCycleConfig: widget.aiCycleConfig,
-            carCornerModelPath: cornerPath,
-            carDamageModelPath: damagePath,
-            carPartModelPath: partPath,
-            onComplete: widget.onComplete,
-          ),
-        ),
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -138,12 +111,9 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
         }
         if (_modelController.isPreparing) return _buildPreparing();
         if (_modelController.isReady) {
-          // Model đã sẵn sàng → định tuyến: folder có kết quả thì vào thẳng
-          // ResultView, ngược lại vào CameraScreen. Model luôn được tải để
-          // khi quay lại camera (vd "Thêm ảnh tổn thất") đã sẵn dùng.
-          _routeOnce(_modelController.resultsAvailable
-              ? _buildResultRoute
-              : _buildCameraRoute);
+          // Model tải xong → vào thẳng CameraScreen. Màn ResultView đã được bỏ
+          // khỏi flow; Next ở camera sẽ upload rồi gọi onComplete.
+          _routeOnce(_buildCameraRoute);
           return _buildLoading(StringSheet.preparingModels);
         }
         return _buildError(

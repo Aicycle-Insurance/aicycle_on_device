@@ -15,6 +15,7 @@ class ResultController extends ChangeNotifier {
     required this.capturedPhotos,
     required ResultRepository repository,
     this.onAngleUploaded,
+    this.fetchResultAfterUpload = true,
   }) : _repository = repository;
 
   final String sessionId;
@@ -22,6 +23,10 @@ class ResultController extends ChangeNotifier {
   /// Live reference from CameraController — we snapshot it at [start] time.
   final Map<int, List<Uint8List>> capturedPhotos;
   final ResultRepository _repository;
+
+  /// Khi `false` chỉ upload ảnh rồi dừng (không gọi API lấy kết quả) — dùng cho
+  /// flow camera đã bỏ màn ResultView, chỉ cần upload xong là [start] hoàn tất.
+  final bool fetchResultAfterUpload;
 
   /// Called after every angle's photos are fully uploaded so the camera
   /// controller can drop them; prevents re-uploading on a second "next" press.
@@ -55,7 +60,12 @@ class ResultController extends ChangeNotifier {
     // Không có ảnh nào để upload (vd folder đã có sẵn kết quả) → lấy kết quả
     // luôn, bỏ qua upload + xin quyền + lưu gallery.
     if (_totalCount == 0) {
-      await _fetchResultOnly();
+      if (fetchResultAfterUpload) {
+        await _fetchResultOnly();
+      } else {
+        _status = ResultStatus.success;
+        _notify();
+      }
       return;
     }
 
@@ -74,13 +84,18 @@ class ResultController extends ChangeNotifier {
         final photos = entry.value;
 
         for (int i = 0; i < photos.length; i++) {
-          await _repository.uploadAnglePhoto(
-            angleId: angleId,
-            photoBytes: photos[i],
-            photoIndex: i,
-          );
-          // Upload thành công → lưu ảnh vào thư viện ảnh của thiết bị.
-          unawaited(GalleryHelper.saveBytes(photos[i]));
+          try {
+            await _repository.uploadAnglePhoto(
+              angleId: angleId,
+              photoBytes: photos[i],
+              photoIndex: i,
+            );
+            // Upload thành công → lưu ảnh vào thư viện ảnh của thiết bị.
+            unawaited(GalleryHelper.saveBytes(photos[i]));
+          } catch (_) {
+            // Ảnh này upload fail → bỏ qua luôn, không chặn flow.
+          }
+          // Đếm cả ảnh fail để tiến độ chạy tới 100% và flow tiếp tục.
           _uploadedCount++;
           _notify();
         }
@@ -90,10 +105,12 @@ class ResultController extends ChangeNotifier {
         onAngleUploaded?.call(angleId);
       }
 
-      _status = ResultStatus.fetchingResult;
-      _notify();
-
-      _result = await _repository.fetchResult();
+      // Bỏ màn kết quả khỏi flow → chỉ upload xong là dừng.
+      if (fetchResultAfterUpload) {
+        _status = ResultStatus.fetchingResult;
+        _notify();
+        _result = await _repository.fetchResult();
+      }
       _status = ResultStatus.success;
       _notify();
     } catch (e) {

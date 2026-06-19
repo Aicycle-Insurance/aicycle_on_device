@@ -70,7 +70,6 @@ class AICycleFolderRepositoryImpl implements AICycleFolderRepository {
   Success<String, Failure> _cacheAndReturn(AICycleFolderModel folder) {
     final claimId = folder.claimId?.toString() ?? '';
     SessionCache.instance.claimId = claimId;
-    SessionCache.instance.resultsAvailable = folder.resultsAvailable;
     return Success(claimId);
   }
 
