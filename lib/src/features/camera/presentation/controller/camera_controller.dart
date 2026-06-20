@@ -41,6 +41,12 @@ class CameraController extends ChangeNotifier {
   bool _isCapturing = false;
   Map<int, List<Uint8List>> _capturedPhotos = {};
 
+  /// Vùng camera user thực sự nhìn thấy (giữa top bar và bottom bar), dạng tỉ lệ
+  /// [0,1] theo chiều dọc của preview. Dùng để native crop ảnh chụp về đúng
+  /// khung nhìn (preview là aspect-fill nên ảnh gốc rộng/cao hơn vùng thấy).
+  double _cropTop = 0;
+  double _cropBottom = 1;
+
   /// Bumped every time a photo is actually captured — the view listens to
   /// this to trigger a screen-blink (flash) effect.
   int _captureFlashTick = 0;
@@ -98,6 +104,13 @@ class CameraController extends ChangeNotifier {
 
   /// Bounding boxes are shown only during inspection (after panoramic).
   bool get showBoundingBoxes => _inspectionPhase != null;
+
+  /// Cập nhật khung nhìn thấy (do view tính từ chiều cao top/bottom bar so với
+  /// chiều cao preview). Ảnh chụp sẽ được crop về đúng khung này.
+  void setCaptureViewport({required double top, required double bottom}) {
+    _cropTop = top;
+    _cropBottom = bottom;
+  }
 
   // ── Cache restore ─────────────────────────────────────────────────────────
 
@@ -181,7 +194,10 @@ class CameraController extends ChangeNotifier {
         _captureFlashTick++;
       }
 
-      final bytes = await yoloController.capturePhoto();
+      final bytes = await yoloController.capturePhoto(
+        cropTop: _cropTop,
+        cropBottom: _cropBottom,
+      );
       final seg = segment ?? _activeSegmentIndex;
       if (seg != null) {
         _capturedPhotos.putIfAbsent(seg, () => []).add(bytes);
@@ -423,11 +439,22 @@ class CameraController extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool _stopped = false;
+
+  /// Dừng YOLO stream và giải phóng tài nguyên native (GPU/model/camera).
+  /// An toàn khi gọi nhiều lần. Gọi sớm — trước khi widget bị gỡ khỏi cây —
+  /// để tránh đơ UI vì cleanup nặng chạy trong dispose().
+  void stopCamera() {
+    if (_stopped) return;
+    _stopped = true;
+    yoloController.stop();
+  }
+
   @override
   void dispose() {
     _autoCaptureTimer?.cancel();
     _noDetectionTimer?.cancel();
-    yoloController.stop();
+    stopCamera(); // no-op nếu đã gọi trước đó
     super.dispose();
   }
 }

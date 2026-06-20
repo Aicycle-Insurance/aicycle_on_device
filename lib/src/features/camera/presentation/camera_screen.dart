@@ -130,6 +130,8 @@ class _CameraScreenState extends State<CameraScreen> {
       ),
     );
     if (confirmed == true) {
+      // Dừng camera trước khi pop để native cleanup không chặn UI trong dispose().
+      _cameraController.stopCamera();
       await PhotoSessionCache.instance
           .clearSession(widget.aiCycleConfig.generalConfig.documentId);
     }
@@ -187,10 +189,10 @@ class _CameraScreenState extends State<CameraScreen> {
     );
   }
 
-  /// "Xem kết quả": trả ảnh đã chụp lên bootstrap để chuyển sang pha upload.
-  /// Bootstrap sẽ gỡ CameraScreen này khỏi cây → dispose → camera idle/giải
-  /// phóng tài nguyên.
+  /// "Xem kết quả": dừng YOLO trước (tránh đơ trong dispose), snapshot ảnh,
+  /// rồi báo bootstrap chuyển sang pha upload.
   void _goToResult() {
+    _cameraController.stopCamera();
     final photos = {
       for (final e in _cameraController.capturedPhotos.entries)
         e.key: List<Uint8List>.from(e.value),
@@ -216,107 +218,121 @@ class _CameraScreenState extends State<CameraScreen> {
           backgroundColor: AppColors.black,
           systemOverlayStyle: SystemUiOverlayStyle.light,
         ),
-        body: AnimatedBuilder(
-          animation: _cameraController,
-          builder: (context, _) => Stack(
-            children: [
-              MultiTaskYOLOView(
-                detectModelPath: widget.carDamageModelPath,
-                classifyModelPath: widget.carCornerModelPath,
-                secondDetectModelPath: widget.carPartModelPath,
-                controller: _cameraController.yoloController,
-                secondDetectConfidenceThreshold: model.carPartConfThreshold,
-                secondDetectIouThreshold: model.carPartIouThreshold,
-                classifyConfidenceThreshold: model.carCornerConfThreshold,
-                detectConfidenceThreshold: model.carDamageConfThreshold,
-                detectIouThreshold: model.carDamageIouThreshold,
-                onStreamingData: _cameraController.onStreamingData,
-              ),
-
-              /// Bounding boxes — only during inspection phase
-              Positioned.fill(
-                child: BoundingBoxOverlay(
-                  detections: _cameraController.showBoundingBoxes
-                      ? _cameraController.latestDetections
-                      : const [],
-                ),
-              ),
-
-              /// Nhãn tên bộ phận — chỉ khi đang căn chỉnh ảnh toàn cảnh.
-              Positioned.fill(
-                child: CarPartLabelOverlay(
-                  detections: _cameraController.latestCarPartDetections,
-                ),
-              ),
-
-              /// Overlay UI — yellow frame corners only while taking the
-              /// panoramic photo, not during damage detail inspection.
-              if (!_cameraController.isInspectionMode)
-                Positioned(
-                  top: 83.h,
-                  left: 0.w,
-                  right: 0.w,
-                  bottom: 115.h,
-                  child: CameraFrameCorners(
-                    isSuccess:
-                        _cameraController.message?.type == MessageType.loading,
+        body: LayoutBuilder(
+          builder: (context, constraints) {
+            // Camera preview là aspect-fill phủ toàn bộ vùng này; top bar (83.h)
+            // và bottom bar (115.h) che 2 đầu. Báo controller khung user thực sự
+            // thấy để native crop ảnh chụp về đúng vùng đó (tránh ảnh "dài hơn").
+            final h = constraints.maxHeight;
+            if (h > 0) {
+              _cameraController.setCaptureViewport(
+                top: 83.h / h,
+                bottom: (h - 115.h) / h,
+              );
+            }
+            return AnimatedBuilder(
+              animation: _cameraController,
+              builder: (context, _) => Stack(
+                children: [
+                  MultiTaskYOLOView(
+                    detectModelPath: widget.carDamageModelPath,
+                    classifyModelPath: widget.carCornerModelPath,
+                    secondDetectModelPath: widget.carPartModelPath,
+                    controller: _cameraController.yoloController,
+                    secondDetectConfidenceThreshold: model.carPartConfThreshold,
+                    secondDetectIouThreshold: model.carPartIouThreshold,
+                    classifyConfidenceThreshold: model.carCornerConfThreshold,
+                    detectConfidenceThreshold: model.carDamageConfThreshold,
+                    detectIouThreshold: model.carDamageIouThreshold,
+                    onStreamingData: _cameraController.onStreamingData,
                   ),
-                ),
 
-              /// Tooltip — buttons depend on inspection phase
-              if (_cameraController.message != null)
-                Positioned(
-                  right: 36.w,
-                  top: 105.h,
-                  bottom: 140.h,
-                  child: Center(
-                    child: RotatedBox(
-                      quarterTurns: 1,
-                      child: _buildTooltip(),
+                  /// Bounding boxes — only during inspection phase
+                  Positioned.fill(
+                    child: BoundingBoxOverlay(
+                      detections: _cameraController.showBoundingBoxes
+                          ? _cameraController.latestDetections
+                          : const [],
                     ),
                   ),
-                ),
 
-              // Top bar
-              CameraTopBar(
-                isTorchEnabled: _cameraController.isTorchEnabled,
-                onClose: () async {
-                  final nav = Navigator.of(context);
-                  if (await _onWillPop()) nav.pop();
-                },
-                onToggleFlash: _cameraController.toggleFlash,
-              ),
-
-              // Bottom bar (thumbnail + nút chụp thủ công + progress ring)
-              CameraBottomBar(
-                capturedPhotos: _cameraController.capturedPhotos,
-                activeSegmentIndex: _cameraController.activeSegmentIndex,
-                completedSegments: _cameraController.completedSegments,
-                onShowProgress: _showCarProgressDialog,
-                onCapture: _cameraController.manualCapture,
-              ),
-
-              /// Nút "Xem kết quả" (2 bước chống chạm nhầm) — góc dưới phải.
-              if (_canGoNext())
-                Positioned(
-                  left: 24.w,
-                  bottom: 130.h,
-                  child: RotatedBox(
-                    quarterTurns: 1,
-                    child: ViewResultButton(onPressed: _goToResult),
+                  /// Nhãn tên bộ phận — chỉ khi đang căn chỉnh ảnh toàn cảnh.
+                  Positioned.fill(
+                    child: CarPartLabelOverlay(
+                      detections: _cameraController.latestCarPartDetections,
+                    ),
                   ),
-                ),
 
-              /// Screen-blink (flash) effect — triggered on every photo capture.
-              Positioned.fill(
-                top: 83.h,
-                bottom: 115.h,
-                child: _CaptureFlashOverlay(
-                  flashTick: _cameraController.captureFlashTick,
-                ),
+                  /// Overlay UI — yellow frame corners only while taking the
+                  /// panoramic photo, not during damage detail inspection.
+                  if (!_cameraController.isInspectionMode)
+                    Positioned(
+                      top: 83.h,
+                      left: 0.w,
+                      right: 0.w,
+                      bottom: 115.h,
+                      child: CameraFrameCorners(
+                        isSuccess: _cameraController.message?.type ==
+                            MessageType.loading,
+                      ),
+                    ),
+
+                  /// Tooltip — buttons depend on inspection phase
+                  if (_cameraController.message != null)
+                    Positioned(
+                      right: 36.w,
+                      top: 105.h,
+                      bottom: 140.h,
+                      child: Center(
+                        child: RotatedBox(
+                          quarterTurns: 1,
+                          child: _buildTooltip(),
+                        ),
+                      ),
+                    ),
+
+                  // Top bar
+                  CameraTopBar(
+                    isTorchEnabled: _cameraController.isTorchEnabled,
+                    onClose: () async {
+                      final nav = Navigator.of(context);
+                      if (await _onWillPop()) nav.pop();
+                    },
+                    onToggleFlash: _cameraController.toggleFlash,
+                  ),
+
+                  // Bottom bar (thumbnail + nút chụp thủ công + progress ring)
+                  CameraBottomBar(
+                    capturedPhotos: _cameraController.capturedPhotos,
+                    activeSegmentIndex: _cameraController.activeSegmentIndex,
+                    completedSegments: _cameraController.completedSegments,
+                    onShowProgress: _showCarProgressDialog,
+                    onCapture: _cameraController.manualCapture,
+                  ),
+
+                  /// Nút "Xem kết quả" (2 bước chống chạm nhầm) — góc dưới phải.
+                  if (_canGoNext())
+                    Positioned(
+                      left: 24.w,
+                      bottom: 130.h,
+                      child: RotatedBox(
+                        quarterTurns: 1,
+                        child: ViewResultButton(onPressed: _goToResult),
+                      ),
+                    ),
+
+                  /// Screen-blink (flash) effect — triggered on every photo capture.
+                  Positioned.fill(
+                    top: 83.h,
+                    bottom: 115.h,
+                    child: _CaptureFlashOverlay(
+                      flashTick: _cameraController.captureFlashTick,
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );
