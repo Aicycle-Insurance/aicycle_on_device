@@ -47,6 +47,10 @@ class CameraController extends ChangeNotifier {
   double _cropTop = 0;
   double _cropBottom = 1;
 
+  /// Đã đồng bộ cấu hình model bật/tắt theo pha lần đầu chưa (cần channel native
+  /// đã attach — tức đã có frame đầu).
+  bool _activeModelsSynced = false;
+
   /// Bumped every time a photo is actually captured — the view listens to
   /// this to trigger a screen-blink (flash) effect.
   int _captureFlashTick = 0;
@@ -128,6 +132,12 @@ class CameraController extends ChangeNotifier {
   // ── Streaming data ────────────────────────────────────────────────────────
 
   void onStreamingData(Map<String, dynamic> data) {
+    // Áp cấu hình model cho pha hiện tại ngay khi có frame đầu (lúc này channel
+    // native đã attach). Ban đầu chưa inspection → chỉ carCorner + carPart.
+    if (!_activeModelsSynced) {
+      _activeModelsSynced = true;
+      _syncActiveModels();
+    }
     final type = data['type'];
     // Hai model detect đều trả type=='detect'; phân biệt bằng modelId:
     //   'detect'  -> car damage (model chính)
@@ -272,7 +282,7 @@ class CameraController extends ChangeNotifier {
       _completedSegments.add(_activeSegmentIndex!);
     }
     _classificationLocked = true;
-    _inspectionPhase = InspectionPhase.panoramicGuide;
+    _setInspectionPhase(InspectionPhase.panoramicGuide);
     _setMessage(CameraMessage(
       message: StringSheet.inspectDamageGuide,
       type: MessageType.info,
@@ -288,7 +298,8 @@ class CameraController extends ChangeNotifier {
   void _enterScanning() {
     _autoCaptureTimer?.cancel();
     _autoCaptureTimer = null;
-    _inspectionPhase = InspectionPhase.scanning;
+    // Vào pha quét thiệt hại → bật carDamage (carCorner/carPart vẫn bật).
+    _setInspectionPhase(InspectionPhase.scanning);
     _setMessage(null);
     _startNoDetectionTimer();
   }
@@ -308,7 +319,8 @@ class CameraController extends ChangeNotifier {
 
     _noDetectionTimer?.cancel();
     _noDetectionTimer = null;
-    _inspectionPhase = InspectionPhase.detectionReady;
+    // Đã thấy thiệt hại → dừng quét (tắt carDamage), chờ user xác nhận.
+    _setInspectionPhase(InspectionPhase.detectionReady);
     _setMessage(CameraMessage(
       message: StringSheet.damageDetectedGuide,
       type: MessageType.info,
@@ -356,7 +368,7 @@ class CameraController extends ChangeNotifier {
   Future<void> confirmDamage({bool flashTick = true}) async {
     _autoCaptureTimer?.cancel();
     _autoCaptureTimer = null;
-    _inspectionPhase = InspectionPhase.capturingDamage;
+    _setInspectionPhase(InspectionPhase.capturingDamage);
 
     await capturePhoto(immediate: true, flashTick: flashTick);
 
@@ -366,7 +378,7 @@ class CameraController extends ChangeNotifier {
   /// Hiển thị message "Tiếp tục di chuyển camera…" trong 5 s rồi quay lại
   /// scanning. Dùng chung cho cả "Xác nhận" và "Thiếu tổn thất".
   Future<void> _showContinueThenScan({required bool confirm}) async {
-    _inspectionPhase = InspectionPhase.continueOrChange;
+    _setInspectionPhase(InspectionPhase.continueOrChange);
     _setMessage(CameraMessage(
       message: confirm
           ? StringSheet.continueOrChangeGuide
@@ -406,8 +418,9 @@ class CameraController extends ChangeNotifier {
     if (justCompleted != null) {
       _completedSegments.add(justCompleted);
     }
-    _inspectionPhase = null;
     _classificationLocked = false;
+    // Quay lại chọn góc → tắt carDamage (carCorner/carPart vẫn bật).
+    _setInspectionPhase(null);
 
     final nextSegment = _nextNavigationSegment(justCompleted);
     if (nextSegment == null) {
@@ -437,6 +450,24 @@ class CameraController extends ChangeNotifier {
     if (_message == msg) return;
     _message = msg;
     notifyListeners();
+  }
+
+  /// Bật/tắt model theo pha để giảm tải (model vẫn nằm sẵn trong bộ nhớ, không
+  /// reload khi đổi). carCorner + carPart luôn bật; carDamage chỉ bật khi đang
+  /// quét tìm vết thiệt hại ([InspectionPhase.scanning]), còn lại tắt.
+  void _syncActiveModels() {
+    final scanning = _inspectionPhase == InspectionPhase.scanning;
+    yoloController.setActiveModels(
+      classify: true, // carCorner — luôn bật
+      detect: scanning, // carDamage — chỉ khi quét thiệt hại
+      secondDetect: true, // carPart — luôn bật
+    );
+  }
+
+  /// Gán pha inspection và đồng bộ lại model đang bật/tắt cho khớp pha.
+  void _setInspectionPhase(InspectionPhase? phase) {
+    _inspectionPhase = phase;
+    _syncActiveModels();
   }
 
   bool _stopped = false;

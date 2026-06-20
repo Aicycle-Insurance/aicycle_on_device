@@ -31,8 +31,8 @@ class ExampleHomePage extends StatefulWidget {
 
 class _ExampleHomePageState extends State<ExampleHomePage> {
   // General Config
-  final _apiTokenController = TextEditingController();
-  final _documentIdController = TextEditingController();
+  final _apiTokenController = TextEditingController(text: '');
+  final _documentIdController = TextEditingController(text: '');
   final _documentNameController = TextEditingController(text: 'Test Claim');
   AiCycleEnvironment _environment = AiCycleEnvironment.stage;
   AiCycleOrg _organization = AiCycleOrg.aicycle;
@@ -59,16 +59,16 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
   final _carDamageIouController = TextEditingController(text: '0.45');
 
   // VBI Config (chỉ bắt buộc khi Organization = vbi)
-  final _vbiAuthorityIdController = TextEditingController();
-  final _vbiSignatureKeyController = TextEditingController();
-  final _vbiExternalSessionIdController = TextEditingController();
-  final _vbiJobIdController = TextEditingController();
-  final _vbiMaHangMucController = TextEditingController();
-  final _vbiTenHangMucController = TextEditingController();
-  final _vbiDepartmentIdController = TextEditingController();
-  final _vbiUserIdController = TextEditingController();
-  final _vbiMaTVVController = TextEditingController();
-  final _vbiSourceController = TextEditingController();
+  final _vbiAuthorityIdController = TextEditingController(text: '');
+  final _vbiSignatureKeyController = TextEditingController(text: '');
+  final _vbiExternalSessionIdController = TextEditingController(text: '');
+  final _vbiJobIdController = TextEditingController(text: '');
+  final _vbiMaHangMucController = TextEditingController(text: '');
+  final _vbiTenHangMucController = TextEditingController(text: 'Ảnh toàn cảnh');
+  final _vbiDepartmentIdController = TextEditingController(text: '000');
+  final _vbiUserIdController = TextEditingController(text: '');
+  final _vbiMaTVVController = TextEditingController(text: '');
+  final _vbiSourceController = TextEditingController(text: '');
 
   // Display Config
   bool _showBackButton = true;
@@ -374,10 +374,11 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
       MaterialPageRoute(
         builder: (context) => AICycleOnDeviceCamera(
           aiCycleConfig: config,
-          onComplete: (data) {
-            if (data is Map<AiModelType, DownloadedModelInfo>) {
-              _showSelectedModels(data);
-            }
+          onComplete: () {
+            if (mounted) Navigator.pop(context);
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('Completed')));
           },
           onError: (error) {
             ScaffoldMessenger.of(
@@ -385,38 +386,6 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
             ).showSnackBar(SnackBar(content: Text('SDK Error: $error')));
           },
         ),
-      ),
-    );
-  }
-
-  void _showSelectedModels(Map<AiModelType, DownloadedModelInfo> models) {
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Model đã chọn'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (final entry in models.entries) ...[
-              Text(
-                entry.key.displayName,
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              Text(
-                'v${entry.value.version}\n${entry.value.filePath}',
-                style: const TextStyle(fontSize: 12, color: Colors.black54),
-              ),
-              const SizedBox(height: 12),
-            ],
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Đóng'),
-          ),
-        ],
       ),
     );
   }
