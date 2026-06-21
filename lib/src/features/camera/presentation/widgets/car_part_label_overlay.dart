@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../../../core/utils/screen_utils.dart';
 import '../../data/model/detection_output.dart';
 
 /// Vẽ nhãn tên bộ phận lên trên các vùng bộ phận detect được.
@@ -65,9 +66,9 @@ class _CarPartLabelPainter extends CustomPainter {
       final tp = TextPainter(
         text: TextSpan(
           text: label,
-          style: const TextStyle(
+          style: TextStyle(
             color: Colors.white,
-            fontSize: 8,
+            fontSize: 12.sp,
             fontWeight: FontWeight.w500,
             height: 1,
           ),

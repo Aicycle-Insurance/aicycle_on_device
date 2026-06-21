@@ -1,6 +1,6 @@
 name: aicycle_on_device
 description: "An AICycle On-Device SDK for Flutter."
-version: 0.0.2
+version: 0.0.3
 homepage:
 
 environment:
@@ -24,8 +24,6 @@ dependencies:
   aicycle_yolo: ^1.0.5
   gallery_saver_plus: ^3.2.9
   permission_handler: ^11.3.1
-
-  # giữ màn hình sáng khi camera đang stream
   wakelock_plus: ^1.6.1
 
 dev_dependencies:
