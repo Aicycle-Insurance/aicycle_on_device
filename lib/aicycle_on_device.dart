@@ -9,5 +9,3 @@ export 'src/config/aicycle_config.dart';
 export 'src/features/ai_model_manager/data/model/downloaded_model_info.dart';
 export 'src/features/ai_model_manager/domain/entity/ai_model_type.dart';
 export 'src/features/camera/presentation/camera_view.dart';
-// 4. Utility for clearing photo cache after upload
-export 'src/core/cache/photo_session_cache.dart' show PhotoSessionCache;

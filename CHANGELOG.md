@@ -1,3 +1,8 @@
+## 0.0.4
+
+* Un-public PhotoSessionCache
+* Update README.md
+
 ## 0.0.3
 
 * Update README.md

@@ -380,17 +380,3 @@ AICycleOnDeviceCamera(
   },
 );
 ```
-
----
-
-## Dọn cache ảnh sau khi upload
-
-SDK lưu ảnh đã chụp xuống đĩa theo `documentId` (để chịu được app bị kill giữa chừng). Sau khi upload thành công, có thể dọn cache phiên đó:
-
-```dart
-import 'package:aicycle_on_device/aicycle_on_device.dart';
-
-await PhotoSessionCache.instance.clearSession(documentId);
-```
-
-`PhotoSessionCache` là singleton (`PhotoSessionCache.instance`); `clearSession(sessionId)` xóa toàn bộ ảnh cache của hồ sơ tương ứng với `sessionId` (chính là `documentId`).
