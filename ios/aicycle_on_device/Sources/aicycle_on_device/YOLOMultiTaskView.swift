@@ -85,6 +85,13 @@ public class YOLOMultiTaskView: UIView {
   var classifyBusy = false
   var thirdBusy    = false
 
+  /// Giới hạn nhịp chạy classify (carCorner) / third (carPart): ~6–7 fps là đủ để
+  /// highlight góc / căn ảnh, giảm tải inference. carDamage (detect) chạy mỗi frame.
+  /// Accessed only on cameraQueue.
+  private static let minInferenceInterval: CFTimeInterval = 0.15
+  private var lastClassifyTime: CFTimeInterval = 0
+  private var lastThirdTime: CFTimeInterval = 0
+
   private lazy var detectAdapter   = MultiTaskPredictorAdapter(taskName: "detect",   cameraQueue: cameraQueue)
   private lazy var classifyAdapter = MultiTaskPredictorAdapter(taskName: "classify", cameraQueue: cameraQueue)
   private lazy var thirdAdapter    = MultiTaskPredictorAdapter(taskName: "third",    cameraQueue: cameraQueue)
@@ -501,9 +508,17 @@ public class YOLOMultiTaskView: UIView {
       self?.previewLayer?.removeFromSuperlayer()
       self?.previewLayer = nil
     }
+    // Thả tham chiếu predictor ở luồng nền: dealloc model CoreML (giải phóng ANE/
+    // GPU) có thể tốn nhiều ms, chạy trên main thread sẽ treo UI khi rời màn camera.
+    let toRelease = [detectPredictor, classifyPredictor, thirdPredictor]
     detectPredictor = nil
     classifyPredictor = nil
     thirdPredictor = nil
+    DispatchQueue.global(qos: .utility).async {
+      // Giữ strong ref tới hết block rồi mới thả → dealloc xảy ra ở nền (nếu đây
+      // là tham chiếu cuối cùng).
+      _ = toRelease.count
+    }
   }
 
   deinit {
@@ -542,14 +557,20 @@ extension YOLOMultiTaskView: AVCaptureVideoDataOutputSampleBufferDelegate, @unch
       let adapter = detectAdapter
       detectQueue.async { p.predict(sampleBuffer: buf, onResultsListener: adapter, onInferenceTime: adapter) }
     }
-    if let p = classifyPredictor, !classifyBusy, !p.isUpdating {
+    if let p = classifyPredictor, !classifyBusy, !p.isUpdating,
+      now - lastClassifyTime >= Self.minInferenceInterval
+    {
+      lastClassifyTime = now
       classifyBusy = true
       p.isUpdating = true
       let buf = sampleBuffer
       let adapter = classifyAdapter
       classifyQueue.async { p.predict(sampleBuffer: buf, onResultsListener: adapter, onInferenceTime: adapter) }
     }
-    if let p = thirdPredictor, !thirdBusy, !p.isUpdating {
+    if let p = thirdPredictor, !thirdBusy, !p.isUpdating,
+      now - lastThirdTime >= Self.minInferenceInterval
+    {
+      lastThirdTime = now
       thirdBusy = true
       p.isUpdating = true
       let buf = sampleBuffer

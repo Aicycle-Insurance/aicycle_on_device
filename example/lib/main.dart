@@ -55,10 +55,10 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
 
   // Model Config
   // Ngưỡng riêng cho từng model (để trống = dùng mặc định của SDK).
-  final _carPartConfController = TextEditingController(text: '0.1');
+  final _carPartConfController = TextEditingController(text: '0.5');
   final _carPartIouController = TextEditingController(text: '0.45');
-  final _carCornerConfController = TextEditingController(text: '0.1');
-  final _carDamageConfController = TextEditingController(text: '0.1');
+  final _carCornerConfController = TextEditingController(text: '0.3');
+  final _carDamageConfController = TextEditingController(text: '0.3');
   final _carDamageIouController = TextEditingController(text: '0.45');
 
   // VBI Config (chỉ bắt buộc khi Organization = vbi)

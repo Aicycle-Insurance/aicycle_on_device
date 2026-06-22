@@ -26,6 +26,7 @@ import androidx.lifecycle.LifecycleOwner
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -41,6 +42,12 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         private val CLASS_NAMES = listOf("Móp/bẹp", "Vỡ/nứt", "Thủng/rách", "Trầy/xước")
         private const val REQUEST_CODE_PERMISSIONS = 1001
         private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
+
+        // Khoảng cách tối thiểu giữa 2 lần chạy của classify (carCorner) và third
+        // (carPart) — ~6–7 fps là đủ để highlight góc / căn ảnh toàn cảnh, giảm
+        // tải inference đáng kể. carDamage (detect) chạy mỗi frame khi rảnh.
+        private const val CLASSIFY_MIN_INTERVAL_MS = 150L
+        private const val THIRD_MIN_INTERVAL_MS = 150L
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -67,6 +74,11 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     private val detectBusy   = AtomicBoolean(false)
     private val classifyBusy = AtomicBoolean(false)
     private val thirdBusy    = AtomicBoolean(false)
+
+    // Mốc thời gian lần chạy gần nhất (chỉ truy cập trên cameraExecutor) — dùng
+    // để giới hạn nhịp chạy của classify/third theo *_MIN_INTERVAL_MS.
+    private var lastClassifyMs = 0L
+    private var lastThirdMs = 0L
 
     private var lifecycleOwner: LifecycleOwner? = null
     private var imageCaptureUseCase: ImageCapture? = null
@@ -209,21 +221,30 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     fun release() {
         isStopped = true
         onMultiTaskStream = null
+        // Unbind camera phải chạy trên main thread (yêu cầu của CameraX).
         if (Looper.myLooper() == Looper.getMainLooper()) {
             stopCameraInternal()
         } else {
             mainHandler.post { stopCameraInternal() }
         }
-        detectExecutor.shutdownNow()
-        classifyExecutor.shutdownNow()
-        thirdExecutor.shutdownNow()
-        cameraExecutor.shutdownNow()
-        (detectPredictor as? BasePredictor)?.close()
-        (classifyPredictor as? BasePredictor)?.close()
-        (thirdPredictor as? BasePredictor)?.close()
+
+        // Snapshot rồi xoá tham chiếu ngay để onFrame (đã bị chặn bởi isStopped)
+        // không còn dùng tới. Việc đóng model nặng làm ở luồng nền bên dưới.
+        val executors = listOf(detectExecutor, classifyExecutor, thirdExecutor, cameraExecutor)
+        val predictors = listOf(detectPredictor, classifyPredictor, thirdPredictor)
         detectPredictor = null
         classifyPredictor = null
         thirdPredictor = null
+
+        // Đóng model/GPU delegate có thể tốn hàng trăm ms; chạy trên main thread sẽ
+        // treo UI đúng lúc rời màn camera. Đẩy sang luồng nền: chờ inference đang
+        // chạy kết thúc (predict không interrupt được) rồi mới close để tránh
+        // dùng model sau khi đã giải phóng.
+        Thread {
+            executors.forEach { it.shutdownNow() }
+            executors.forEach { runCatching { it.awaitTermination(2, TimeUnit.SECONDS) } }
+            predictors.forEach { (it as? BasePredictor)?.close() }
+        }.apply { isDaemon = true; name = "yolo-release" }.start()
     }
 
     fun initCamera(lensFacing: Int) {
@@ -387,64 +408,78 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         val w = bitmap.width
         val h = bitmap.height
         val camFpsNow = camFps
+        val now = System.currentTimeMillis()
 
-        dispatchDetect(bitmap, w, h, camFpsNow)
-        dispatchClassify(bitmap, w, h, camFpsNow)
-        dispatchThird(bitmap, w, h, camFpsNow)
+        // Phase 1 — claim slots ngay trên cameraExecutor (đơn luồng): áp giới hạn
+        // nhịp theo model + back-pressure. Chưa chạy inference ở đây.
+        val runDetect = claimDetect()
+        val runClassify = claimClassify(now)
+        val runThird = claimThird(now)
 
-        bitmap.recycle()
-    }
+        val count = (if (runDetect) 1 else 0) +
+            (if (runClassify) 1 else 0) +
+            (if (runThird) 1 else 0)
+        if (count == 0) { bitmap.recycle(); return }
 
-    private fun dispatchDetect(src: Bitmap, w: Int, h: Int, camFpsNow: Double) {
-        val p = detectPredictor ?: return
-        if (!detectBusy.compareAndSet(false, true)) return
-        val copy = src.copy(Bitmap.Config.ARGB_8888, false)
-        detectExecutor.execute {
-            try {
-                val result = p.predict(copy, w, h, rotateForCamera = false, isLandscape = true)
-                val data = buildTaskData(result, Slot.DETECT, camFpsNow)
-                mainHandler.post { onMultiTaskStream?.invoke(data) }
-            } catch (e: Exception) {
-                Log.e(TAG, "detect predict error: ${e.message}")
-            } finally {
-                copy.recycle()
-                detectBusy.set(false)
-            }
+        // Phase 2 — dùng CHUNG một bitmap (predictor chỉ đọc), giải phóng đúng một
+        // lần khi predictor cuối cùng xong. Bỏ hẳn 3 bản copy/ frame trước đây.
+        val refCount = AtomicInteger(count)
+        val release = Runnable { if (refCount.decrementAndGet() == 0) bitmap.recycle() }
+
+        if (runDetect) {
+            launchPredict(detectExecutor, detectPredictor!!, detectBusy, Slot.DETECT, bitmap, w, h, camFpsNow, release)
+        }
+        if (runClassify) {
+            launchPredict(classifyExecutor, classifyPredictor!!, classifyBusy, Slot.CLASSIFY, bitmap, w, h, camFpsNow, release)
+        }
+        if (runThird) {
+            launchPredict(thirdExecutor, thirdPredictor!!, thirdBusy, Slot.THIRD, bitmap, w, h, camFpsNow, release)
         }
     }
 
-    private fun dispatchClassify(src: Bitmap, w: Int, h: Int, camFpsNow: Double) {
-        val p = classifyPredictor ?: return
-        if (!classifyBusy.compareAndSet(false, true)) return
-        val copy = src.copy(Bitmap.Config.ARGB_8888, false)
-        classifyExecutor.execute {
-            try {
-                val result = p.predict(copy, w, h, rotateForCamera = false, isLandscape = true)
-                val data = buildTaskData(result, Slot.CLASSIFY, camFpsNow)
-                mainHandler.post { onMultiTaskStream?.invoke(data) }
-            } catch (e: Exception) {
-                Log.e(TAG, "classify predict error: ${e.message}")
-            } finally {
-                copy.recycle()
-                classifyBusy.set(false)
-            }
-        }
+    /** carDamage: chạy mỗi frame khi rảnh (không giới hạn nhịp). */
+    private fun claimDetect(): Boolean {
+        if (detectPredictor == null) return false
+        return detectBusy.compareAndSet(false, true)
     }
 
-    private fun dispatchThird(src: Bitmap, w: Int, h: Int, camFpsNow: Double) {
-        val p = thirdPredictor ?: return
-        if (!thirdBusy.compareAndSet(false, true)) return
-        val copy = src.copy(Bitmap.Config.ARGB_8888, false)
-        thirdExecutor.execute {
+    private fun claimClassify(now: Long): Boolean {
+        if (classifyPredictor == null) return false
+        if (now - lastClassifyMs < CLASSIFY_MIN_INTERVAL_MS) return false
+        if (!classifyBusy.compareAndSet(false, true)) return false
+        lastClassifyMs = now
+        return true
+    }
+
+    private fun claimThird(now: Long): Boolean {
+        if (thirdPredictor == null) return false
+        if (now - lastThirdMs < THIRD_MIN_INTERVAL_MS) return false
+        if (!thirdBusy.compareAndSet(false, true)) return false
+        lastThirdMs = now
+        return true
+    }
+
+    private fun launchPredict(
+        executor: ExecutorService,
+        predictor: Predictor,
+        busy: AtomicBoolean,
+        slot: Slot,
+        bitmap: Bitmap,
+        w: Int,
+        h: Int,
+        camFpsNow: Double,
+        release: Runnable,
+    ) {
+        executor.execute {
             try {
-                val result = p.predict(copy, w, h, rotateForCamera = false, isLandscape = true)
-                val data = buildTaskData(result, Slot.THIRD, camFpsNow)
+                val result = predictor.predict(bitmap, w, h, rotateForCamera = false, isLandscape = true)
+                val data = buildTaskData(result, slot, camFpsNow)
                 mainHandler.post { onMultiTaskStream?.invoke(data) }
             } catch (e: Exception) {
-                Log.e(TAG, "third predict ($thirdTaskType) error: ${e.message}")
+                Log.e(TAG, "$slot predict error: ${e.message}")
             } finally {
-                copy.recycle()
-                thirdBusy.set(false)
+                busy.set(false)
+                release.run()
             }
         }
     }
