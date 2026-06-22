@@ -1,5 +1,9 @@
 ## 0.0.5
 
+* Fix bugs and enhance performance
+
+## 0.0.5
+
 * Move aicycle_yolo to local
 * Fix bugs and enhance performance
 

@@ -408,7 +408,6 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         val w = bitmap.width
         val h = bitmap.height
         val camFpsNow = camFps
-        val now = System.currentTimeMillis()
 
         // Phase 1 — claim slots ngay trên cameraExecutor (đơn luồng): áp giới hạn
         // nhịp theo model + back-pressure. Chưa chạy inference ở đây.
