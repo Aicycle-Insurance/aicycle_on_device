@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:aicycle_yolo/multi_task_yolo_view.dart';
+import '../../../../yolo/multi_task_yolo_view.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../../../core/cache/photo_session_cache.dart';

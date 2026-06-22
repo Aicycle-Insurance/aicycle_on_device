@@ -1,4 +1,4 @@
-import 'package:aicycle_yolo/multi_task_yolo_view.dart';
+import '../../../yolo/multi_task_yolo_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';

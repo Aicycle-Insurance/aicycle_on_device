@@ -5,7 +5,9 @@ homepage:
 
 environment:
   sdk: ^3.6.1
-  flutter: ">=1.17.0"
+  # Native YOLO inference is bundled in this package; the Android side needs a
+  # recent AGP/Gradle toolchain, so require a matching Flutter floor.
+  flutter: ">=3.32.1"
 
 dependencies:
   dio: ^5.9.2
@@ -20,8 +22,6 @@ dependencies:
 
   path_provider: ^2.1.5
 
-  # utralytics yolo custom package
-  aicycle_yolo: ^1.0.5
   gallery_saver_plus: ^3.2.9
   permission_handler: ^11.3.1
   wakelock_plus: ^1.6.1
@@ -30,6 +30,16 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+
 flutter:
+  # This package bundles its own native YOLO inference (previously the separate
+  # aicycle_yolo plugin). Channel namespace: com.aicycle.yolo
+  plugin:
+    platforms:
+      android:
+        package: com.aicycle.yolo
+        pluginClass: YOLOPlugin
+      ios:
+        pluginClass: YOLOPlugin
   assets:
     - assets/images/

@@ -1,0 +1,180 @@
+// Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
+package com.aicycle.yolo
+
+import android.app.Activity
+import android.content.Context
+import android.util.Log
+import android.view.View
+import androidx.lifecycle.LifecycleOwner
+import io.flutter.plugin.common.BinaryMessenger
+import io.flutter.plugin.common.EventChannel
+import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.StandardMessageCodec
+import io.flutter.plugin.platform.PlatformView
+import io.flutter.plugin.platform.PlatformViewFactory
+
+/** Flutter platform-view wrapper for YOLOMultiTaskAndroidView. */
+class YOLOMultiTaskPlatformView(
+    private val context: Context,
+    private val viewId: Int,
+    args: Any?,
+    messenger: BinaryMessenger,
+    private val onDispose: ((Int) -> Unit)? = null
+) : PlatformView {
+
+    private val TAG = "YOLOMultiTaskPlatformView"
+    private val multiTaskView = YOLOMultiTaskAndroidView(context)
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    @Volatile private var eventSink: EventChannel.EventSink? = null
+    private val eventChannel: EventChannel
+    private val methodChannel: MethodChannel
+
+    init {
+        val params = args as? Map<*, *>
+        val idStr = params?.get("viewId") as? String ?: viewId.toString()
+
+        // Channels must match the names in lib/multi_task_yolo_view.dart.
+        eventChannel = EventChannel(messenger, "com.aicycle.yolo/multiTaskResults_$idStr")
+        eventChannel.setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    eventSink = events
+                }
+                override fun onCancel(arguments: Any?) {
+                    eventSink = null
+                }
+            })
+
+        methodChannel = MethodChannel(messenger, "com.aicycle.yolo/multiTaskControl_$idStr")
+        methodChannel.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "stop" -> {
+                        // Mirror iOS: fully release camera, executors and predictors — not just
+                        // pause the camera — so GPU/native model memory is freed immediately.
+                        multiTaskView.release()
+                        result.success(null)
+                    }
+                    "capturePhoto" -> {
+                        val args = call.arguments as? Map<*, *>
+                        val crop = if (args != null) {
+                            val l = (args["cropLeft"] as? Number)?.toFloat()
+                            val t = (args["cropTop"] as? Number)?.toFloat()
+                            val r = (args["cropRight"] as? Number)?.toFloat()
+                            val b = (args["cropBottom"] as? Number)?.toFloat()
+                            if (l != null && t != null && r != null && b != null)
+                                android.graphics.RectF(l, t, r, b) else null
+                        } else null
+                        multiTaskView.capturePhoto(crop) { bytes ->
+                            mainHandler.post {
+                                if (bytes != null) result.success(bytes)
+                                else result.error("capture_failed", "Failed to capture photo", null)
+                            }
+                        }
+                    }
+                    "setTorch" -> {
+                        val enable = (call.arguments as? Map<*, *>)?.get("enable") as? Boolean
+                            ?: run { result.error("bad_args", "enable (bool) is required", null); return@setMethodCallHandler }
+                        result.success(multiTaskView.setTorchMode(enable))
+                    }
+                    "setActiveModels" -> {
+                        val args = call.arguments as? Map<*, *>
+                        multiTaskView.setActiveModels(
+                            args?.get("detect") as? Boolean,
+                            args?.get("classify") as? Boolean,
+                            args?.get("secondDetect") as? Boolean,
+                        )
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        // Forward inference results to Flutter via the EventChannel sink.
+        multiTaskView.onMultiTaskStream = { data ->
+            mainHandler.post {
+                try { eventSink?.success(data) } catch (e: Exception) {
+                    Log.e(TAG, "EventSink error: ${e.message}")
+                }
+            }
+        }
+
+        // Provide lifecycle so CameraX can bind use-cases.
+        if (context is LifecycleOwner) {
+            multiTaskView.onLifecycleOwnerAvailable(context)
+        }
+
+        val detectPath = params?.get("detectModel") as? String
+        val classifyPath = params?.get("classifyModel") as? String
+        if (detectPath != null && classifyPath != null) {
+            val useGpu = params["useGpu"] as? Boolean ?: true
+            val lensFacing = if ((params["lensFacing"] as? String) == "front")
+                androidx.camera.core.CameraSelector.LENS_FACING_FRONT
+            else
+                androidx.camera.core.CameraSelector.LENS_FACING_BACK
+            val confidence = params["confidenceThreshold"] as? Double ?: 0.25
+            val iou = params["iouThreshold"] as? Double ?: 0.7
+            val detectConfidence = params["detectConfidenceThreshold"] as? Double ?: confidence
+            val detectIou = params["detectIouThreshold"] as? Double ?: iou
+            val classifyConfidence = params["classifyConfidenceThreshold"] as? Double ?: confidence
+            // Second detection model — runs in the third predictor slot with a "detect" task.
+            val secondDetectModel = params["secondDetectModel"] as? String
+            val secondDetectConfidence = params["secondDetectConfidenceThreshold"] as? Double ?: confidence
+            val secondDetectIou = params["secondDetectIouThreshold"] as? Double ?: iou
+
+            multiTaskView.loadModels(
+                detectPath = detectPath,
+                classifyPath = classifyPath,
+                thirdModelPath = secondDetectModel,
+                thirdModelTask = "detect",
+                thirdModelId = "detect2",
+                useGpu = useGpu,
+                detectConfidenceThreshold = detectConfidence,
+                detectIouThreshold = detectIou,
+                classifyConfidenceThreshold = classifyConfidence,
+                thirdConfidenceThreshold = secondDetectConfidence,
+                thirdIouThreshold = secondDetectIou,
+                lensFacing = lensFacing,
+                completion = { Log.d(TAG, "Models loaded, camera started") }
+            )
+        } else {
+            Log.e(TAG, "Missing detectModel or classifyModel in creation params")
+        }
+    }
+
+    override fun getView(): View = multiTaskView
+
+    fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        multiTaskView.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    }
+
+    override fun dispose() {
+        onDispose?.invoke(viewId)
+        multiTaskView.release()
+        methodChannel.setMethodCallHandler(null)
+        eventChannel.setStreamHandler(null)
+        eventSink = null
+    }
+}
+
+// MARK: - Factory
+
+class YOLOMultiTaskPlatformViewFactory(
+    private val messenger: BinaryMessenger
+) : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
+
+    private var activity: Activity? = null
+    val activeViews = mutableMapOf<Int, YOLOMultiTaskPlatformView>()
+
+    fun setActivity(activity: Activity?) {
+        this.activity = activity
+    }
+
+    override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
+        val view = YOLOMultiTaskPlatformView(activity ?: context, viewId, args, messenger) { id ->
+            activeViews.remove(id)
+        }
+        activeViews[viewId] = view
+        return view
+    }
+}
