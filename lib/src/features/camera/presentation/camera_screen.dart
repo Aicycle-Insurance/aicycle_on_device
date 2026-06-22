@@ -233,107 +233,119 @@ class _CameraScreenState extends State<CameraScreen> {
                 bottom: (h - 115.h) / h,
               );
             }
-            return AnimatedBuilder(
-              animation: _cameraController,
-              builder: (context, _) => Stack(
-                children: [
-                  MultiTaskYOLOView(
-                    detectModelPath: widget.carDamageModelPath,
-                    classifyModelPath: widget.carCornerModelPath,
-                    secondDetectModelPath: widget.carPartModelPath,
-                    controller: _cameraController.yoloController,
-                    secondDetectConfidenceThreshold: model.carPartConfThreshold,
-                    secondDetectIouThreshold: model.carPartIouThreshold,
-                    classifyConfidenceThreshold: model.carCornerConfThreshold,
-                    detectConfidenceThreshold: model.carDamageConfThreshold,
-                    detectIouThreshold: model.carDamageIouThreshold,
-                    onStreamingData: _cameraController.onStreamingData,
-                  ),
+            return Stack(
+              children: [
+                // Platform view dựng MỘT lần — đặt NGOÀI AnimatedBuilder để
+                // không bị rebuild theo từng frame inference (notifyListeners).
+                MultiTaskYOLOView(
+                  detectModelPath: widget.carDamageModelPath,
+                  classifyModelPath: widget.carCornerModelPath,
+                  secondDetectModelPath: widget.carPartModelPath,
+                  controller: _cameraController.yoloController,
+                  secondDetectConfidenceThreshold: model.carPartConfThreshold,
+                  secondDetectIouThreshold: model.carPartIouThreshold,
+                  classifyConfidenceThreshold: model.carCornerConfThreshold,
+                  detectConfidenceThreshold: model.carDamageConfThreshold,
+                  detectIouThreshold: model.carDamageIouThreshold,
+                  onStreamingData: _cameraController.onStreamingData,
+                ),
 
-                  /// Bounding boxes — only during inspection phase
-                  Positioned.fill(
-                    child: BoundingBoxOverlay(
-                      detections: _cameraController.showBoundingBoxes
-                          ? _cameraController.latestDetections
-                          : const [],
-                    ),
-                  ),
-
-                  /// Nhãn tên bộ phận — chỉ khi đang căn chỉnh ảnh toàn cảnh.
-                  Positioned.fill(
-                    child: CarPartLabelOverlay(
-                      detections: _cameraController.latestCarPartDetections,
-                    ),
-                  ),
-
-                  /// Overlay UI — yellow frame corners only while taking the
-                  /// panoramic photo, not during damage detail inspection.
-                  if (!_cameraController.isInspectionMode)
-                    Positioned(
-                      top: 83.h,
-                      left: 0.w,
-                      right: 0.w,
-                      bottom: 115.h,
-                      child: CameraFrameCorners(
-                        isSuccess: _cameraController.message?.type ==
-                            MessageType.loading,
-                      ),
-                    ),
-
-                  /// Tooltip — buttons depend on inspection phase
-                  if (_cameraController.message != null)
-                    Positioned(
-                      right: 36.w,
-                      top: 105.h,
-                      bottom: 140.h,
-                      child: Center(
-                        child: RotatedBox(
-                          quarterTurns: 1,
-                          child: _buildTooltip(),
+                // Các overlay động gom trong 1 AnimatedBuilder phủ kín màn hình.
+                Positioned.fill(
+                  child: AnimatedBuilder(
+                    animation: _cameraController,
+                    builder: (context, _) => Stack(
+                      children: [
+                        /// Bounding boxes — only during inspection phase
+                        Positioned.fill(
+                          child: BoundingBoxOverlay(
+                            detections: _cameraController.showBoundingBoxes
+                                ? _cameraController.latestDetections
+                                : const [],
+                          ),
                         ),
-                      ),
+
+                        /// Nhãn tên bộ phận — chỉ khi đang căn chỉnh ảnh toàn cảnh.
+                        Positioned.fill(
+                          child: CarPartLabelOverlay(
+                            detections:
+                                _cameraController.latestCarPartDetections,
+                          ),
+                        ),
+
+                        /// Overlay UI — yellow frame corners only while taking the
+                        /// panoramic photo, not during damage detail inspection.
+                        if (!_cameraController.isInspectionMode)
+                          Positioned(
+                            top: 83.h,
+                            left: 0.w,
+                            right: 0.w,
+                            bottom: 115.h,
+                            child: CameraFrameCorners(
+                              isSuccess: _cameraController.message?.type ==
+                                  MessageType.loading,
+                            ),
+                          ),
+
+                        /// Tooltip — buttons depend on inspection phase
+                        if (_cameraController.message != null)
+                          Positioned(
+                            right: 36.w,
+                            top: 105.h,
+                            bottom: 140.h,
+                            child: Center(
+                              child: RotatedBox(
+                                quarterTurns: 1,
+                                child: _buildTooltip(),
+                              ),
+                            ),
+                          ),
+
+                        // Top bar
+                        CameraTopBar(
+                          isTorchEnabled: _cameraController.isTorchEnabled,
+                          onClose: () async {
+                            final nav = Navigator.of(context);
+                            if (await _onWillPop()) nav.pop();
+                          },
+                          onToggleFlash: _cameraController.toggleFlash,
+                        ),
+
+                        // Bottom bar (thumbnail + nút chụp thủ công + progress ring)
+                        CameraBottomBar(
+                          capturedPhotos: _cameraController.capturedPhotos,
+                          activeSegmentIndex:
+                              _cameraController.activeSegmentIndex,
+                          completedSegments:
+                              _cameraController.completedSegments,
+                          onShowProgress: _showCarProgressDialog,
+                          onCapture: _cameraController.manualCapture,
+                        ),
+
+                        /// Nút "Xem kết quả" (2 bước chống chạm nhầm) — góc dưới phải.
+                        if (_canGoNext())
+                          Positioned(
+                            left: 24.w,
+                            bottom: 130.h,
+                            child: RotatedBox(
+                              quarterTurns: 1,
+                              child: ViewResultButton(onPressed: _goToResult),
+                            ),
+                          ),
+
+                        /// Screen-blink (flash) effect — triggered on every photo capture.
+                        Positioned.fill(
+                          top: 83.h,
+                          bottom: 115.h,
+                          child: _CaptureFlashOverlay(
+                            flashTick: _cameraController.captureFlashTick,
+                          ),
+                        ),
+                      ],
                     ),
-
-                  // Top bar
-                  CameraTopBar(
-                    isTorchEnabled: _cameraController.isTorchEnabled,
-                    onClose: () async {
-                      final nav = Navigator.of(context);
-                      if (await _onWillPop()) nav.pop();
-                    },
-                    onToggleFlash: _cameraController.toggleFlash,
                   ),
-
-                  // Bottom bar (thumbnail + nút chụp thủ công + progress ring)
-                  CameraBottomBar(
-                    capturedPhotos: _cameraController.capturedPhotos,
-                    activeSegmentIndex: _cameraController.activeSegmentIndex,
-                    completedSegments: _cameraController.completedSegments,
-                    onShowProgress: _showCarProgressDialog,
-                    onCapture: _cameraController.manualCapture,
-                  ),
-
-                  /// Nút "Xem kết quả" (2 bước chống chạm nhầm) — góc dưới phải.
-                  if (_canGoNext())
-                    Positioned(
-                      left: 24.w,
-                      bottom: 130.h,
-                      child: RotatedBox(
-                        quarterTurns: 1,
-                        child: ViewResultButton(onPressed: _goToResult),
-                      ),
-                    ),
-
-                  /// Screen-blink (flash) effect — triggered on every photo capture.
-                  Positioned.fill(
-                    top: 83.h,
-                    bottom: 115.h,
-                    child: _CaptureFlashOverlay(
-                      flashTick: _cameraController.captureFlashTick,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             );
           },
         ),

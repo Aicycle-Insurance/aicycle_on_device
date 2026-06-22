@@ -132,6 +132,10 @@ class CameraController extends ChangeNotifier {
 
   // ── Streaming data ────────────────────────────────────────────────────────
 
+  // [data] đã là Map<String, dynamic> do MultiTaskYOLOView cấp — dùng trực tiếp,
+  // không copy lại (mỗi frame chạy trên UI thread). Mỗi nhánh chỉ
+  // notifyListeners() đúng một lần và chỉ khi có thay đổi nhìn thấy được, để
+  // tránh rebuild thừa khi stream bắn nhiều frame/giây.
   void onStreamingData(Map<String, dynamic> data) {
     final type = data['type'];
     // Hai model detect đều trả type=='detect'; phân biệt bằng modelId:
@@ -140,40 +144,52 @@ class CameraController extends ChangeNotifier {
     final modelId = data['modelId'];
     if (type == 'classify') {
       // carCorner — phân loại góc xe.
-      final output = ClassifyOutput.fromJson(Map<String, dynamic>.from(data));
+      final output = ClassifyOutput.fromJson(data);
       final segment = CarAngle.segmentOf(output.classification.top1);
       // Luôn highlight góc đang nhận diện được, kể cả khi flow đã khoá.
-      if (segment != null && segment != _detectedSegmentIndex) {
-        _detectedSegmentIndex = segment;
-        notifyListeners();
+      final highlightChanged =
+          segment != null && segment != _detectedSegmentIndex;
+      if (highlightChanged) _detectedSegmentIndex = segment;
+
+      // Cập nhật luồng (chỉ khi chưa khoá và góc đổi). Các hàm bên trong
+      // (startDamageScanning/updateMessage) tự notify khi message đổi.
+      if (!_classificationLocked && segment != _activeSegmentIndex) {
+        _activeSegmentIndex = segment;
+        // Góc này đã có ảnh toàn cảnh → bắt đầu luôn từ scanning, không cần
+        // chụp toàn cảnh lại.
+        if (_panoramicCapturedSegments.contains(segment)) {
+          _classificationLocked = true;
+          startDamageScanning();
+        } else {
+          updateMessage();
+        }
       }
-      if (_classificationLocked) return;
-      if (segment == _activeSegmentIndex) return;
-      _activeSegmentIndex = segment;
-      // Góc này đã có ảnh toàn cảnh → bắt đầu luôn từ scanning, không cần
-      // chụp toàn cảnh lại.
-      if (_panoramicCapturedSegments.contains(segment)) {
-        _classificationLocked = true;
-        startDamageScanning();
-      } else {
-        updateMessage();
-      }
-    } else if (type == 'detect' && modelId == 'detect2') {
+      if (highlightChanged) notifyListeners();
+      return;
+    }
+
+    if (type == 'detect' && modelId == 'detect2') {
       // carPart — model detect bộ phận, dùng để căn ảnh toàn cảnh.
-      final output = DetectionOutput.fromJson(Map<String, dynamic>.from(data));
+      final output = DetectionOutput.fromJson(data);
+      final wasEmpty = _latestCarPartDetections.isEmpty;
       _latestCarPartClasses = output.detections.map((d) => d.className).toSet();
       _latestCarPartDetections = output.detections;
-      updateMessage();
-      notifyListeners();
+      updateMessage(); // tự notify khi message đổi
+      // Bỏ qua redraw nếu không có nhãn bộ phận nào để vẽ (trước & sau đều rỗng).
+      if (!(wasEmpty && output.detections.isEmpty)) notifyListeners();
       return;
-    } else if (type == 'detect') {
+    }
+
+    if (type == 'detect') {
       // carDamage — model detect tổn thất (model chính).
-      final output = DetectionOutput.fromJson(Map<String, dynamic>.from(data));
+      final output = DetectionOutput.fromJson(data);
       _latestDetections = output.detections;
       // Phát hiện tổn thất → hiển thị xác nhận ngay, không chờ timer 5s.
-      _maybeShowDetectionReady();
+      _maybeShowDetectionReady(); // tự notify khi chuyển pha
+      // Bounding box chỉ vẽ khi đang trong pha inspection; ngoài ra việc đổi
+      // _latestDetections không ảnh hưởng UI → khỏi rebuild.
+      if (showBoundingBoxes) notifyListeners();
     }
-    notifyListeners();
   }
 
   // ── Torch ─────────────────────────────────────────────────────────────────
