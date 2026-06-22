@@ -137,10 +137,10 @@ class ModelConfig {
   final double carDamageIouThreshold;
 
   ModelConfig({
-    this.carPartConfThreshold = 0.25,
+    this.carPartConfThreshold = 0.5,
     this.carPartIouThreshold = 0.45,
-    this.carCornerConfThreshold = 0.25,
-    this.carDamageConfThreshold = 0.25,
+    this.carCornerConfThreshold = 0.3,
+    this.carDamageConfThreshold = 0.3,
     this.carDamageIouThreshold = 0.45,
   })  : assert(
           carPartConfThreshold >= 0.0 && carPartConfThreshold <= 1.0,
@@ -152,15 +152,15 @@ class ModelConfig {
         ),
         assert(
           carCornerConfThreshold >= 0.0 && carCornerConfThreshold <= 1.0,
-          'classifyConfThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
+          'carCornerConfThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
         ),
         assert(
           carDamageConfThreshold >= 0.0 && carDamageConfThreshold <= 1.0,
-          'detectionConfThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
+          'carDamageConfThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
         ),
         assert(
           carDamageIouThreshold >= 0.0 && carDamageIouThreshold <= 1.0,
-          'detectionIouThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
+          'carDamageIouThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
         );
 }
 

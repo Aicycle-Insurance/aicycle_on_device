@@ -277,10 +277,10 @@ ModelConfig();
 
 // Hoặc tinh chỉnh
 ModelConfig(
-  carPartConfThreshold: 0.1,
+  carPartConfThreshold: 0.5,
   carPartIouThreshold: 0.45,
-  carCornerConfThreshold: 0.1,
-  carDamageConfThreshold: 0.1,
+  carCornerConfThreshold: 0.3,
+  carDamageConfThreshold: 0.3,
   carDamageIouThreshold: 0.45,
 );
 ```
