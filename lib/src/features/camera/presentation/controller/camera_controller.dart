@@ -47,17 +47,18 @@ class CameraController extends ChangeNotifier {
   double _cropTop = 0;
   double _cropBottom = 1;
 
-  /// Đã đồng bộ cấu hình model bật/tắt theo pha lần đầu chưa (cần channel native
-  /// đã attach — tức đã có frame đầu).
-  bool _activeModelsSynced = false;
-
   /// Bumped every time a photo is actually captured — the view listens to
   /// this to trigger a screen-blink (flash) effect.
   int _captureFlashTick = 0;
   CameraMessage? _message;
 
   /// Segment index (0–3) đang được detect, null nếu chưa nhận kết quả.
+  /// Đây là góc cho LUỒNG xử lý (bị khoá khi [_classificationLocked]).
   int? _activeSegmentIndex;
+
+  /// Góc (0–3) đang được classify nhận diện trực tiếp ở frame mới nhất — luôn
+  /// cập nhật bất kể flow có khoá hay không, dùng để highlight trên UI.
+  int? _detectedSegmentIndex;
 
   /// Angles that have a panoramic photo (inspection started but not completed).
   final Set<int> _panoramicCapturedSegments = {};
@@ -95,7 +96,7 @@ class CameraController extends ChangeNotifier {
   bool get isTorchEnabled => _torchEnabled;
   bool get isCapturing => _isCapturing;
   Map<int, List<Uint8List>> get capturedPhotos => _capturedPhotos;
-  int? get activeSegmentIndex => _activeSegmentIndex;
+  int? get activeSegmentIndex => _detectedSegmentIndex ?? _activeSegmentIndex;
   Set<int> get completedSegments => Set.unmodifiable(_completedSegments);
   CameraMessage? get message => _message;
   int get captureFlashTick => _captureFlashTick;
@@ -132,12 +133,6 @@ class CameraController extends ChangeNotifier {
   // ── Streaming data ────────────────────────────────────────────────────────
 
   void onStreamingData(Map<String, dynamic> data) {
-    // Áp cấu hình model cho pha hiện tại ngay khi có frame đầu (lúc này channel
-    // native đã attach). Ban đầu chưa inspection → chỉ carCorner + carPart.
-    if (!_activeModelsSynced) {
-      _activeModelsSynced = true;
-      _syncActiveModels();
-    }
     final type = data['type'];
     // Hai model detect đều trả type=='detect'; phân biệt bằng modelId:
     //   'detect'  -> car damage (model chính)
@@ -145,9 +140,14 @@ class CameraController extends ChangeNotifier {
     final modelId = data['modelId'];
     if (type == 'classify') {
       // carCorner — phân loại góc xe.
-      if (_classificationLocked) return;
       final output = ClassifyOutput.fromJson(Map<String, dynamic>.from(data));
       final segment = CarAngle.segmentOf(output.classification.top1);
+      // Luôn highlight góc đang nhận diện được, kể cả khi flow đã khoá.
+      if (segment != null && segment != _detectedSegmentIndex) {
+        _detectedSegmentIndex = segment;
+        notifyListeners();
+      }
+      if (_classificationLocked) return;
       if (segment == _activeSegmentIndex) return;
       _activeSegmentIndex = segment;
       // Góc này đã có ảnh toàn cảnh → bắt đầu luôn từ scanning, không cần
@@ -287,6 +287,9 @@ class CameraController extends ChangeNotifier {
       message: StringSheet.inspectDamageGuide,
       type: MessageType.info,
     ));
+    // Đang hướng dẫn soi tổn thất: nếu sau 10 s vẫn không phát hiện tổn thất
+    // → cảnh báo rồi tự chuyển góc.
+    _startNoDetectionTimer();
   }
 
   // ── Inspection / damage flow ──────────────────────────────────────────────
@@ -334,7 +337,13 @@ class CameraController extends ChangeNotifier {
     });
   }
 
-  /// 10 s ở scanning mà không phát hiện tổn thất → cảnh báo rồi rời góc.
+  /// Các pha đang chờ phát hiện tổn thất: hướng dẫn soi (panoramicGuide) và
+  /// đang quét (scanning). Hết 10 s mà không thấy tổn thất → cảnh báo rồi rời góc.
+  bool get _isAwaitingDamage =>
+      _inspectionPhase == InspectionPhase.scanning ||
+      _inspectionPhase == InspectionPhase.panoramicGuide;
+
+  /// 10 s không phát hiện tổn thất → cảnh báo rồi rời góc.
   void _startNoDetectionTimer() {
     _noDetectionTimer?.cancel();
     _noDetectionTimer =
@@ -342,7 +351,7 @@ class CameraController extends ChangeNotifier {
   }
 
   Future<void> _onNoDetectionTimeout() async {
-    if (_inspectionPhase != InspectionPhase.scanning) return;
+    if (!_isAwaitingDamage) return;
     if (_latestDetections.isNotEmpty) return;
 
     _setMessage(CameraMessage(
@@ -352,7 +361,7 @@ class CameraController extends ChangeNotifier {
 
     await Future.delayed(const Duration(seconds: 5));
     // Guard: angle may already have been completed/changed during the delay.
-    if (_inspectionPhase != InspectionPhase.scanning) return;
+    if (!_isAwaitingDamage) return;
     completeCurrentAngle();
   }
 
@@ -452,22 +461,9 @@ class CameraController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Bật/tắt model theo pha để giảm tải (model vẫn nằm sẵn trong bộ nhớ, không
-  /// reload khi đổi). carCorner + carPart luôn bật; carDamage chỉ bật khi đang
-  /// quét tìm vết thiệt hại ([InspectionPhase.scanning]), còn lại tắt.
-  void _syncActiveModels() {
-    final scanning = _inspectionPhase == InspectionPhase.scanning;
-    yoloController.setActiveModels(
-      classify: true, // carCorner — luôn bật
-      detect: scanning, // carDamage — chỉ khi quét thiệt hại
-      secondDetect: true, // carPart — luôn bật
-    );
-  }
-
-  /// Gán pha inspection và đồng bộ lại model đang bật/tắt cho khớp pha.
+  /// Gán pha inspection. Tất cả model luôn chạy — không bật/tắt theo pha.
   void _setInspectionPhase(InspectionPhase? phase) {
     _inspectionPhase = phase;
-    _syncActiveModels();
   }
 
   bool _stopped = false;
