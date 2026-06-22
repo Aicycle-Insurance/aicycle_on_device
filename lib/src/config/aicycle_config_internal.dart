@@ -3,7 +3,13 @@ import 'aicycle_config.dart';
 /// Internal extension to provide base URLs based on environment.
 /// This prevents end-users from seeing these URLs in their IDE autocomplete.
 extension AiCycleConfigInternal on AICycleConfig {
+  /// Ưu tiên dùng [GeneralConfig.customDomain] nếu được cung cấp,
+  /// nếu null thì fallback về URL theo môi trường.
   String get baseUrl {
+    final customDomain = generalConfig.customDomain;
+    if (customDomain != null && customDomain.isNotEmpty) {
+      return customDomain;
+    }
     switch (generalConfig.environment) {
       case AiCycleEnvironment.develop:
         return 'https://dev.api.aicycle.ai';

@@ -100,6 +100,9 @@ class GeneralConfig {
   /// Có lưu lại ảnh đã chụp vào gallery không
   final bool savePhotoAfterShot;
 
+  /// Ví dụ: https://example.com
+  final String? customDomain;
+
   GeneralConfig({
     required this.apiToken,
     required this.documentId,
@@ -108,7 +111,16 @@ class GeneralConfig {
     this.documentName,
     this.loggingEnabled = false,
     this.savePhotoAfterShot = true,
-  });
+    this.customDomain,
+  })  : assert(
+          customDomain == null || customDomain.isNotEmpty,
+          'customDomain phải khác rỗng nếu được cung cấp',
+        ),
+        assert(
+          organization != AiCycleOrg.vbi ||
+              (customDomain != null && customDomain.isNotEmpty),
+          'customDomain là bắt buộc và phải khác rỗng với đối tác VBI',
+        );
 }
 
 class ValidateConfig {
@@ -178,6 +190,8 @@ class DisplayConfig {
 }
 
 class VBIConfig {
+  /// Ví dụ: v1, v2
+  final String apiVersionCode;
   final String authorityId;
   final String signatureKey;
   final String externalSessionId;
@@ -190,6 +204,7 @@ class VBIConfig {
   final String source;
 
   VBIConfig({
+    required this.apiVersionCode,
     required this.authorityId,
     required this.signatureKey,
     required this.externalSessionId,

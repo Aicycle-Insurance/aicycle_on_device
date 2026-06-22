@@ -2,9 +2,6 @@ import '../../features/ai_model_manager/data/datasource/ai_model_local_datasourc
 import '../../features/ai_model_manager/data/datasource/ai_model_remote_datasource.dart';
 import '../../features/ai_model_manager/data/repository/ai_model_repository_impl.dart';
 import '../../features/ai_model_manager/domain/repository/ai_model_repository.dart';
-import '../../features/auth/data/datasource/auth_remote_datasource.dart';
-import '../../features/auth/data/repository/auth_repository_impl.dart';
-import '../../features/auth/domain/repository/auth_repository.dart';
 import '../../features/aicycle_folder/data/datasource/aicycle_folder_remote_datasource.dart';
 import '../../features/aicycle_folder/data/repository/aicycle_folder_repository_impl.dart';
 import '../../features/aicycle_folder/domain/repository/aicycle_folder_repository.dart';
@@ -33,12 +30,6 @@ class AICycleInjection {
     _aiModelRemoteDataSource,
     _aiModelLocalDataSource,
   );
-
-  // --- Feature: Auth ---
-  late final AuthRemoteDataSource _authRemoteDataSource =
-      AuthRemoteDataSource(dioClient);
-  late final AuthRepository authRepository =
-      AuthRepositoryImpl(_authRemoteDataSource);
 
   // --- Feature: AICycle Folder ---
   late final AICycleFolderRemoteDataSource _aicycleFolderRemoteDataSource =

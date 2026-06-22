@@ -34,6 +34,9 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
   final _apiTokenController = TextEditingController(text: '');
   final _documentIdController = TextEditingController(text: '');
   final _documentNameController = TextEditingController(text: 'Test Claim');
+  final _customDomainController = TextEditingController(
+    text: 'https://stage.api.aicycle.ai',
+  );
   AiCycleEnvironment _environment = AiCycleEnvironment.stage;
   AiCycleOrg _organization = AiCycleOrg.aicycle;
   bool _loggingEnabled = true;
@@ -90,6 +93,7 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
             _textField('API Token', _apiTokenController, isRequired: true),
             _textField('Document ID', _documentIdController, isRequired: true),
             _textField('Document Name', _documentNameController),
+            _textField('Custom Domain', _customDomainController),
             _dropdown<AiCycleEnvironment>(
               'Environment',
               _environment,
@@ -324,6 +328,7 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
         return;
       }
       vbiConfig = VBIConfig(
+        apiVersionCode: 'v1',
         authorityId: _vbiAuthorityIdController.text,
         signatureKey: _vbiSignatureKeyController.text,
         externalSessionId: _vbiExternalSessionIdController.text,
@@ -346,6 +351,9 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
         organization: _organization,
         loggingEnabled: _loggingEnabled,
         savePhotoAfterShot: _savePhoto,
+        customDomain: _customDomainController.text.isEmpty
+            ? null
+            : _customDomainController.text,
       ),
       carInformation: CarInformation(
         companyName: _companyNameController.text,

@@ -54,7 +54,6 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
     _modelController = CameraModelController(
       sl.aiModelRepository,
       sl.aicycleFolderRepository,
-      sl.authRepository,
     )..onError = (message) => widget.onError?.call(message);
 
     _modelController.init(

@@ -4,7 +4,6 @@ import 'package:dio/dio.dart';
 
 import '../../../../../aicycle_on_device.dart';
 import '../../../../config/config_holder.dart';
-import '../../../../core/cache/session_cache.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../../../core/utils/location_services.dart';
 import '../model/result_model.dart';
@@ -13,9 +12,6 @@ class ResultRemoteDataSource {
   ResultRemoteDataSource(this._client);
 
   final DioClient _client;
-
-  /// Base URL của server VBI (độc lập với hệ thống AICycle).
-  static const _vbiBaseUrl = 'https://uat-api-mobile.evbi.vn/api/v1/vbi4sales';
 
   /// Upload to AICycle server
   /// POST /v2/claim-me/upload
@@ -39,7 +35,6 @@ class ResultRemoteDataSource {
     });
     await _client.post<dynamic>(
       '/insurance/v2/claim-me/upload',
-      customBaseUrl: SessionCache.instance.baseUrlOnPremise,
       data: formData,
     );
 
@@ -96,9 +91,10 @@ class ResultRemoteDataSource {
       'source': vbi.source,
     });
 
+    /// Chắc chắn != null do org VBI bắt buộc khai báo
+    final versionCode = config.vbiConfig!.apiVersionCode;
     await _client.post<dynamic>(
-      '/Upload/upload-ai',
-      customBaseUrl: _vbiBaseUrl,
+      '/api/$versionCode/vbi4sales/Upload/upload-ai',
       skipDefaultAuth: true,
       headers: {
         'Authority': vbi.authorityId,
