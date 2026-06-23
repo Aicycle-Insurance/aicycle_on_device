@@ -86,7 +86,11 @@ class _CameraScreenState extends State<CameraScreen> {
           color: Colors.transparent,
           child: Center(
             child: CameraGuideSheet(
-              onStart: () => Navigator.of(context).pop(),
+              onStart: () {
+                // Mở cổng streaming: trước khi bấm nút này, output YOLO bị bỏ qua.
+                _cameraController.startCapture();
+                Navigator.of(context).pop();
+              },
             ),
           ),
         ),

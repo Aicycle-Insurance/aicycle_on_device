@@ -96,6 +96,7 @@ class ResultRemoteDataSource {
     await _client.post<dynamic>(
       '/api/$versionCode/vbi4sales/Upload/upload-ai',
       skipDefaultAuth: true,
+      customBaseUrl: config.vbiConfig!.apiUploadBaseUrl,
       headers: {
         'Authority': vbi.authorityId,
         'Signature': vbi.signatureKey,

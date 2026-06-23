@@ -39,6 +39,11 @@ class CameraController extends ChangeNotifier {
 
   bool _torchEnabled = false;
   bool _isCapturing = false;
+
+  /// User chưa bấm "Bắt đầu chụp ảnh xe" (guide sheet) → tạm bỏ qua mọi output
+  /// streaming từ YOLO. Bật lên qua [startCapture].
+  bool _captureStarted = false;
+
   Map<int, List<Uint8List>> _capturedPhotos = {};
 
   /// Vùng camera user thực sự nhìn thấy (giữa top bar và bottom bar), dạng tỉ lệ
@@ -130,6 +135,12 @@ class CameraController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── Capture gate ──────────────────────────────────────────────────────────
+
+  /// Gọi khi user bấm "Bắt đầu chụp ảnh xe" ở guide sheet — mở cổng cho phép
+  /// [onStreamingData] bắt đầu xử lý frame. An toàn khi gọi nhiều lần.
+  void startCapture() => _captureStarted = true;
+
   // ── Streaming data ────────────────────────────────────────────────────────
 
   // [data] đã là Map<String, dynamic> do MultiTaskYOLOView cấp — dùng trực tiếp,
@@ -137,6 +148,9 @@ class CameraController extends ChangeNotifier {
   // notifyListeners() đúng một lần và chỉ khi có thay đổi nhìn thấy được, để
   // tránh rebuild thừa khi stream bắn nhiều frame/giây.
   void onStreamingData(Map<String, dynamic> data) {
+    // User chưa bấm "Bắt đầu chụp ảnh xe" → bỏ qua toàn bộ frame streaming.
+    if (!_captureStarted) return;
+
     final type = data['type'];
     // Hai model detect đều trả type=='detect'; phân biệt bằng modelId:
     //   'detect'  -> car damage (model chính)

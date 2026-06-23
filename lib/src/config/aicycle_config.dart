@@ -100,8 +100,9 @@ class GeneralConfig {
   /// Có lưu lại ảnh đã chụp vào gallery không
   final bool savePhotoAfterShot;
 
+  /// API Endpoint của AICycle trong môi trường On-Premise của đối tác (nếu có)
   /// Ví dụ: https://example.com
-  final String? customDomain;
+  final String? aicBaseUrl;
 
   GeneralConfig({
     required this.apiToken,
@@ -111,15 +112,15 @@ class GeneralConfig {
     this.documentName,
     this.loggingEnabled = false,
     this.savePhotoAfterShot = true,
-    this.customDomain,
+    this.aicBaseUrl,
   })  : assert(
-          customDomain == null || customDomain.isNotEmpty,
-          'customDomain phải khác rỗng nếu được cung cấp',
+          aicBaseUrl == null || aicBaseUrl.isNotEmpty,
+          'aicBaseUrl phải khác rỗng nếu được cung cấp',
         ),
         assert(
           organization != AiCycleOrg.vbi ||
-              (customDomain != null && customDomain.isNotEmpty),
-          'customDomain là bắt buộc và phải khác rỗng với đối tác VBI',
+              (aicBaseUrl != null && aicBaseUrl.isNotEmpty),
+          'aicBaseUrl là bắt buộc và phải khác rỗng với đối tác VBI',
         );
 }
 
@@ -192,6 +193,10 @@ class DisplayConfig {
 class VBIConfig {
   /// Ví dụ: v1, v2
   final String apiVersionCode;
+
+  /// API upload ảnh của hệ thống VBI
+  /// Ví dụ: https://uat-api.example.com
+  final String apiUploadBaseUrl;
   final String authorityId;
   final String signatureKey;
   final String externalSessionId;
@@ -205,6 +210,7 @@ class VBIConfig {
 
   VBIConfig({
     required this.apiVersionCode,
+    required this.apiUploadBaseUrl,
     required this.authorityId,
     required this.signatureKey,
     required this.externalSessionId,

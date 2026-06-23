@@ -1,4 +1,8 @@
-## 0.0.5
+## 0.0.7
+
+* Fix bugs and enhance performance
+
+## 0.0.6
 
 * Fix bugs and enhance performance
 

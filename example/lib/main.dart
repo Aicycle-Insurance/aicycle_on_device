@@ -62,6 +62,8 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
   final _carDamageIouController = TextEditingController(text: '0.45');
 
   // VBI Config (chỉ bắt buộc khi Organization = vbi)
+  final _vbiApiVersionCodeController = TextEditingController(text: 'v1');
+  final _vbiApiUploadBaseUrlController = TextEditingController(text: '');
   final _vbiAuthorityIdController = TextEditingController(text: '');
   final _vbiSignatureKeyController = TextEditingController(text: '');
   final _vbiExternalSessionIdController = TextEditingController(text: '');
@@ -75,6 +77,9 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
 
   // Display Config
   bool _showBackButton = true;
+
+  // Validate Config
+  bool _require4AnglePanoramicPhotos = false;
 
   @override
   Widget build(BuildContext context) {
@@ -121,6 +126,16 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
             if (_organization == AiCycleOrg.vbi) ...[
               const Divider(height: 32),
               _sectionTitle('VBI Configuration'),
+              _textField(
+                'API Version Code',
+                _vbiApiVersionCodeController,
+                isRequired: true,
+              ),
+              _textField(
+                'API Upload Base URL',
+                _vbiApiUploadBaseUrlController,
+                isRequired: true,
+              ),
               _textField(
                 'Authority ID',
                 _vbiAuthorityIdController,
@@ -203,6 +218,14 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
               'Show Back Button',
               _showBackButton,
               (val) => setState(() => _showBackButton = val),
+            ),
+
+            const Divider(height: 32),
+            _sectionTitle('Validate Configuration'),
+            _switchTile(
+              'Require 4-angle panoramic photos',
+              _require4AnglePanoramicPhotos,
+              (val) => setState(() => _require4AnglePanoramicPhotos = val),
             ),
 
             const SizedBox(height: 32),
@@ -312,7 +335,9 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
 
     VBIConfig? vbiConfig;
     if (_organization == AiCycleOrg.vbi) {
-      if (_vbiAuthorityIdController.text.isEmpty ||
+      if (_vbiApiVersionCodeController.text.isEmpty ||
+          _vbiApiUploadBaseUrlController.text.isEmpty ||
+          _vbiAuthorityIdController.text.isEmpty ||
           _vbiSignatureKeyController.text.isEmpty ||
           _vbiExternalSessionIdController.text.isEmpty ||
           _vbiJobIdController.text.isEmpty ||
@@ -328,7 +353,8 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
         return;
       }
       vbiConfig = VBIConfig(
-        apiVersionCode: 'v1',
+        apiVersionCode: _vbiApiVersionCodeController.text,
+        apiUploadBaseUrl: _vbiApiUploadBaseUrlController.text,
         authorityId: _vbiAuthorityIdController.text,
         signatureKey: _vbiSignatureKeyController.text,
         externalSessionId: _vbiExternalSessionIdController.text,
@@ -351,7 +377,7 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
         organization: _organization,
         loggingEnabled: _loggingEnabled,
         savePhotoAfterShot: _savePhoto,
-        customDomain: _customDomainController.text.isEmpty
+        aicBaseUrl: _customDomainController.text.isEmpty
             ? null
             : _customDomainController.text,
       ),
@@ -374,6 +400,9 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
         carDamageIouThreshold: double.parse(_carDamageIouController.text),
       ),
       displayConfig: DisplayConfig(showBackButton: _showBackButton),
+      validateConfig: ValidateConfig(
+        require4AnglePanoramicPhotos: _require4AnglePanoramicPhotos,
+      ),
       vbiConfig: vbiConfig,
     );
 

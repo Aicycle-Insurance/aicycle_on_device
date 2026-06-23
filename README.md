@@ -216,6 +216,7 @@ final config = AICycleConfig(
 | `documentName` | `String?` | ❌ | `null` | Tên hồ sơ. |
 | `loggingEnabled` | `bool` | ❌ | `false` | Bật/tắt log của SDK. |
 | `savePhotoAfterShot` | `bool` | ❌ | `true` | Có lưu ảnh đã chụp vào gallery của máy không. |
+| `aicBaseUrl` | `String?` | ❌ | `null` | Base URL API AICycle theo domain đối tác (on-premise). |
 
 ```dart
 GeneralConfig(
@@ -226,8 +227,12 @@ GeneralConfig(
   documentName: 'Hồ sơ kiểm định xe',
   loggingEnabled: false,
   savePhotoAfterShot: true,
+  // Ví dụ override domain API cho môi trường đối tác.
+  // aicBaseUrl: 'https://partner-api.example.com',
 );
 ```
+
+> ⚠️ Với `organization: AiCycleOrg.vbi`, `aicBaseUrl` là **bắt buộc** và phải khác rỗng.
 
 ### `CarInformation` (bắt buộc)
 
@@ -265,10 +270,10 @@ Ngưỡng cho từng model AI. Tất cả giá trị phải nằm trong khoảng
 
 | Trường | Kiểu | Mặc định | Mô tả |
 |---|---|---|---|
-| `carPartConfThreshold` | `double` | `0.25` | Confidence threshold model nhận diện bộ phận xe. |
+| `carPartConfThreshold` | `double` | `0.5` | Confidence threshold model nhận diện bộ phận xe. |
 | `carPartIouThreshold` | `double` | `0.45` | IOU threshold model nhận diện bộ phận xe. |
-| `carCornerConfThreshold` | `double` | `0.25` | Confidence threshold model phân loại góc xe. |
-| `carDamageConfThreshold` | `double` | `0.25` | Confidence threshold model phát hiện thiệt hại. |
+| `carCornerConfThreshold` | `double` | `0.3` | Confidence threshold model phân loại góc xe. |
+| `carDamageConfThreshold` | `double` | `0.3` | Confidence threshold model phát hiện thiệt hại. |
 | `carDamageIouThreshold` | `double` | `0.45` | IOU threshold model phát hiện thiệt hại. |
 
 ```dart
@@ -318,6 +323,8 @@ Chỉ dùng khi `generalConfig.organization == AiCycleOrg.vbi`. Tất cả các 
 
 | Trường | Kiểu | Mô tả |
 |---|---|---|
+| `apiVersionCode` | `String` | Version API VBI, ví dụ `v1`, `v2`. |
+| `apiUploadBaseUrl` | `String` | Base URL upload ảnh của hệ thống VBI. |
 | `authorityId` | `String` | ID đơn vị/authority. |
 | `signatureKey` | `String` | Khóa chữ ký. |
 | `externalSessionId` | `String` | ID phiên bên ngoài. |
@@ -335,10 +342,13 @@ final config = AICycleConfig(
     apiToken: '<API_TOKEN>',
     documentId: '<DOCUMENT_ID>',
     organization: AiCycleOrg.vbi, // ⚠️ bắt buộc vbiConfig
+    aicBaseUrl: 'https://partner-api.example.com', // ⚠️ bắt buộc với VBI
   ),
   modelConfig: ModelConfig(),
   carInformation: CarInformation(licensePlate: '30A12345'),
   vbiConfig: VBIConfig(
+    apiVersionCode: 'v1',
+    apiUploadBaseUrl: 'https://uat-api-vbi.example.com',
     authorityId: '...',
     signatureKey: '...',
     externalSessionId: '...',
