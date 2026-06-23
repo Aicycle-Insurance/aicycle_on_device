@@ -2406,6 +2406,12 @@ class YOLOView @JvmOverloads constructor(
         // A full teardown is not an intentional pause; a later lifecycle restart should rebind normally.
         intentionallyPaused = false
 
+        // ── Fast path on the calling (main) thread ──────────────────────────────
+        // Stop the camera preview/analysis immediately so the UI can transition away
+        // without waiting for the heavy native teardown. Mirrors pauseCamera()'s cheap
+        // unbind; the executor await + predictor close are deferred to a background
+        // thread below.
+        val executorToShutdown = cameraExecutor
         try {
             imageAnalysisUseCase?.clearAnalyzer()
             if (::cameraProviderFuture.isInitialized) {
@@ -2422,53 +2428,65 @@ class YOLOView @JvmOverloads constructor(
 
             previewUseCase?.setSurfaceProvider(null)
             previewUseCase = null
-
-            cameraExecutor?.let { exec ->
-                exec.shutdown()
-                try {
-                    if (!exec.awaitTermination(500, TimeUnit.MILLISECONDS)) {
-                        Log.w(TAG, "Executor didn't shut down in time; forcing shutdown")
-                        exec.shutdownNow()
-                        if (!exec.awaitTermination(500, TimeUnit.MILLISECONDS)) {
-                            Log.e(TAG, "Executor failed to terminate after forced shutdown")
-                        }
-                    }
-                } catch (e: InterruptedException) {
-                    Log.e(TAG, "Interrupted while waiting for executor shutdown", e)
-                    exec.shutdownNow()
-                    Thread.currentThread().interrupt()
-                }
-            }
             cameraExecutor = null
-
             camera = null
-            
-            // Close the active predictor AND release every other cached predictor (prior setModel() instances), so a
-            // disposed view doesn't leak their native LiteRT interpreters / tensor buffers. Closing also makes a later
-            // same-key setModel() fast path unable to serve a now-closed instance (use-after-close).
-            val closing = predictor
-            try {
-                (closing as? BasePredictor)?.close()
-            } catch (e: Exception) {
-                Log.e(TAG, "Error closing predictor", e)
-            }
-            for (cached in predictorCache.values) {
-                if (cached !== closing) {
-                    try {
-                        (cached as? BasePredictor)?.close()
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error closing cached predictor", e)
-                    }
-                }
-            }
-            predictorCache.clear()
-            predictorCacheOrder.clear()
-            predictor = null
-            inferenceCallback = null
-            streamCallback = null
-            inferenceResult = null
         } catch (e: Exception) {
             Log.e(TAG, "Error during YOLOView stop", e)
+        }
+
+        // ── Heavy teardown off the main thread ──────────────────────────────────
+        // Detach the predictors here (predictorCache is main-thread-only), then close
+        // them — and await the analysis executor — on a background thread. Awaiting an
+        // in-flight frame plus closing the native LiteRT interpreters / tensor buffers
+        // can block the caller for ~1–2 s and freeze the UI right as the user leaves the
+        // camera (iOS already releases CoreML predictors off the main thread for this
+        // same reason). Shutting the executor down before closing keeps the original
+        // ordering, so no in-flight predict() overlaps with close().
+        val closing = predictor
+        val predictorsToClose = ArrayList<Predictor>()
+        closing?.let { predictorsToClose.add(it) }
+        for (cached in predictorCache.values) {
+            if (cached !== closing) predictorsToClose.add(cached)
+        }
+        predictorCache.clear()
+        predictorCacheOrder.clear()
+        predictor = null
+        inferenceCallback = null
+        streamCallback = null
+        inferenceResult = null
+
+        if (executorToShutdown != null || predictorsToClose.isNotEmpty()) {
+            Thread {
+                executorToShutdown?.let { exec ->
+                    exec.shutdown()
+                    try {
+                        if (!exec.awaitTermination(500, TimeUnit.MILLISECONDS)) {
+                            Log.w(TAG, "Executor didn't shut down in time; forcing shutdown")
+                            exec.shutdownNow()
+                            if (!exec.awaitTermination(500, TimeUnit.MILLISECONDS)) {
+                                Log.e(TAG, "Executor failed to terminate after forced shutdown")
+                            }
+                        }
+                    } catch (e: InterruptedException) {
+                        Log.e(TAG, "Interrupted while waiting for executor shutdown", e)
+                        exec.shutdownNow()
+                        Thread.currentThread().interrupt()
+                    }
+                }
+                // Close the active predictor AND every other cached predictor (prior setModel()
+                // instances), so a disposed view doesn't leak their native LiteRT interpreters /
+                // tensor buffers.
+                for (p in predictorsToClose) {
+                    try {
+                        (p as? BasePredictor)?.close()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error closing predictor", e)
+                    }
+                }
+            }.apply {
+                name = "yolo-stop-teardown"
+                isDaemon = true
+            }.start()
         }
     }
 
