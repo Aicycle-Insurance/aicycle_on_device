@@ -28,14 +28,22 @@ class DioClient {
         onRequest: (options, handler) {
           // 1. Automatically get baseUrl and token from config
           final skipDefaultAuth = options.extra['skipDefaultAuth'] == true;
+          // A fully-qualified URL (e.g. a presigned S3/CDN model download) must
+          // keep its own host and must NOT receive our baseUrl or Authorization
+          // header: S3 rejects a request that mixes the X-Amz query-string
+          // signature with an Authorization header (HTTP 400). Detected by the
+          // path already carrying an http(s) scheme.
+          final isAbsoluteUrl = options.path.startsWith('http');
           try {
             final config = AICycleConfigHolder.config;
-            final String? customBaseUrl = options.extra['customBaseUrl'];
-            options.baseUrl = customBaseUrl ?? config.baseUrl;
+            if (!isAbsoluteUrl) {
+              final String? customBaseUrl = options.extra['customBaseUrl'];
+              options.baseUrl = customBaseUrl ?? config.baseUrl;
+            }
 
             // Some endpoints (e.g. VBI's own server) use their own
             // auth scheme and must not get AICycle's Authorization header.
-            if (!skipDefaultAuth) {
+            if (!skipDefaultAuth && !isAbsoluteUrl) {
               options.headers['Authorization'] =
                   'Bearer ${config.generalConfig.apiToken}';
               String? xApp;

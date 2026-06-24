@@ -1,3 +1,7 @@
+## 0.0.8
+
+* Fix download models issue
+
 ## 0.0.7
 
 * Fix bugs and enhance performance
