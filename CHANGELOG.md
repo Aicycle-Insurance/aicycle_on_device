@@ -1,5 +1,9 @@
 ## 0.0.9
 
+* Prevent uploading to AICycle server twice
+
+## 0.0.9
+
 * Add filter model output to viewport 
 
 ## 0.0.8

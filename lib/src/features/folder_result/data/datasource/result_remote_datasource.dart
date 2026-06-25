@@ -22,21 +22,6 @@ class ResultRemoteDataSource {
   }) async {
     final config = AICycleConfigHolder.config;
     final sessionId = config.generalConfig.documentId;
-    final formData = FormData.fromMap({
-      if (config.generalConfig.organization == AiCycleOrg.aicycle)
-        'claimFolderId': sessionId,
-      if (config.generalConfig.organization != AiCycleOrg.aicycle)
-        'externalSessionId': sessionId,
-      'img': MultipartFile.fromBytes(
-        photoBytes,
-        filename: '${angleId}_$photoIndex.jpg',
-        contentType: DioMediaType('image', 'jpeg'),
-      ),
-    });
-    await _client.post<dynamic>(
-      '/insurance/v2/claim-me/upload',
-      data: formData,
-    );
 
     /// Upload to VBI server
     if (config.generalConfig.organization == AiCycleOrg.vbi) {
@@ -44,6 +29,23 @@ class ResultRemoteDataSource {
         angleId: angleId,
         photoBytes: photoBytes,
         photoIndex: photoIndex,
+      );
+    } else {
+      // Upload to AICycle server
+      final formData = FormData.fromMap({
+        if (config.generalConfig.organization == AiCycleOrg.aicycle)
+          'claimFolderId': sessionId,
+        if (config.generalConfig.organization != AiCycleOrg.aicycle)
+          'externalSessionId': sessionId,
+        'img': MultipartFile.fromBytes(
+          photoBytes,
+          filename: '${angleId}_$photoIndex.jpg',
+          contentType: DioMediaType('image', 'jpeg'),
+        ),
+      });
+      await _client.post<dynamic>(
+        '/insurance/v2/claim-me/upload',
+        data: formData,
       );
     }
   }
