@@ -122,6 +122,20 @@ class CameraController extends ChangeNotifier {
     _cropBottom = bottom;
   }
 
+  /// Lọc các detection chỉ giữ lại box nằm trong khung nhìn thực sự (dải giữa
+  /// top/bottom bar). Camera frame là landscape, preview xoay 90° để hiển thị
+  /// dọc nên trục dọc màn hình (nơi 2 bar che) tương ứng với trục X của box
+  /// (`centerX`). Khung nhìn theo trục đó là `[_cropTop, _cropBottom]`.
+  /// `(0,1)` = không che → trả nguyên danh sách.
+  List<DetectionResult> _filterToViewport(List<DetectionResult> detections) {
+    if (_cropTop <= 0 && _cropBottom >= 1) return detections;
+    return detections
+        .where((d) =>
+            d.normalizedBox.centerX >= _cropTop &&
+            d.normalizedBox.centerX <= _cropBottom)
+        .toList();
+  }
+
   // ── Cache restore ─────────────────────────────────────────────────────────
 
   /// Restores previously captured photos from disk cache.
@@ -186,18 +200,22 @@ class CameraController extends ChangeNotifier {
       // carPart — model detect bộ phận, dùng để căn ảnh toàn cảnh.
       final output = DetectionOutput.fromJson(data);
       final wasEmpty = _latestCarPartDetections.isEmpty;
-      _latestCarPartClasses = output.detections.map((d) => d.className).toSet();
-      _latestCarPartDetections = output.detections;
+      // Chỉ giữ bộ phận nằm trong vùng user thực sự nhìn thấy (giữa top/bottom
+      // bar) — model xử lý cả phần bị che nên phải lọc lại.
+      final visible = _filterToViewport(output.detections);
+      _latestCarPartClasses = visible.map((d) => d.className).toSet();
+      _latestCarPartDetections = visible;
       updateMessage(); // tự notify khi message đổi
       // Bỏ qua redraw nếu không có nhãn bộ phận nào để vẽ (trước & sau đều rỗng).
-      if (!(wasEmpty && output.detections.isEmpty)) notifyListeners();
+      if (!(wasEmpty && visible.isEmpty)) notifyListeners();
       return;
     }
 
     if (type == 'detect') {
       // carDamage — model detect tổn thất (model chính).
       final output = DetectionOutput.fromJson(data);
-      _latestDetections = output.detections;
+      // Bỏ qua tổn thất nằm ngoài khung nhìn (bị top/bottom bar che).
+      _latestDetections = _filterToViewport(output.detections);
       // Phát hiện tổn thất → hiển thị xác nhận ngay, không chờ timer 5s.
       _maybeShowDetectionReady(); // tự notify khi chuyển pha
       // Bounding box chỉ vẽ khi đang trong pha inspection; ngoài ra việc đổi
