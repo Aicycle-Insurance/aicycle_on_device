@@ -1,3 +1,7 @@
+## 0.0.9
+
+* Add filter model output to viewport 
+
 ## 0.0.8
 
 * Fix download models issue
