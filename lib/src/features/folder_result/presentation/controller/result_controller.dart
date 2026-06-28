@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:nativewrappers/_internal/vm/lib/ffi_allocation_patch.dart';
 
 import 'package:flutter/foundation.dart';
 
@@ -15,6 +16,8 @@ class ResultController extends ChangeNotifier {
     required this.capturedPhotos,
     required ResultRepository repository,
     this.onAngleUploaded,
+    this.onImageUploaded,
+    this.onError,
     this.fetchResultAfterUpload = true,
   }) : _repository = repository;
 
@@ -31,6 +34,12 @@ class ResultController extends ChangeNotifier {
   /// Called after every angle's photos are fully uploaded so the camera
   /// controller can drop them; prevents re-uploading on a second "next" press.
   final void Function(int angleId)? onAngleUploaded;
+
+  /// Gọi mỗi khi MỘT ảnh upload thành công, kèm body JSON server trả về cho
+  /// ảnh đó.
+  final void Function(Map<String, dynamic> data)? onImageUploaded;
+
+  final void Function(String)? onError;
 
   ResultStatus _status = ResultStatus.uploading;
   int _uploadedCount = 0;
@@ -85,15 +94,18 @@ class ResultController extends ChangeNotifier {
 
         for (int i = 0; i < photos.length; i++) {
           try {
-            await _repository.uploadAnglePhoto(
+            final data = await _repository.uploadAnglePhoto(
               angleId: angleId,
               photoBytes: photos[i],
               photoIndex: i,
             );
+            // Upload thành công → trả data về host (nếu server có phản hồi JSON).
+            if (data != null) onImageUploaded?.call(data);
             // Upload thành công → lưu ảnh vào thư viện ảnh của thiết bị.
             unawaited(GalleryHelper.saveBytes(photos[i]));
-          } catch (_) {
-            // Ảnh này upload fail → bỏ qua luôn, không chặn flow.
+          } catch (e) {
+            // Ảnh này upload fail → call back error, không chặn flow.
+            onError?.call(e.toString());
           }
           // Đếm cả ảnh fail để tiến độ chạy tới 100% và flow tiếp tục.
           _uploadedCount++;

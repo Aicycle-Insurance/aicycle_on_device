@@ -411,6 +411,9 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
       MaterialPageRoute(
         builder: (context) => AICycleOnDeviceCamera(
           aiCycleConfig: config,
+          onImageUploaded: (data) {
+            // print(data);
+          },
           onComplete: () {
             if (mounted) Navigator.pop(context);
             ScaffoldMessenger.of(

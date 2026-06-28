@@ -17,11 +17,15 @@ class AICycleOnDevice extends StatefulWidget {
     required this.aiCycleConfig,
     this.onError,
     this.onComplete,
+    this.onImageUploaded,
   });
 
   final AICycleConfig aiCycleConfig;
   final Function(String error)? onError;
   final Function()? onComplete;
+
+  /// Gọi mỗi khi một ảnh upload thành công, kèm data server trả về.
+  final OnImageUploaded? onImageUploaded;
 
   @override
   State<AICycleOnDevice> createState() => _AICycleOnDeviceState();
@@ -68,6 +72,7 @@ class _AICycleOnDeviceState extends State<AICycleOnDevice> {
                   aiCycleConfig: widget.aiCycleConfig,
                   onError: widget.onError,
                   onComplete: widget.onComplete,
+                  onImageUploaded: widget.onImageUploaded,
                   carCornerModelPath:
                       selectedModels[AiModelType.carCorner]?.filePath,
                   carDamageModelPath:

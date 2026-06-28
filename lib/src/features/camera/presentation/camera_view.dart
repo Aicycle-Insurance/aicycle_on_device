@@ -13,6 +13,11 @@ import 'camera_screen.dart';
 import 'controller/camera_model_controller.dart';
 import 'upload_view.dart';
 
+/// Callback bắn ra mỗi khi MỘT ảnh upload thành công.
+///
+/// [data] là body JSON server trả về cho ảnh vừa upload.
+typedef OnImageUploaded = void Function(Map<String, dynamic> data);
+
 /// Màn bootstrap của SDK: khởi tạo cấu hình, tạo/lấy hồ sơ (folder) và chuẩn bị
 /// model, sau đó vào [CameraScreen].
 ///
@@ -23,6 +28,7 @@ class AICycleOnDeviceCamera extends StatefulWidget {
     required this.aiCycleConfig,
     this.onError,
     this.onComplete,
+    this.onImageUploaded,
     this.carCornerModelPath,
     this.carDamageModelPath,
     this.carPartModelPath,
@@ -31,6 +37,9 @@ class AICycleOnDeviceCamera extends StatefulWidget {
   final AICycleConfig aiCycleConfig;
   final Function(String error)? onError;
   final Function()? onComplete;
+
+  /// Gọi mỗi khi một ảnh upload thành công, kèm data server trả về.
+  final OnImageUploaded? onImageUploaded;
   final String? carCornerModelPath;
   final String? carDamageModelPath;
   final String? carPartModelPath;
@@ -108,6 +117,8 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
               sessionId: widget.aiCycleConfig.generalConfig.documentId,
               capturedPhotos: _uploadPhotos!,
               onComplete: widget.onComplete,
+              onImageUploaded: widget.onImageUploaded,
+              onError: widget.onError,
             );
           }
           // Model tải xong → CameraScreen. ResultView đã bỏ khỏi flow.

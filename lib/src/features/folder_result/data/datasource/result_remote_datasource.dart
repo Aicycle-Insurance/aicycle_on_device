@@ -15,7 +15,10 @@ class ResultRemoteDataSource {
 
   /// Upload to AICycle server
   /// POST /v2/claim-me/upload
-  Future<void> uploadAnglePhoto({
+  ///
+  /// Trả về body JSON server phản hồi cho ảnh vừa upload (null nếu không phải
+  /// dạng map) để host nhận qua callback.
+  Future<Map<String, dynamic>?> uploadAnglePhoto({
     required int angleId,
     required Uint8List photoBytes,
     required int photoIndex,
@@ -25,7 +28,7 @@ class ResultRemoteDataSource {
 
     /// Upload to VBI server
     if (config.generalConfig.organization == AiCycleOrg.vbi) {
-      await _uploadToVBIServer(
+      return _uploadToVBIServer(
         angleId: angleId,
         photoBytes: photoBytes,
         photoIndex: photoIndex,
@@ -43,23 +46,24 @@ class ResultRemoteDataSource {
           contentType: DioMediaType('image', 'jpeg'),
         ),
       });
-      await _client.post<dynamic>(
+      final res = await _client.post<dynamic>(
         '/insurance/v2/claim-me/upload',
         data: formData,
       );
+      return _asJsonMap(res);
     }
   }
 
   /// Upload to VBI server
   /// POST {_vbiBaseUrl}/Upload/upload-ai
-  Future<void> _uploadToVBIServer({
+  Future<Map<String, dynamic>?> _uploadToVBIServer({
     required int angleId,
     required Uint8List photoBytes,
     required int photoIndex,
   }) async {
     final config = AICycleConfigHolder.config;
     final vbi = config.vbiConfig;
-    if (vbi == null) return;
+    if (vbi == null) return null;
 
     double? latitude;
     double? longitude;
@@ -95,7 +99,7 @@ class ResultRemoteDataSource {
 
     /// Chắc chắn != null do org VBI bắt buộc khai báo
     final versionCode = config.vbiConfig!.apiVersionCode;
-    await _client.post<dynamic>(
+    final res = await _client.post<dynamic>(
       '/api/$versionCode/vbi4sales/Upload/upload-ai',
       skipDefaultAuth: true,
       customBaseUrl: config.vbiConfig!.apiUploadBaseUrl,
@@ -106,6 +110,14 @@ class ResultRemoteDataSource {
       },
       data: formData,
     );
+    return _asJsonMap(res);
+  }
+
+  /// Chuẩn hoá body phản hồi về [Map] JSON; null nếu không phải dạng map.
+  Map<String, dynamic>? _asJsonMap(dynamic res) {
+    if (res is Map<String, dynamic>) return res;
+    if (res is Map) return Map<String, dynamic>.from(res);
+    return null;
   }
 
   /// GET insurance/v2/claimfolders/$sessionId/external-segment-result

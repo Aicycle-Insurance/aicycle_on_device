@@ -10,7 +10,7 @@ class ResultRepositoryImpl implements ResultRepository {
   final ResultRemoteDataSource _dataSource;
 
   @override
-  Future<void> uploadAnglePhoto({
+  Future<Map<String, dynamic>?> uploadAnglePhoto({
     required int angleId,
     required Uint8List photoBytes,
     required int photoIndex,

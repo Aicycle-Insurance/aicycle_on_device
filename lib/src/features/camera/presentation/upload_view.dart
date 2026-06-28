@@ -18,11 +18,17 @@ class UploadView extends StatefulWidget {
     required this.sessionId,
     required this.capturedPhotos,
     this.onComplete,
+    this.onImageUploaded,
+    this.onError,
   });
 
   final String sessionId;
   final Map<int, List<Uint8List>> capturedPhotos;
   final Function()? onComplete;
+  final Function(String)? onError;
+
+  /// Gọi mỗi khi một ảnh upload thành công, kèm data server trả về.
+  final void Function(Map<String, dynamic> data)? onImageUploaded;
 
   @override
   State<UploadView> createState() => _UploadViewState();
@@ -39,6 +45,8 @@ class _UploadViewState extends State<UploadView> {
       capturedPhotos: widget.capturedPhotos,
       repository: sl.resultRepository,
       fetchResultAfterUpload: false,
+      onImageUploaded: widget.onImageUploaded,
+      onError: widget.onError,
     );
     _run();
   }
