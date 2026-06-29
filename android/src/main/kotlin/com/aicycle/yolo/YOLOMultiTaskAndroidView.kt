@@ -572,8 +572,6 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         ocrExecutor.execute {
             try {
                 val read = ocr.read(crop)
-                // TODO(remove before production): plate-read debug log.
-                if (read != null) Log.d(TAG, "[OCR] plate=\"${read.first}\" score=${"%.3f".format(read.second)}")
                 val event = mapOf(
                     "type" to "ocr",
                     "modelId" to "ocr",

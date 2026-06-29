@@ -6,9 +6,11 @@ class StringSheet {
   static const carCornerName = 'Nhận diện góc xe';
   static const carDamageName = 'Nhận diện thiệt hại';
   static const carPartName = 'Nhận diện bộ phận xe';
+  static const licensePlateName = 'Nhận diện biển số xe';
   static const carCornerShortName = 'Góc xe';
   static const carDamageShortName = 'Thiệt hại';
   static const carPartShortName = 'Bộ phận xe';
+  static const licensePlateShortName = 'Biển số xe';
 
   // ----- Model manager screen -----
   static const modelManagerTitle = 'Quản lý mô hình AI';

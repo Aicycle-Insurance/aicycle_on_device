@@ -33,6 +33,7 @@ class CameraScreen extends StatefulWidget {
     required this.carCornerModelPath,
     required this.carDamageModelPath,
     required this.carPartModelPath,
+    this.licensePlateModelPath,
     this.onComplete,
     this.onViewResult,
   });
@@ -41,6 +42,10 @@ class CameraScreen extends StatefulWidget {
   final String carCornerModelPath;
   final String carDamageModelPath;
   final String carPartModelPath;
+
+  /// Model OCR biển số (đã tải/quản lý qua model manager). Null → fallback dùng
+  /// asset bundle tạm.
+  final String? licensePlateModelPath;
   final Function()? onComplete;
 
   /// Bấm "Xem kết quả": trả ảnh đã chụp lên bootstrap để chuyển sang pha upload
@@ -213,9 +218,11 @@ class _CameraScreenState extends State<CameraScreen> {
   Widget build(BuildContext context) {
     ScreenUtil.init(context);
     final model = widget.aiCycleConfig.modelConfig;
-    final ocrPath = Platform.isIOS
-        ? 'assets/models/license_plate_ocr.mlpackage.zip'
-        : 'assets/models/license_plate_ocr.tflite';
+    // Ưu tiên model đã tải qua model manager; fallback asset bundle khi chưa có.
+    final ocrPath = widget.licensePlateModelPath ??
+        (Platform.isIOS
+            ? 'assets/models/license_plate_ocr.mlpackage.zip'
+            : 'assets/models/license_plate_ocr.tflite');
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
@@ -250,9 +257,7 @@ class _CameraScreenState extends State<CameraScreen> {
                   detectModelPath: widget.carDamageModelPath,
                   classifyModelPath: widget.carCornerModelPath,
                   secondDetectModelPath: widget.carPartModelPath,
-                  // TEMP: bundled asset (per-platform format). Will be served
-                  // from the API like the other models once the OCR endpoint is
-                  // ready.
+                  // OCR biển số: model đã tải/quản lý, hoặc asset bundle nếu chưa.
                   ocrModelPath: ocrPath,
                   ocrConfidenceThreshold: model.licensePlateConfThreshold,
                   controller: _cameraController.yoloController,

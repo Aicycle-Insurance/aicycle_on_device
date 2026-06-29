@@ -79,6 +79,8 @@ class _AICycleOnDeviceState extends State<AICycleOnDevice> {
                       selectedModels[AiModelType.carDamage]?.filePath,
                   carPartModelPath:
                       selectedModels[AiModelType.carPart]?.filePath,
+                  licensePlateModelPath:
+                      selectedModels[AiModelType.licensePlate]?.filePath,
                 ),
               ),
             );

@@ -224,11 +224,7 @@ class _MultiTaskYOLOViewState extends State<MultiTaskYOLOView> {
       if (ocrPath != null) {
         try {
           ocrResolved = await YOLOModelResolver.preparePath(ocrPath);
-          // TODO(remove before production): OCR model resolution log.
-          debugPrint('[OCR] resolved model path: $ocrResolved');
-        } catch (e) {
-          // TODO(remove before production): surface why OCR didn't load.
-          debugPrint('[OCR] failed to resolve "$ocrPath": $e');
+        } catch (_) {
           ocrResolved = null;
         }
       }

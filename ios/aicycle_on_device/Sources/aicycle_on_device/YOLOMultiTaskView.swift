@@ -264,15 +264,9 @@ public class YOLOMultiTaskView: UIView {
     // viewport (so the saved viewport-cropped photo will contain the whole plate).
     let lo = ocrViewportTop + Self.ocrViewportMargin
     let hi = ocrViewportBottom - Self.ocrViewportMargin
-    let allPlates = result.boxes.filter { $0.cls == Self.licensePlateClass }
-    let plateBox = allPlates
-      .filter { $0.xywhn.minX >= lo && $0.xywhn.maxX <= hi }
+    let plateBox = result.boxes
+      .filter { $0.cls == Self.licensePlateClass && $0.xywhn.minX >= lo && $0.xywhn.maxX <= hi }
       .max { $0.conf < $1.conf }
-    // TODO(remove before production): OCR gating visibility.
-    if !allPlates.isEmpty {
-      NSLog("[OCR] plate boxes=%d inViewport=%@ viewport=[%.3f,%.3f]",
-        allPlates.count, plateBox != nil ? "yes" : "no", lo, hi)
-    }
     guard let box = plateBox else { return }
 
     let rect = box.xywhn  // normalized, top-left origin in the (landscape) buffer
@@ -280,8 +274,6 @@ public class YOLOMultiTaskView: UIView {
     ocrQueue.async { [weak self] in
       guard let self else { return }
       let read = ocr.read(pixelBuffer: buffer, region: rect)
-      // TODO(remove before production): plate-read debug log.
-      if let r = read { NSLog("[OCR] plate=\"%@\" score=%.3f", r.plate, r.score) }
       let event: [String: Any] = [
         "type": "ocr",
         "modelId": "ocr",
