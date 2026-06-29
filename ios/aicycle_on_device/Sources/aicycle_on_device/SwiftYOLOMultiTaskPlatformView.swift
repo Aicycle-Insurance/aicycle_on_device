@@ -148,6 +148,15 @@ public final class SwiftYOLOMultiTaskPlatformView: NSObject,
         }
         self.multiTaskView?.setOcrViewport(top: CGFloat(top), bottom: CGFloat(bottom))
         result(nil)
+      case "setInspectionActive":
+        guard let args = call.arguments as? [String: Any],
+          let active = args["active"] as? Bool
+        else {
+          result(FlutterError(code: "bad_args", message: "active (bool) required", details: nil))
+          return
+        }
+        self.multiTaskView?.setInspectionActive(active)
+        result(nil)
       default:
         result(FlutterMethodNotImplemented)
       }

@@ -221,11 +221,6 @@ class CameraController extends ChangeNotifier {
       // OCR (native) — tín hiệu canh khung. Đọc được biển ⇒ frame đủ tốt để
       // làm ảnh toàn cảnh; cập nhật cờ rồi re-evaluate để có thể kích hoạt chụp.
       final readable = data['readable'] == true;
-      // TODO(remove before production): log biển đọc được.
-      if (readable) {
-        debugPrint(
-            '[OCR] plate="${data['plate']}" score=${data['score']}');
-      }
       if (readable != _latestPlateReadable) {
         _latestPlateReadable = readable;
         if (readable) updateMessage(); // tự notify khi message đổi
@@ -420,7 +415,7 @@ class CameraController extends ChangeNotifier {
 
     _noDetectionTimer?.cancel();
     _noDetectionTimer = null;
-    // Đã thấy thiệt hại → dừng quét (tắt carDamage), chờ user xác nhận.
+    // Đã thấy thiệt hại, chờ user xác nhận.
     _setInspectionPhase(InspectionPhase.detectionReady);
     _setMessage(CameraMessage(
       message: StringSheet.damageDetectedGuide,
@@ -559,9 +554,21 @@ class CameraController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Gán pha inspection. Tất cả model luôn chạy — không bật/tắt theo pha.
+  /// Active của model gating đã gửi xuống native (null = chưa gửi lần nào).
+  bool? _sentInspectionActive;
+
+  /// Gán pha inspection và bật/tắt model theo pha để giảm tải:
+  ///   panorama (phase == null)   → carDamage OFF, OCR ON
+  ///   inspection (phase != null) → carDamage ON,  OCR OFF
+  /// carCorner/carPart luôn chạy. Chỉ gửi xuống native khi trạng thái đổi.
   void _setInspectionPhase(InspectionPhase? phase) {
     _inspectionPhase = phase;
+    final active = phase != null;
+    if (_sentInspectionActive != active) {
+      if (yoloController.setInspectionActive(active)) {
+        _sentInspectionActive = active;
+      }
+    }
   }
 
   bool _stopped = false;

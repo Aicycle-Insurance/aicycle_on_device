@@ -80,6 +80,13 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     // saved (viewport-cropped) photo. Defaults to the full frame until set.
     @Volatile private var ocrViewportTop = 0f
     @Volatile private var ocrViewportBottom = 1f
+
+    // Phase-based gating. Defaults match the initial framing phase:
+    //   panorama/framing → carDamage OFF, OCR ON
+    //   inspection       → carDamage ON,  OCR OFF
+    // carCorner (classify) and carPart (third) always run.
+    @Volatile private var detectEnabled = false
+    @Volatile private var ocrEnabled = true
     /** Stable id for the third predictor's results so consumers can tell two detect models apart. */
     private var thirdModelId:      String = "detect2"
 
@@ -473,9 +480,9 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         }
     }
 
-    /** carDamage: chạy mỗi frame khi rảnh (không giới hạn nhịp). */
+    /** carDamage: chạy mỗi frame khi rảnh — trừ pha panorama (input bị chặn). */
     private fun claimDetect(): Boolean {
-        if (detectPredictor == null) return false
+        if (detectPredictor == null || !detectEnabled) return false
         return detectBusy.compareAndSet(false, true)
     }
 
@@ -531,6 +538,7 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
      */
     private fun maybeRunOcr(result: YOLOResult, bitmap: Bitmap) {
         val ocr = ocrModel ?: return
+        if (!ocrEnabled) return // gated off during inspection
         if (!ocrBusy.compareAndSet(false, true)) return
 
         // Only the highest-confidence plate box that sits FULLY inside the visible
@@ -585,6 +593,15 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     fun setOcrViewport(top: Float, bottom: Float) {
         ocrViewportTop = top
         ocrViewportBottom = bottom
+    }
+
+    /**
+     * Phase-based gating: inspection runs carDamage and stops OCR; framing/panorama
+     * runs OCR and stops carDamage. carCorner/carPart always run.
+     */
+    fun setInspectionActive(active: Boolean) {
+        detectEnabled = active
+        ocrEnabled = !active
     }
 
     // endregion

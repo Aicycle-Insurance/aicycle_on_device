@@ -105,6 +105,13 @@ public class YOLOMultiTaskView: UIView {
   /// retained so the OCR step can crop the exact frame carPart saw. cameraQueue only.
   private var thirdInFlightBuffer: CVPixelBuffer?
 
+  // Phase-based gating (cameraQueue). Defaults match the initial framing phase:
+  //   panorama/framing  → carDamage OFF, OCR ON
+  //   inspection        → carDamage ON,  OCR OFF
+  // carCorner (classify) and carPart (third) always run.
+  private var detectEnabled = false
+  private var ocrEnabled = true
+
   /// One-frame-deep back-pressure per predictor. Accessed only on cameraQueue.
   var detectBusy   = false
   var classifyBusy = false
@@ -250,16 +257,22 @@ public class YOLOMultiTaskView: UIView {
   /// `type == "ocr"` stream event with `readable` used as the framing signal.
   /// Runs on cameraQueue (where `ocrBusy` / `thirdInFlightBuffer` are owned).
   private func maybeRunOCR(on result: YOLOResult) {
-    guard let ocr = ocrModel, !ocrBusy, let buffer = thirdInFlightBuffer else { return }
+    guard let ocr = ocrModel, ocrEnabled, !ocrBusy, let buffer = thirdInFlightBuffer else { return }
     thirdInFlightBuffer = nil
 
     // Only the highest-confidence plate box that sits FULLY inside the visible
     // viewport (so the saved viewport-cropped photo will contain the whole plate).
     let lo = ocrViewportTop + Self.ocrViewportMargin
     let hi = ocrViewportBottom - Self.ocrViewportMargin
-    let plateBox = result.boxes
-      .filter { $0.cls == Self.licensePlateClass && $0.xywhn.minX >= lo && $0.xywhn.maxX <= hi }
+    let allPlates = result.boxes.filter { $0.cls == Self.licensePlateClass }
+    let plateBox = allPlates
+      .filter { $0.xywhn.minX >= lo && $0.xywhn.maxX <= hi }
       .max { $0.conf < $1.conf }
+    // TODO(remove before production): OCR gating visibility.
+    if !allPlates.isEmpty {
+      NSLog("[OCR] plate boxes=%d inViewport=%@ viewport=[%.3f,%.3f]",
+        allPlates.count, plateBox != nil ? "yes" : "no", lo, hi)
+    }
     guard let box = plateBox else { return }
 
     let rect = box.xywhn  // normalized, top-left origin in the (landscape) buffer
@@ -286,6 +299,15 @@ public class YOLOMultiTaskView: UIView {
     cameraQueue.async { [weak self] in
       self?.ocrViewportTop = top
       self?.ocrViewportBottom = bottom
+    }
+  }
+
+  /// Phase-based gating: inspection runs carDamage and stops OCR; framing/panorama
+  /// runs OCR and stops carDamage. carCorner/carPart always run.
+  func setInspectionActive(_ active: Bool) {
+    cameraQueue.async { [weak self] in
+      self?.detectEnabled = active
+      self?.ocrEnabled = !active
     }
   }
 
@@ -638,7 +660,8 @@ extension YOLOMultiTaskView: AVCaptureVideoDataOutputSampleBufferDelegate, @unch
     }
 
     // Dispatch each predictor to its own queue so all run concurrently.
-    if let p = detectPredictor, !detectBusy, !p.isUpdating {
+    // carDamage is skipped (input blocked) during the framing/panorama phase.
+    if let p = detectPredictor, detectEnabled, !detectBusy, !p.isUpdating {
       detectBusy = true
       p.isUpdating = true
       let buf = sampleBuffer
@@ -664,8 +687,9 @@ extension YOLOMultiTaskView: AVCaptureVideoDataOutputSampleBufferDelegate, @unch
       let buf = sampleBuffer
       let adapter = thirdAdapter
       // Retain this frame's pixel buffer so the OCR step (run from the third
-      // result handler) can crop the exact frame carPart processed.
-      if ocrModel != nil {
+      // result handler) can crop the exact frame carPart processed. Skipped when
+      // OCR is gated off (inspection phase).
+      if ocrModel != nil, ocrEnabled {
         thirdInFlightBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
       }
       thirdQueue.async { p.predict(sampleBuffer: buf, onResultsListener: adapter, onInferenceTime: adapter) }

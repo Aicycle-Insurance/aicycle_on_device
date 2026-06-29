@@ -11,6 +11,7 @@ import CoreImage
 import CoreML
 import CoreVideo
 import Foundation
+import UIKit
 
 final class LicensePlateOCR {
   // Geometry / vocabulary — must match the trained model.
@@ -27,6 +28,9 @@ final class LicensePlateOCR {
   private let model: MLModel
   private let inputName: String
   private let outputName: String
+
+  /// TODO(remove before production): ensures only one debug input image is saved.
+  private static var didSaveDebugInput = false
 
   /// Shared CIContext — creating one per frame is expensive.
   private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
@@ -130,6 +134,17 @@ final class LicensePlateOCR {
     ctx.interpolationQuality = .high
     ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: w, height: h))
 
+    // TODO(remove before production): dump the exact 128×64 model input once so
+    // the crop+resize can be eyeballed in the Photos app.
+    if !Self.didSaveDebugInput, let dbg = ctx.makeImage() {
+      Self.didSaveDebugInput = true
+      let img = UIImage(cgImage: dbg)
+      DispatchQueue.main.async {
+        UIImageWriteToSavedPhotosAlbum(img, nil, nil, nil)
+        NSLog("[OCR] saved debug input (128x64) to Photos")
+      }
+    }
+
     guard let array = try? MLMultiArray(shape: [1, NSNumber(value: h), NSNumber(value: w), 3], dataType: .float32)
     else { return nil }
     let ptr = array.dataPointer.bindMemory(to: Float32.self, capacity: array.count)
@@ -179,8 +194,17 @@ final class LicensePlateOCR {
     let joined = String(rawChars)
     let cleaned = joined.filter { $0 != "." && $0 != "-" && $0 != "_" }
 
-    if cleaned.count < 7 { return nil }
-    if cleaned.count == 7 && rawChars.contains(".") { return nil }
+    // TODO(remove before production): raw OCR decode log.
+    NSLog("[OCR] raw=\"%@\" cleaned=\"%@\"", joined, cleaned)
+
+    if cleaned.count < 7 {
+      NSLog("[OCR] reject: len<7 (%d)", cleaned.count)
+      return nil
+    }
+    if cleaned.count == 7 && rawChars.contains(".") {
+      NSLog("[OCR] reject: 7 chars but dot present")
+      return nil
+    }
 
     // Format: 2 digits + 1–2 letters, then the remaining digits → "30H 12345".
     var finalPlate: String? = nil
@@ -189,15 +213,25 @@ final class LicensePlateOCR {
     } else if specialChars.contains(where: { joined.contains($0) }) {
       finalPlate = cleaned
     }
-    guard let plate = finalPlate else { return nil }
+    guard let plate = finalPlate else {
+      NSLog("[OCR] reject: no VN plate format")
+      return nil
+    }
 
     // Confidence = mean score over the DIGIT characters only.
     var digitScores: [Double] = []
     for (ch, s) in zip(rawChars, scores) where ch.isNumber {
       digitScores.append(s)
     }
-    guard !digitScores.isEmpty else { return nil }
+    guard !digitScores.isEmpty else {
+      NSLog("[OCR] reject: no digit scores")
+      return nil
+    }
     let finalScore = digitScores.reduce(0, +) / Double(digitScores.count)
+
+    // TODO(remove before production): final score vs threshold.
+    NSLog("[OCR] plate=\"%@\" score=%.3f thr=%.2f -> %@",
+      plate, finalScore, threshold, finalScore > threshold ? "ACCEPT" : "below-thr")
 
     return finalScore > threshold ? (plate, finalScore) : nil
   }

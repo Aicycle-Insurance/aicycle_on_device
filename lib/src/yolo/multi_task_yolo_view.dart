@@ -96,6 +96,17 @@ class MultiTaskYOLOController {
     return true;
   }
 
+  /// Phase-based model gating to cut inference load. `active == true` (inspection)
+  /// runs carDamage and stops license-plate OCR; `active == false`
+  /// (framing/panorama) runs OCR and stops carDamage. carCorner/carPart always
+  /// run. Returns `false` if the view isn't attached yet.
+  bool setInspectionActive(bool active) {
+    final ch = _channel;
+    if (ch == null) return false;
+    ch.invokeMethod<void>('setInspectionActive', {'active': active});
+    return true;
+  }
+
   /// Stops the camera and releases all CoreML model predictors from memory.
   /// Call this before removing [MultiTaskYOLOView] from the tree so GPU/ANE
   /// memory is freed immediately rather than waiting for a potentially-delayed deinit.

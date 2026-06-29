@@ -88,6 +88,15 @@ class YOLOMultiTaskPlatformView(
                             result.error("bad_args", "top/bottom (double) required", null)
                         }
                     }
+                    "setInspectionActive" -> {
+                        val active = (call.arguments as? Map<*, *>)?.get("active") as? Boolean
+                        if (active != null) {
+                            multiTaskView.setInspectionActive(active)
+                            result.success(null)
+                        } else {
+                            result.error("bad_args", "active (bool) required", null)
+                        }
+                    }
                     else -> result.notImplemented()
                 }
             }
