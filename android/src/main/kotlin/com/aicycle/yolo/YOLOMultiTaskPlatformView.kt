@@ -77,6 +77,17 @@ class YOLOMultiTaskPlatformView(
                             ?: run { result.error("bad_args", "enable (bool) is required", null); return@setMethodCallHandler }
                         result.success(multiTaskView.setTorchMode(enable))
                     }
+                    "setViewport" -> {
+                        val args = call.arguments as? Map<*, *>
+                        val top = (args?.get("top") as? Number)?.toFloat()
+                        val bottom = (args?.get("bottom") as? Number)?.toFloat()
+                        if (top != null && bottom != null) {
+                            multiTaskView.setOcrViewport(top, bottom)
+                            result.success(null)
+                        } else {
+                            result.error("bad_args", "top/bottom (double) required", null)
+                        }
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -112,6 +123,9 @@ class YOLOMultiTaskPlatformView(
             val secondDetectModel = params["secondDetectModel"] as? String
             val secondDetectConfidence = params["secondDetectConfidenceThreshold"] as? Double ?: confidence
             val secondDetectIou = params["secondDetectIouThreshold"] as? Double ?: iou
+            // License-plate OCR model — gated by the carPart detector (optional).
+            val ocrModel = params["ocrModel"] as? String
+            val ocrConfidence = params["ocrConfidenceThreshold"] as? Double ?: 0.85
 
             multiTaskView.loadModels(
                 detectPath = detectPath,
@@ -119,6 +133,8 @@ class YOLOMultiTaskPlatformView(
                 thirdModelPath = secondDetectModel,
                 thirdModelTask = "detect",
                 thirdModelId = "detect2",
+                ocrModelPath = ocrModel,
+                ocrConfidenceThreshold = ocrConfidence,
                 useGpu = useGpu,
                 detectConfidenceThreshold = detectConfidence,
                 detectIouThreshold = detectIou,

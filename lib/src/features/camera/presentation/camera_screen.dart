@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import '../../../yolo/multi_task_yolo_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -211,6 +213,9 @@ class _CameraScreenState extends State<CameraScreen> {
   Widget build(BuildContext context) {
     ScreenUtil.init(context);
     final model = widget.aiCycleConfig.modelConfig;
+    final ocrPath = Platform.isIOS
+        ? 'assets/models/license_plate_ocr.mlpackage.zip'
+        : 'assets/models/license_plate_ocr.tflite';
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
@@ -245,6 +250,11 @@ class _CameraScreenState extends State<CameraScreen> {
                   detectModelPath: widget.carDamageModelPath,
                   classifyModelPath: widget.carCornerModelPath,
                   secondDetectModelPath: widget.carPartModelPath,
+                  // TEMP: bundled asset (per-platform format). Will be served
+                  // from the API like the other models once the OCR endpoint is
+                  // ready.
+                  ocrModelPath: ocrPath,
+                  ocrConfidenceThreshold: model.licensePlateConfThreshold,
                   controller: _cameraController.yoloController,
                   secondDetectConfidenceThreshold: model.carPartConfThreshold,
                   secondDetectIouThreshold: model.carPartIouThreshold,

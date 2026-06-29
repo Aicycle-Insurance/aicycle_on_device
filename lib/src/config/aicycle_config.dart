@@ -140,14 +140,17 @@ class ModelConfig {
   /// IOU threshold của model car part detection (giá trị từ 0.0 đến 1.0)
   final double carPartIouThreshold;
 
-  /// Confidence threshold của model classification (giá trị từ 0.0 đến 1.0)
+  /// Confidence threshold của model car corner classification (giá trị từ 0.0 đến 1.0)
   final double carCornerConfThreshold;
 
-  /// Confidence threshold của model detection (giá trị từ 0.0 đến 1.0)
+  /// Confidence threshold của model car damage detection (giá trị từ 0.0 đến 1.0)
   final double carDamageConfThreshold;
 
   /// IOU threshold của model detection (giá trị từ 0.0 đến 1.0)
   final double carDamageIouThreshold;
+
+  /// Confidence threshold của model license plate OCR (giá trị từ 0.0 đến 1.0)
+  final double licensePlateConfThreshold;
 
   ModelConfig({
     this.carPartConfThreshold = 0.5,
@@ -155,6 +158,7 @@ class ModelConfig {
     this.carCornerConfThreshold = 0.3,
     this.carDamageConfThreshold = 0.3,
     this.carDamageIouThreshold = 0.45,
+    this.licensePlateConfThreshold = 0.5,
   })  : assert(
           carPartConfThreshold >= 0.0 && carPartConfThreshold <= 1.0,
           'carPartConfThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
@@ -174,6 +178,10 @@ class ModelConfig {
         assert(
           carDamageIouThreshold >= 0.0 && carDamageIouThreshold <= 1.0,
           'carDamageIouThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
+        ),
+        assert(
+          licensePlateConfThreshold >= 0.0 && licensePlateConfThreshold <= 1.0,
+          'licensePlateConfThreshold phải nằm trong khoảng từ 0.0 đến 1.0',
         );
 }
 

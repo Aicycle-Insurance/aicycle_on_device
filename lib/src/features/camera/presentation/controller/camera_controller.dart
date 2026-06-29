@@ -52,6 +52,11 @@ class CameraController extends ChangeNotifier {
   double _cropTop = 0;
   double _cropBottom = 1;
 
+  /// Viewport đã gửi xuống native (để gate OCR). Null khi chưa gửi thành công —
+  /// platform view có thể chưa attach ở lần layout đầu, nên thử lại tới khi gửi được.
+  double? _sentCropTop;
+  double? _sentCropBottom;
+
   /// Bumped every time a photo is actually captured — the view listens to
   /// this to trigger a screen-blink (flash) effect.
   int _captureFlashTick = 0;
@@ -74,8 +79,15 @@ class CameraController extends ChangeNotifier {
   /// Angles fully completed (user pressed "Chuyển góc").
   final Set<int> _completedSegments = {};
 
+  /// Tên class biển số xe trong model car-part (khớp với logic native OCR).
+  static const _licensePlateClass = 'Biển số xe';
+
   /// Class names bộ phận từ frame car-part detect (model thứ 2) mới nhất.
   Set<String> _latestCarPartClasses = {};
+
+  /// OCR (native) đọc được biển số ở frame mới nhất hay chưa. Là tín hiệu canh
+  /// khung: đọc được biển ⇒ khung đủ rõ/đủ gần để dùng làm ảnh toàn cảnh.
+  bool _latestPlateReadable = false;
 
   /// Chi tiết bộ phận (kèm bounding box) từ frame car-part detect mới nhất —
   /// dùng để vẽ nhãn tên bộ phận lên màn hình.
@@ -120,6 +132,15 @@ class CameraController extends ChangeNotifier {
   void setCaptureViewport({required double top, required double bottom}) {
     _cropTop = top;
     _cropBottom = bottom;
+    // Gửi viewport xuống native để gate OCR (chỉ đọc biển nằm trọn trong khung
+    // nhìn thấy). Gọi mỗi lần layout; chỉ gửi khi đổi hoặc lần trước chưa gửi
+    // được (platform view có thể chưa attach ở layout đầu).
+    if (_sentCropTop != top || _sentCropBottom != bottom) {
+      if (yoloController.setViewport(top, bottom)) {
+        _sentCropTop = top;
+        _sentCropBottom = bottom;
+      }
+    }
   }
 
   /// Lọc các detection chỉ giữ lại box nằm trong khung nhìn thực sự (dải giữa
@@ -196,6 +217,22 @@ class CameraController extends ChangeNotifier {
       return;
     }
 
+    if (type == 'ocr') {
+      // OCR (native) — tín hiệu canh khung. Đọc được biển ⇒ frame đủ tốt để
+      // làm ảnh toàn cảnh; cập nhật cờ rồi re-evaluate để có thể kích hoạt chụp.
+      final readable = data['readable'] == true;
+      // TODO(remove before production): log biển đọc được.
+      if (readable) {
+        debugPrint(
+            '[OCR] plate="${data['plate']}" score=${data['score']}');
+      }
+      if (readable != _latestPlateReadable) {
+        _latestPlateReadable = readable;
+        if (readable) updateMessage(); // tự notify khi message đổi
+      }
+      return;
+    }
+
     if (type == 'detect' && modelId == 'detect2') {
       // carPart — model detect bộ phận, dùng để căn ảnh toàn cảnh.
       final output = DetectionOutput.fromJson(data);
@@ -205,6 +242,10 @@ class CameraController extends ChangeNotifier {
       final visible = _filterToViewport(output.detections);
       _latestCarPartClasses = visible.map((d) => d.className).toSet();
       _latestCarPartDetections = visible;
+      // Biển không còn trong khung → cờ "đọc được" cũ không còn hiệu lực.
+      if (!_latestCarPartClasses.contains(_licensePlateClass)) {
+        _latestPlateReadable = false;
+      }
       updateMessage(); // tự notify khi message đổi
       // Bỏ qua redraw nếu không có nhãn bộ phận nào để vẽ (trước & sau đều rỗng).
       if (!(wasEmpty && visible.isEmpty)) notifyListeners();
@@ -299,7 +340,7 @@ class CameraController extends ChangeNotifier {
   void clearMessage() => _setMessage(null);
 
   void _updateMessageSegment(Set<String> classes, int segmentIndex) {
-    const licencePlate = 'Biển số xe';
+    const licencePlate = _licensePlateClass;
     const door = 'Cánh cửa';
 
     final config = _segmentConfigs[segmentIndex];
@@ -316,14 +357,23 @@ class CameraController extends ChangeNotifier {
     } else if (classes.contains(door) &&
         classes.contains(frontBumper) &&
         classes.contains(licencePlate)) {
+      // Bộ phận đã căn đủ — giữ yên để OCR đọc biển số. Chỉ chụp ảnh toàn cảnh
+      // khi OCR đọc được biển (khung đủ rõ/đủ gần), tránh chụp ảnh mờ/xa.
       _setMessage(CameraMessage(
           message: StringSheet.holdStillGuide, type: MessageType.loading));
-      _triggerAutoCapture();
+      if (_latestPlateReadable) {
+        _triggerAutoCapture();
+      }
     }
   }
 
   Future<void> _triggerAutoCapture() async {
-    await capturePhoto();
+    // Cờ "đọc được biển" chỉ dùng cho 1 lần chụp toàn cảnh; reset để góc sau
+    // phải đọc lại biển mới chụp.
+    _latestPlateReadable = false;
+    // OCR vừa đọc được biển ở frame hiện tại ⇒ chụp NGAY (immediate, bỏ delay 3s)
+    // để ảnh toàn cảnh sát nhất với frame đã canh đúng khung + đọc được biển.
+    await capturePhoto(immediate: true);
     if (_activeSegmentIndex != null) {
       _panoramicCapturedSegments.add(_activeSegmentIndex!);
       // Chụp toàn cảnh xong là góc đó đã được tính hoàn thành.

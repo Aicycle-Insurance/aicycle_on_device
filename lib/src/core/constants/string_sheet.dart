@@ -47,7 +47,7 @@ class StringSheet {
   static const moveBackGuide =
       'Lùi camera ra xa để xe nằm trọn vẹn trong khung hình';
   static const holdStillGuide =
-      'Hãy giữ yên điện thoại. Ảnh sẽ được chụp tự động';
+      'Hãy giữ yên điện thoại. Đang nhận diện biển số';
   static const captureSuccess = 'Chụp thành công';
   static const inspectDamageGuide =
       'Đưa camera lại gần vị trí tổn thất.\nNếu không có tổn thất, hãy chuyển sang vị trí khác';

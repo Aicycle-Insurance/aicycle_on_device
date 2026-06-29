@@ -80,6 +80,31 @@ public class YOLOMultiTaskView: UIView {
   /// models apart (the primary detect model reports `modelId == "detect"`).
   var thirdModelId:      String = "detect2"
 
+  // MARK: License-plate OCR (gated by the carPart / third detector)
+
+  /// Standalone CoreML recognizer (not a YOLO predictor). When set, every carPart
+  /// frame that contains a `"Biển số xe"` box is cropped and run through OCR; the
+  /// result is streamed to Dart as a separate `type == "ocr"` event used purely as
+  /// a framing signal (a readable plate ⇒ this frame is a good panoramic shot).
+  private var ocrModel: LicensePlateOCR?
+  /// carPart's class name for the license plate (matches the Dart gating logic).
+  private static let licensePlateClass = "Biển số xe"
+  /// Visible viewport (preview-space vertical band, which maps to the box X axis —
+  /// see `_filterToViewport` in the Dart controller). OCR only considers plate
+  /// boxes fully inside this band so a readable plate is guaranteed to sit inside
+  /// the saved (viewport-cropped) photo. Defaults to the full frame until set.
+  private var ocrViewportTop: CGFloat = 0
+  private var ocrViewportBottom: CGFloat = 1
+  /// Inset so a readable plate isn't flush against the viewport edge.
+  private static let ocrViewportMargin: CGFloat = 0.02
+  /// Dedicated queue so OCR inference never blocks the camera/inference queues.
+  private let ocrQueue = DispatchQueue(label: "yolo.infer.ocr", qos: .userInitiated)
+  /// One-frame-deep back-pressure for OCR. Accessed only on cameraQueue.
+  private var ocrBusy = false
+  /// Pixel buffer of the frame currently in flight through the third predictor —
+  /// retained so the OCR step can crop the exact frame carPart saw. cameraQueue only.
+  private var thirdInFlightBuffer: CVPixelBuffer?
+
   /// One-frame-deep back-pressure per predictor. Accessed only on cameraQueue.
   var detectBusy   = false
   var classifyBusy = false
@@ -208,6 +233,7 @@ public class YOLOMultiTaskView: UIView {
       taskFps = thirdFps
       task = thirdTaskType
       modelId = thirdModelId
+      maybeRunOCR(on: result)
     }
 
     let camFpsSnapshot = camFps
@@ -216,6 +242,50 @@ public class YOLOMultiTaskView: UIView {
 
     DispatchQueue.main.async { [weak self] in
       self?.onMultiTaskStream?(streamData)
+    }
+  }
+
+  /// If carPart found a license-plate box and OCR is idle, crop that region from
+  /// the retained frame and recognize it off the camera queue. Emits a separate
+  /// `type == "ocr"` stream event with `readable` used as the framing signal.
+  /// Runs on cameraQueue (where `ocrBusy` / `thirdInFlightBuffer` are owned).
+  private func maybeRunOCR(on result: YOLOResult) {
+    guard let ocr = ocrModel, !ocrBusy, let buffer = thirdInFlightBuffer else { return }
+    thirdInFlightBuffer = nil
+
+    // Only the highest-confidence plate box that sits FULLY inside the visible
+    // viewport (so the saved viewport-cropped photo will contain the whole plate).
+    let lo = ocrViewportTop + Self.ocrViewportMargin
+    let hi = ocrViewportBottom - Self.ocrViewportMargin
+    let plateBox = result.boxes
+      .filter { $0.cls == Self.licensePlateClass && $0.xywhn.minX >= lo && $0.xywhn.maxX <= hi }
+      .max { $0.conf < $1.conf }
+    guard let box = plateBox else { return }
+
+    let rect = box.xywhn  // normalized, top-left origin in the (landscape) buffer
+    ocrBusy = true
+    ocrQueue.async { [weak self] in
+      guard let self else { return }
+      let read = ocr.read(pixelBuffer: buffer, region: rect)
+      // TODO(remove before production): plate-read debug log.
+      if let r = read { NSLog("[OCR] plate=\"%@\" score=%.3f", r.plate, r.score) }
+      let event: [String: Any] = [
+        "type": "ocr",
+        "modelId": "ocr",
+        "plate": read?.plate ?? "",
+        "score": read?.score ?? 0.0,
+        "readable": read != nil,
+      ]
+      DispatchQueue.main.async { [weak self] in self?.onMultiTaskStream?(event) }
+      self.cameraQueue.async { [weak self] in self?.ocrBusy = false }
+    }
+  }
+
+  /// Updates the visible viewport used to gate OCR (preview-space vertical band).
+  func setOcrViewport(top: CGFloat, bottom: CGFloat) {
+    cameraQueue.async { [weak self] in
+      self?.ocrViewportTop = top
+      self?.ocrViewportBottom = bottom
     }
   }
 
@@ -281,6 +351,8 @@ public class YOLOMultiTaskView: UIView {
     classifyPath: String,
     thirdModelPath: String? = nil,
     thirdModelTask: String = "detect",
+    ocrModelPath: String? = nil,
+    ocrConfidenceThreshold: Double = 0.85,
     useGpu: Bool = true,
     detectConfidenceThreshold: Double = 0.25,
     detectIouThreshold: Double = 0.7,
@@ -293,6 +365,20 @@ public class YOLOMultiTaskView: UIView {
     self.thirdTaskType = thirdModelTask
     expectedCount = thirdModelPath != nil ? 3 : 2
     loadedCount = 0
+
+    // OCR is not a YOLO predictor and must not gate camera start — load it on a
+    // background queue and attach when ready (frames before that simply skip OCR).
+    if let ocrPath = ocrModelPath, let ocrURL = resolveModelURL(ocrPath) {
+      DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        let ocr = LicensePlateOCR(modelURL: ocrURL, threshold: ocrConfidenceThreshold)
+        DispatchQueue.main.async {
+          self?.ocrModel = ocr
+          NSLog(ocr == nil
+            ? "YOLOMultiTaskView: ⚠️ OCR model failed to load"
+            : "YOLOMultiTaskView: ✅ OCR model loaded")
+        }
+      }
+    }
 
     func tryDone() {
       loadedCount += 1
@@ -514,6 +600,8 @@ public class YOLOMultiTaskView: UIView {
     detectPredictor = nil
     classifyPredictor = nil
     thirdPredictor = nil
+    ocrModel = nil
+    thirdInFlightBuffer = nil
     DispatchQueue.global(qos: .utility).async {
       // Giữ strong ref tới hết block rồi mới thả → dealloc xảy ra ở nền (nếu đây
       // là tham chiếu cuối cùng).
@@ -575,6 +663,11 @@ extension YOLOMultiTaskView: AVCaptureVideoDataOutputSampleBufferDelegate, @unch
       p.isUpdating = true
       let buf = sampleBuffer
       let adapter = thirdAdapter
+      // Retain this frame's pixel buffer so the OCR step (run from the third
+      // result handler) can crop the exact frame carPart processed.
+      if ocrModel != nil {
+        thirdInFlightBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
+      }
       thirdQueue.async { p.predict(sampleBuffer: buf, onResultsListener: adapter, onInferenceTime: adapter) }
     }
   }
