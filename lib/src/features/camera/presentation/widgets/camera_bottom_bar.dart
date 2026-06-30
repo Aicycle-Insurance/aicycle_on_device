@@ -16,12 +16,14 @@ class CameraBottomBar extends StatelessWidget {
     required this.completedSegments,
     required this.onShowProgress,
     this.onCapture,
+    this.completedTakesPriority = false,
   });
 
   final Map<int, List<Uint8List>> capturedPhotos;
   final int? activeSegmentIndex;
   final Set<int> completedSegments;
   final VoidCallback onShowProgress;
+  final bool completedTakesPriority;
 
   /// Chụp ảnh thủ công (nút shutter).
   final VoidCallback? onCapture;
@@ -45,6 +47,7 @@ class CameraBottomBar extends StatelessWidget {
               child: CarProgressRing(
                 activeIndex: activeSegmentIndex,
                 completedIndices: completedSegments,
+                completedTakesPriority: completedTakesPriority,
               ),
             ),
           ],

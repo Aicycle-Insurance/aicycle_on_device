@@ -11,10 +11,12 @@ class CarProgressDialog extends StatelessWidget {
     super.key,
     required this.activeIndex,
     required this.completedIndices,
+    this.completedTakesPriority = false,
   });
 
   final int? activeIndex;
   final Set<int> completedIndices;
+  final bool completedTakesPriority;
 
   @override
   Widget build(BuildContext context) {
@@ -47,6 +49,7 @@ class CarProgressDialog extends StatelessWidget {
                     size: 70.r,
                     activeIndex: activeIndex,
                     completedIndices: completedIndices,
+                    completedTakesPriority: completedTakesPriority,
                   ),
                 ),
                 SizedBox(width: 16.w),
