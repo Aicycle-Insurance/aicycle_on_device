@@ -28,20 +28,31 @@ final class LicensePlateOCR {
   private let inputName: String
   private let outputName: String
 
-  /// Shared CIContext — creating one per frame is expensive.
-  private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+  /// Shared CIContext — creating one per frame is expensive. Color management is
+  /// disabled (workingColorSpace = null) so cropped pixels pass through as raw
+  /// values, matching cv2's color-unmanaged bytes used by the Python pipeline.
+  private let ciContext = CIContext(options: [
+    .useSoftwareRenderer: false,
+    .workingColorSpace: NSNull(),
+    .outputColorSpace: NSNull(),
+  ])
 
   /// Loads (and compiles, if needed) the CoreML model at [url]. Heavy — call off
   /// the main thread.
   init?(modelURL url: URL, threshold: Double = 0.85) {
     self.threshold = threshold
     do {
+      // Match the Python pipeline's execution: run on CPU (Float32) instead of
+      // the ANE (Float16), whose lower precision can flip argmax on the CCT
+      // transformer and misread plates. OCR runs gated/infrequently, so CPU is fine.
+      let config = MLModelConfiguration()
+      config.computeUnits = .cpuOnly
       let loaded: MLModel
       if url.pathExtension.lowercased() == "mlmodelc" {
-        loaded = try MLModel(contentsOf: url)
+        loaded = try MLModel(contentsOf: url, configuration: config)
       } else {
         let compiled = try MLModel.compileModel(at: url)
-        loaded = try MLModel(contentsOf: compiled)
+        loaded = try MLModel(contentsOf: compiled, configuration: config)
       }
       self.model = loaded
 
@@ -126,8 +137,10 @@ final class LicensePlateOCR {
         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
     else { return nil }
 
-    // Bilinear resize via the draw call (matches cv2.INTER_LINEAR closely enough).
-    ctx.interpolationQuality = .high
+    // Bilinear resize to match the Python pipeline's cv2.resize(INTER_LINEAR).
+    // `.high` is bicubic/Lanczos and shifts edge pixel values the CCT model is
+    // sensitive to, so use `.medium` (bilinear).
+    ctx.interpolationQuality = .medium
     ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: w, height: h))
 
     guard let array = try? MLMultiArray(shape: [1, NSNumber(value: h), NSNumber(value: w), 3], dataType: .float32)
@@ -155,16 +168,32 @@ final class LicensePlateOCR {
   private func postprocess(_ tensor: MLMultiArray) -> (plate: String, score: Double)? {
     let classes = alphabet.count  // 39
     guard tensor.count >= numSlots * classes else { return nil }
-    let ptr = tensor.dataPointer.bindMemory(to: Float32.self, capacity: tensor.count)
+
+    // Read via the multi-dimensional subscript so CoreML applies the real strides
+    // (handles padded / non-contiguous outputs) and bounds-checks safely. We auto-
+    // detect the slot(12)/class(39) axes so the decode is correct regardless of
+    // layout ([1,12,39] slot-major vs [1,39,12] transposed). dtype-agnostic.
+    let shape = tensor.shape.map { $0.intValue }
+    let slotAxis = shape.firstIndex(of: numSlots)
+    let classAxis = shape.firstIndex(of: classes)
+    func value(_ t: Int, _ k: Int) -> Double {
+      guard let sa = slotAxis, let ca = classAxis, sa != ca else {
+        // Fallback: assume a flat / contiguous slot-major buffer.
+        return tensor[t * classes + k].doubleValue
+      }
+      var idx = [NSNumber](repeating: 0, count: shape.count)
+      idx[sa] = NSNumber(value: t)
+      idx[ca] = NSNumber(value: k)
+      return tensor[idx].doubleValue
+    }
 
     var rawChars: [Character] = []
     var scores: [Double] = []
     for t in 0..<numSlots {
       var bestIdx = 0
-      var bestVal = -Float.greatestFiniteMagnitude
-      let base = t * classes
+      var bestVal = -Double.greatestFiniteMagnitude
       for k in 0..<classes {
-        let v = ptr[base + k]
+        let v = value(t, k)
         if v > bestVal {
           bestVal = v
           bestIdx = k
@@ -173,7 +202,7 @@ final class LicensePlateOCR {
       let ch = alphabet[bestIdx]
       if ch == padChar { continue }  // drop padding
       rawChars.append(ch)
-      scores.append(Double(bestVal))
+      scores.append(bestVal)
     }
 
     let joined = String(rawChars)

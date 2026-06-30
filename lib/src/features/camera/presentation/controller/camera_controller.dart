@@ -89,6 +89,14 @@ class CameraController extends ChangeNotifier {
   /// khung: đọc được biển ⇒ khung đủ rõ/đủ gần để dùng làm ảnh toàn cảnh.
   bool _latestPlateReadable = false;
 
+  /// Timer 5s: khi đã căn đủ bộ phận nhưng OCR chưa đọc được biển hợp lệ, hết
+  /// 5s thì nhắc user di chuyển cho biển rõ nét.
+  Timer? _plateReadTimer;
+
+  /// Đã hiển thị nhắc "di chuyển cho biển rõ" hay chưa — để frame carPart kế
+  /// tiếp không ghi đè message về holdStill.
+  bool _platePromptShown = false;
+
   /// Chi tiết bộ phận (kèm bounding box) từ frame car-part detect mới nhất —
   /// dùng để vẽ nhãn tên bộ phận lên màn hình.
   List<DetectionResult> _latestCarPartDetections = [];
@@ -343,29 +351,66 @@ class CameraController extends ChangeNotifier {
 
     final (frontBumper, initialGuide) = config;
 
-    if (!classes.contains(licencePlate)) {
+    final hasPlate = classes.contains(licencePlate);
+    final allPresent = hasPlate &&
+        classes.contains(door) &&
+        classes.contains(frontBumper);
+
+    // Chỉ giữ timer 5s khi đang ở trạng thái "đã căn đủ, chờ OCR". Rời trạng
+    // thái này (di chuyển làm mất bộ phận) → huỷ timer + reset cờ nhắc.
+    if (!(allPresent && !_latestPlateReadable)) {
+      _cancelPlateReadTimer();
+    }
+
+    if (!hasPlate) {
       _setMessage(
           CameraMessage(message: initialGuide, type: MessageType.guide));
     } else if (!classes.contains(door)) {
       _setMessage(CameraMessage(
           message: StringSheet.moveBackGuide, type: MessageType.info));
-    } else if (classes.contains(door) &&
-        classes.contains(frontBumper) &&
-        classes.contains(licencePlate)) {
+    } else if (allPresent) {
       // Bộ phận đã căn đủ — giữ yên để OCR đọc biển số. Chỉ chụp ảnh toàn cảnh
       // khi OCR đọc được biển (khung đủ rõ/đủ gần), tránh chụp ảnh mờ/xa.
-      _setMessage(CameraMessage(
-          message: StringSheet.holdStillGuide, type: MessageType.loading));
       if (_latestPlateReadable) {
         _triggerAutoCapture();
+      } else if (_platePromptShown) {
+        // Quá 5s vẫn chưa đọc được biển → giữ nhắc di chuyển cho biển rõ nét.
+        _setMessage(CameraMessage(
+            message: StringSheet.movePlateClearGuide,
+            type: MessageType.warning));
+      } else {
+        _setMessage(CameraMessage(
+            message: StringSheet.holdStillGuide, type: MessageType.loading));
+        _ensurePlateReadTimer();
       }
     }
+  }
+
+  /// Bắt đầu đếm 5s chờ OCR (nếu chưa chạy). Hết 5s mà chưa đọc được biển →
+  /// bật cờ nhắc + hiển thị message di chuyển cho biển rõ.
+  void _ensurePlateReadTimer() {
+    if (_plateReadTimer != null) return;
+    _plateReadTimer = Timer(const Duration(seconds: 5), () {
+      _plateReadTimer = null;
+      _platePromptShown = true;
+      _setMessage(CameraMessage(
+        message: StringSheet.movePlateClearGuide,
+        type: MessageType.warning,
+      ));
+    });
+  }
+
+  void _cancelPlateReadTimer() {
+    _plateReadTimer?.cancel();
+    _plateReadTimer = null;
+    _platePromptShown = false;
   }
 
   Future<void> _triggerAutoCapture() async {
     // Cờ "đọc được biển" chỉ dùng cho 1 lần chụp toàn cảnh; reset để góc sau
     // phải đọc lại biển mới chụp.
     _latestPlateReadable = false;
+    _cancelPlateReadTimer();
     // OCR vừa đọc được biển ở frame hiện tại ⇒ chụp NGAY (immediate, bỏ delay 3s)
     // để ảnh toàn cảnh sát nhất với frame đã canh đúng khung + đọc được biển.
     await capturePhoto(immediate: true);
@@ -375,6 +420,15 @@ class CameraController extends ChangeNotifier {
       _completedSegments.add(_activeSegmentIndex!);
     }
     _classificationLocked = true;
+    // Biển hợp lệ + đã chụp → báo thành công 3s rồi mới sang pha inspection.
+    // (Segment đã nằm trong _panoramicCapturedSegments nên updateMessage bị chặn
+    // → message thành công không bị frame carPart kế tiếp ghi đè.)
+    _setMessage(CameraMessage(
+      message: StringSheet.plateValidCaptured,
+      type: MessageType.success,
+    ));
+    await Future.delayed(const Duration(seconds: 3));
+    if (_stopped) return;
     _setInspectionPhase(InspectionPhase.panoramicGuide);
     _setMessage(CameraMessage(
       message: StringSheet.inspectDamageGuide,
@@ -586,6 +640,7 @@ class CameraController extends ChangeNotifier {
   void dispose() {
     _autoCaptureTimer?.cancel();
     _noDetectionTimer?.cancel();
+    _plateReadTimer?.cancel();
     stopCamera(); // no-op nếu đã gọi trước đó
     super.dispose();
   }

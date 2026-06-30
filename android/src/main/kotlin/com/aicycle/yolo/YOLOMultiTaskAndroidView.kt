@@ -167,7 +167,11 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         if (ocrModelPath != null) {
             ocrExecutor.execute {
                 ocrModel = try {
-                    LicensePlateOCR(context, ocrModelPath, useGpu, ocrConfidenceThreshold).also {
+                    // Force CPU (Float32): the GPU delegate runs fp16, whose lower
+                    // precision flips argmax on the CCT transformer and misreads
+                    // plates (mirrors the iOS ANE issue). OCR runs gated/infrequently
+                    // so CPU is fine. Matches the Python pipeline's CPU execution.
+                    LicensePlateOCR(context, ocrModelPath, false, ocrConfidenceThreshold).also {
                         Log.d(TAG, "✅ OCR model loaded")
                     }
                 } catch (e: Exception) {
