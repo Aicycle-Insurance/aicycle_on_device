@@ -31,7 +31,7 @@ class _BoundingBoxPainter extends CustomPainter {
     'Trầy, xước': Color(0xFF42A5F5),
   };
 
-  static const _defaultColor = Color(0xFFAB47BC);
+  static const _defaultColor = Color(0xFF00AA3E);
 
   @override
   void paint(Canvas canvas, Size size) {

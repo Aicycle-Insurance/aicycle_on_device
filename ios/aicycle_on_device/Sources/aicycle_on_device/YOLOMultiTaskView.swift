@@ -97,6 +97,12 @@ public class YOLOMultiTaskView: UIView {
   private var ocrViewportBottom: CGFloat = 1
   /// Inset so a readable plate isn't flush against the viewport edge.
   private static let ocrViewportMargin: CGFloat = 0.02
+  /// Inset on the PERPENDICULAR axis (preview-horizontal = buffer Y). The viewport
+  /// band only gates the buffer X axis (preview-vertical, where the top/bottom bars
+  /// are), leaving plates flush against the LEFT/RIGHT edge of the screen readable —
+  /// which produced badly-framed panoramas. Require the plate to sit away from those
+  /// edges too so a readable plate means the car is reasonably centered.
+  private static let ocrEdgeMargin: CGFloat = 0.05
   /// Dedicated queue so OCR inference never blocks the camera/inference queues.
   private let ocrQueue = DispatchQueue(label: "yolo.infer.ocr", qos: .userInitiated)
   /// One-frame-deep back-pressure for OCR. Accessed only on cameraQueue.
@@ -264,8 +270,13 @@ public class YOLOMultiTaskView: UIView {
     // viewport (so the saved viewport-cropped photo will contain the whole plate).
     let lo = ocrViewportTop + Self.ocrViewportMargin
     let hi = ocrViewportBottom - Self.ocrViewportMargin
+    let edge = Self.ocrEdgeMargin
     let plateBox = result.boxes
-      .filter { $0.cls == Self.licensePlateClass && $0.xywhn.minX >= lo && $0.xywhn.maxX <= hi }
+      .filter {
+        $0.cls == Self.licensePlateClass
+          && $0.xywhn.minX >= lo && $0.xywhn.maxX <= hi
+          && $0.xywhn.minY >= edge && $0.xywhn.maxY <= 1 - edge
+      }
       .max { $0.conf < $1.conf }
     guard let box = plateBox else { return }
 

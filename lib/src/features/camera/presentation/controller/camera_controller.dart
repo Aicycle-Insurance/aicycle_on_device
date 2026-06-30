@@ -120,6 +120,12 @@ class CameraController extends ChangeNotifier {
   /// tiếp không ghi đè message về holdStill.
   bool _platePromptShown = false;
 
+  /// Mốc thời điểm bắt đầu hiển thị "giữ yên" (đã căn đủ bộ phận). Dùng để giữ
+  /// message holdStill tối thiểu 3s, tránh OCR đọc nhanh khiến message flash qua
+  /// quá nhanh user không kịp thấy.
+  DateTime? _holdStillShownAt;
+  static const _holdStillMinDuration = Duration(seconds: 3);
+
   /// Chi tiết bộ phận (kèm bounding box) từ frame car-part detect mới nhất —
   /// dùng để vẽ nhãn tên bộ phận lên màn hình.
   List<DetectionResult> _latestCarPartDetections = [];
@@ -337,6 +343,10 @@ class CameraController extends ChangeNotifier {
       if (!immediate) await Future.delayed(const Duration(seconds: 3));
       if (flashTick) {
         _captureFlashTick++;
+        // Paint the white shutter-blink NGAY trước khi gọi native capture (có thể
+        // chiếm thời gian) để blink hiện đồng bộ với khoảnh khắc chụp, thay vì chỉ
+        // hiện sau khi capture xong.
+        notifyListeners();
       }
 
       final bytes = await yoloController.capturePhoto(
@@ -412,6 +422,10 @@ class CameraController extends ChangeNotifier {
     if (!(allPresent && !_latestPlateReadable)) {
       _cancelPlateReadTimer();
     }
+    // Rời trạng thái căn đủ → reset mốc đếm thời gian giữ yên.
+    if (!allPresent) {
+      _holdStillShownAt = null;
+    }
 
     if (!hasPlate) {
       _setMessage(
@@ -422,7 +436,12 @@ class CameraController extends ChangeNotifier {
     } else if (allPresent) {
       // Bộ phận đã căn đủ — giữ yên để OCR đọc biển số. Chỉ chụp ảnh toàn cảnh
       // khi OCR đọc được biển (khung đủ rõ/đủ gần), tránh chụp ảnh mờ/xa.
-      if (_latestPlateReadable) {
+      _holdStillShownAt ??= DateTime.now();
+      // Giữ message "giữ yên" tối thiểu 3s trước khi auto-capture, kể cả khi OCR
+      // đọc được biển ngay — để user kịp thấy hướng dẫn.
+      final heldLongEnough =
+          DateTime.now().difference(_holdStillShownAt!) >= _holdStillMinDuration;
+      if (_latestPlateReadable && heldLongEnough) {
         _triggerAutoCapture();
       } else if (_platePromptShown) {
         // Quá 5s vẫn chưa đọc được biển → giữ nhắc di chuyển cho biển rõ nét.
@@ -461,6 +480,7 @@ class CameraController extends ChangeNotifier {
     // Cờ "đọc được biển" chỉ dùng cho 1 lần chụp toàn cảnh; reset để góc sau
     // phải đọc lại biển mới chụp.
     _latestPlateReadable = false;
+    _holdStillShownAt = null;
     _cancelPlateReadTimer();
     // OCR vừa đọc được biển ở frame hiện tại ⇒ chụp NGAY (immediate, bỏ delay 3s)
     // để ảnh toàn cảnh sát nhất với frame đã canh đúng khung + đọc được biển.

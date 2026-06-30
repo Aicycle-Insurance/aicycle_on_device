@@ -44,6 +44,15 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         private const val LICENSE_PLATE_CLASS = "Biển số xe"
         /** Inset so a readable plate isn't flush against the viewport edge. */
         private const val OCR_VIEWPORT_MARGIN = 0.02f
+        /**
+         * Inset on the PERPENDICULAR axis (preview-horizontal = buffer Y). The
+         * viewport band only gates the buffer X axis (preview-vertical, where the
+         * top/bottom bars are), leaving plates flush against the LEFT/RIGHT edge of
+         * the screen readable — which produced badly-framed panoramas. Require the
+         * plate to sit away from those edges too so a readable plate means the car
+         * is reasonably centered.
+         */
+        private const val OCR_EDGE_MARGIN = 0.05f
         private const val REQUEST_CODE_PERMISSIONS = 1001
         private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
 
@@ -550,7 +559,11 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         val lo = ocrViewportTop + OCR_VIEWPORT_MARGIN
         val hi = ocrViewportBottom - OCR_VIEWPORT_MARGIN
         val box = result.boxes
-            .filter { it.cls == LICENSE_PLATE_CLASS && it.xywhn.left >= lo && it.xywhn.right <= hi }
+            .filter {
+                it.cls == LICENSE_PLATE_CLASS &&
+                    it.xywhn.left >= lo && it.xywhn.right <= hi &&
+                    it.xywhn.top >= OCR_EDGE_MARGIN && it.xywhn.bottom <= 1f - OCR_EDGE_MARGIN
+            }
             .maxByOrNull { it.conf }
         if (box == null) { ocrBusy.set(false); return }
 

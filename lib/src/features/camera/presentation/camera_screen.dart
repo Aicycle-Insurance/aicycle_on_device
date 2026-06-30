@@ -163,19 +163,9 @@ class _CameraScreenState extends State<CameraScreen> {
       onCloseButtonPressed: _cameraController.startDamageScanning,
       // ── Secondary button ─────────────────────────────────────────────────
       // detectionReady → "Thiếu tổn thất"
-      // panoramicGuide / detailGuide / continueOrChange → "Chuyển góc"
-      // Ẩn "Chuyển góc" khi đang hiện message "Thiếu tổn thất" (moveCameraToMissing).
-      showSecondaryButton: phase == InspectionPhase.detectionReady ||
-          phase == InspectionPhase.panoramicGuide ||
-          phase == InspectionPhase.detailGuide ||
-          (phase == InspectionPhase.continueOrChange &&
-              msg.message != StringSheet.moveCameraToMissing),
-      secondaryButtonLabel: phase == InspectionPhase.detectionReady
-          ? StringSheet.missingDamage
-          : StringSheet.changeAngle,
-      onSecondaryButtonPressed: phase == InspectionPhase.detectionReady
-          ? _cameraController.rejectDamage
-          : _cameraController.completeCurrentAngle,
+      showSecondaryButton: phase == InspectionPhase.detectionReady,
+      secondaryButtonLabel: StringSheet.missingDamage,
+      onSecondaryButtonPressed: _cameraController.rejectDamage,
       // ── Primary button ("Xác nhận") — only during detectionReady ────────
       showPrimaryButton: phase == InspectionPhase.detectionReady,
       primaryButtonLabel: StringSheet.confirm,
