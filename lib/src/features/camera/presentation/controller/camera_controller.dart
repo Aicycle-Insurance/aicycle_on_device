@@ -10,6 +10,11 @@ import '../../data/model/car_angle.dart';
 import '../../data/model/classify_output.dart';
 import '../../data/model/detection_output.dart';
 
+part 'camera_controller.stream.dart';
+part 'camera_controller.capture.dart';
+part 'camera_controller.panoramic.dart';
+part 'camera_controller.inspection.dart';
+
 /// Sub-states of the damage inspection flow (active when panoramic photo is taken).
 enum InspectionPhase {
   /// Initial message: "Đưa camera lại gần tổn thất…" — X → scanning, Chuyển góc → done.
@@ -21,7 +26,7 @@ enum InspectionPhase {
 
   /// Detections found — showing "Xác nhận / Thiếu tổn thất". Sau 5 s không
   /// bấm gì sẽ tự động chụp. Dùng cho cả ảnh tổng quan (overview) lẫn ảnh chi
-  /// tiết (detail) — phân biệt bằng [_inDetailStage].
+  /// tiết (detail) — phân biệt bằng [_CameraControllerBase._inDetailStage].
   detectionReady,
 
   /// Đang chụp ảnh tổn thất (tự động hoặc do bấm "Xác nhận").
@@ -38,8 +43,35 @@ enum InspectionPhase {
   continueOrChange,
 }
 
-class CameraController extends ChangeNotifier {
-  CameraController({
+/// Tên class biển số xe trong model car-part (khớp với logic native OCR).
+const _licensePlateClass = 'Biển số xe';
+
+/// Giữ message holdStill tối thiểu khoảng này, tránh OCR đọc nhanh khiến message
+/// flash qua quá nhanh user không kịp thấy.
+const _holdStillMinDuration = Duration(seconds: 3);
+
+/// Cấu hình mỗi góc: (tên ba đờ sốc cần thấy, message điều hướng tới góc đó).
+const _segmentConfigs = {
+  0: ('Ba đờ sốc trước', StringSheet.frontRightGuide),
+  1: ('Ba đờ sốc sau', StringSheet.backRightGuide),
+  2: ('Ba đờ sốc sau', StringSheet.backLeftGuide),
+  3: ('Ba đờ sốc trước', StringSheet.frontLeftGuide),
+};
+
+/// Controller điều phối luồng chụp ảnh + soi tổn thất. Hành vi được chia thành
+/// các mixin (trên cùng [_CameraControllerBase], state dùng chung):
+///   * [_StreamMixin]     — phân loại frame YOLO (classify / ocr / carPart / carDamage).
+///   * [_CaptureMixin]    — chụp & lưu ảnh, khôi phục cache.
+///   * [_PanoramicMixin]  — canh khung + OCR biển số cho ảnh toàn cảnh.
+///   * [_InspectionMixin] — máy trạng thái soi tổn thất (scanning → detail → …).
+// ignore: library_private_types_in_public_api
+class CameraController = _CameraControllerBase
+    with _StreamMixin, _CaptureMixin, _PanoramicMixin, _InspectionMixin;
+
+/// State dùng chung cho mọi mixin + các helper cốt lõi (message, viewport, phase,
+/// lifecycle). Các entry-point gọi chéo giữa mixin được khai báo abstract ở đây.
+abstract class _CameraControllerBase extends ChangeNotifier {
+  _CameraControllerBase({
     required String sessionId,
     bool require4Angles = false,
   })  : _sessionId = sessionId,
@@ -59,7 +91,7 @@ class CameraController extends ChangeNotifier {
   bool _isCapturing = false;
 
   /// User chưa bấm "Bắt đầu chụp ảnh xe" (guide sheet) → tạm bỏ qua mọi output
-  /// streaming từ YOLO. Bật lên qua [startCapture].
+  /// streaming từ YOLO. Bật lên qua [_StreamMixin.startCapture].
   bool _captureStarted = false;
 
   Map<int, List<Uint8List>> _capturedPhotos = {};
@@ -102,9 +134,6 @@ class CameraController extends ChangeNotifier {
   /// Angles fully completed (user pressed "Chuyển góc").
   final Set<int> _completedSegments = {};
 
-  /// Tên class biển số xe trong model car-part (khớp với logic native OCR).
-  static const _licensePlateClass = 'Biển số xe';
-
   /// Class names bộ phận từ frame car-part detect (model thứ 2) mới nhất.
   Set<String> _latestCarPartClasses = {};
 
@@ -124,7 +153,6 @@ class CameraController extends ChangeNotifier {
   /// message holdStill tối thiểu 3s, tránh OCR đọc nhanh khiến message flash qua
   /// quá nhanh user không kịp thấy.
   DateTime? _holdStillShownAt;
-  static const _holdStillMinDuration = Duration(seconds: 3);
 
   /// Chi tiết bộ phận (kèm bounding box) từ frame car-part detect mới nhất —
   /// dùng để vẽ nhãn tên bộ phận lên màn hình.
@@ -156,6 +184,11 @@ class CameraController extends ChangeNotifier {
   /// (để không tự động chụp lặp lại; lần hết giờ thứ 2 sẽ chuyển sang góc khác).
   bool _detailAutoCaptured = false;
 
+  /// Active của model gating đã gửi xuống native (null = chưa gửi lần nào).
+  bool? _sentInspectionActive;
+
+  bool _stopped = false;
+
   // ── Getters ──────────────────────────────────────────────────────────────
 
   bool get isTorchEnabled => _torchEnabled;
@@ -179,6 +212,8 @@ class CameraController extends ChangeNotifier {
 
   /// Bounding boxes are shown only during inspection (after panoramic).
   bool get showBoundingBoxes => _inspectionPhase != null;
+
+  // ── Viewport ───────────────────────────────────────────────────────────────
 
   /// Cập nhật khung nhìn thấy (do view tính từ chiều cao top/bottom bar so với
   /// chiều cao preview). Ảnh chụp sẽ được crop về đúng khung này.
@@ -210,113 +245,6 @@ class CameraController extends ChangeNotifier {
         .toList();
   }
 
-  // ── Cache restore ─────────────────────────────────────────────────────────
-
-  /// Restores previously captured photos from disk cache.
-  /// Call once after construction; notifies listeners when done.
-  Future<void> loadCachedPhotos() async {
-    final cached = await PhotoSessionCache.instance.loadSession(_sessionId);
-    if (cached.isEmpty) return;
-    _capturedPhotos = cached;
-    // Angles with cached photos are shown as completed in the progress ring.
-    _completedSegments.addAll(cached.keys);
-    notifyListeners();
-  }
-
-  // ── Capture gate ──────────────────────────────────────────────────────────
-
-  /// Gọi khi user bấm "Bắt đầu chụp ảnh xe" ở guide sheet — mở cổng cho phép
-  /// [onStreamingData] bắt đầu xử lý frame. An toàn khi gọi nhiều lần.
-  void startCapture() => _captureStarted = true;
-
-  // ── Streaming data ────────────────────────────────────────────────────────
-
-  // [data] đã là Map<String, dynamic> do MultiTaskYOLOView cấp — dùng trực tiếp,
-  // không copy lại (mỗi frame chạy trên UI thread). Mỗi nhánh chỉ
-  // notifyListeners() đúng một lần và chỉ khi có thay đổi nhìn thấy được, để
-  // tránh rebuild thừa khi stream bắn nhiều frame/giây.
-  void onStreamingData(Map<String, dynamic> data) {
-    // User chưa bấm "Bắt đầu chụp ảnh xe" → bỏ qua toàn bộ frame streaming.
-    if (!_captureStarted) return;
-
-    final type = data['type'];
-    // Hai model detect đều trả type=='detect'; phân biệt bằng modelId:
-    //   'detect'  -> car damage (model chính)
-    //   'detect2' -> car part   (model thứ 2)
-    final modelId = data['modelId'];
-    if (type == 'classify') {
-      // carCorner — phân loại góc xe.
-      final output = ClassifyOutput.fromJson(data);
-      final segment = CarAngle.segmentOf(output.classification.top1);
-      // Luôn highlight góc đang nhận diện được, kể cả khi flow đã khoá.
-      final highlightChanged =
-          segment != null && segment != _detectedSegmentIndex;
-      if (highlightChanged) _detectedSegmentIndex = segment;
-
-      // Cập nhật luồng (chỉ khi chưa khoá và góc đổi). Các hàm bên trong
-      // (startDamageScanning/updateMessage) tự notify khi message đổi.
-      if (!_classificationLocked && segment != _activeSegmentIndex) {
-        _activeSegmentIndex = segment;
-        // Vào thẳng scanning (bỏ qua chụp toàn cảnh) khi:
-        //  - góc này đã có ảnh toàn cảnh rồi, HOẶC
-        //  - config 4 góc TẮT và đã chụp xong ảnh toàn cảnh đầu tiên (các góc
-        //    sau chỉ ghi nhận tổn thất, không yêu cầu chụp toàn cảnh).
-        final skipPanoramic = _panoramicCapturedSegments.contains(segment) ||
-            (!_require4Angles && _firstPanoramicCaptured);
-        if (skipPanoramic) {
-          _classificationLocked = true;
-          startDamageScanning();
-        } else {
-          updateMessage();
-        }
-      }
-      if (highlightChanged) notifyListeners();
-      return;
-    }
-
-    if (type == 'ocr') {
-      // OCR (native) — tín hiệu canh khung. Đọc được biển ⇒ frame đủ tốt để
-      // làm ảnh toàn cảnh; cập nhật cờ rồi re-evaluate để có thể kích hoạt chụp.
-      final readable = data['readable'] == true;
-      if (readable != _latestPlateReadable) {
-        _latestPlateReadable = readable;
-        if (readable) updateMessage(); // tự notify khi message đổi
-      }
-      return;
-    }
-
-    if (type == 'detect' && modelId == 'detect2') {
-      // carPart — model detect bộ phận, dùng để căn ảnh toàn cảnh.
-      final output = DetectionOutput.fromJson(data);
-      final wasEmpty = _latestCarPartDetections.isEmpty;
-      // Chỉ giữ bộ phận nằm trong vùng user thực sự nhìn thấy (giữa top/bottom
-      // bar) — model xử lý cả phần bị che nên phải lọc lại.
-      final visible = _filterToViewport(output.detections);
-      _latestCarPartClasses = visible.map((d) => d.className).toSet();
-      _latestCarPartDetections = visible;
-      // Biển không còn trong khung → cờ "đọc được" cũ không còn hiệu lực.
-      if (!_latestCarPartClasses.contains(_licensePlateClass)) {
-        _latestPlateReadable = false;
-      }
-      updateMessage(); // tự notify khi message đổi
-      // Bỏ qua redraw nếu không có nhãn bộ phận nào để vẽ (trước & sau đều rỗng).
-      if (!(wasEmpty && visible.isEmpty)) notifyListeners();
-      return;
-    }
-
-    if (type == 'detect') {
-      // carDamage — model detect tổn thất (model chính).
-      final output = DetectionOutput.fromJson(data);
-      // Bỏ qua tổn thất nằm ngoài khung nhìn (bị top/bottom bar che).
-      _latestDetections = _filterToViewport(output.detections);
-      // Phát hiện tổn thất → hiển thị xác nhận ngay, không chờ timer 5s.
-      _maybeShowDetectionReady(); // tự notify khi chuyển pha
-      // Bounding box chỉ vẽ khi đang trong pha inspection; ngoài ra việc đổi
-      // _latestDetections không ảnh hưởng UI → khỏi rebuild.
-      if (showBoundingBoxes) notifyListeners();
-    }
-  }
-
   // ── Torch ─────────────────────────────────────────────────────────────────
 
   Future<void> toggleFlash() async {
@@ -325,435 +253,15 @@ class CameraController extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Photo capture ─────────────────────────────────────────────────────────
-
-  /// Captures a JPEG frame, stores it in memory and on disk.
-  /// Does NOT modify [_completedSegments] — completion is via [completeCurrentAngle].
-  Future<Uint8List?> capturePhoto({
-    bool immediate = false,
-    int? segment,
-    bool flashTick = true,
-  }) async {
-    if (_isCapturing) return null;
-    _isCapturing = true;
-    notifyListeners();
-    try {
-      /// Chụp tự động quá nhanh, người dùng chưa kịp đọc message -> delay 3s.
-      /// Chụp thủ công ([immediate]) thì chụp ngay.
-      if (!immediate) await Future.delayed(const Duration(seconds: 3));
-      if (flashTick) {
-        _captureFlashTick++;
-        // Paint the white shutter-blink NGAY trước khi gọi native capture (có thể
-        // chiếm thời gian) để blink hiện đồng bộ với khoảnh khắc chụp, thay vì chỉ
-        // hiện sau khi capture xong.
-        notifyListeners();
-      }
-
-      final bytes = await yoloController.capturePhoto(
-        cropTop: _cropTop,
-        cropBottom: _cropBottom,
-      );
-      final seg = segment ?? _activeSegmentIndex;
-      if (seg != null) {
-        _capturedPhotos.putIfAbsent(seg, () => []).add(bytes);
-        PhotoSessionCache.instance.savePhoto(_sessionId, seg, bytes);
-        // Config 4 góc TẮT: góc nào đã có ảnh là hiện màu xanh trên vòng tròn
-        // góc (không cần qua bước "Chuyển góc" như flow 4 góc).
-        if (!_require4Angles) _completedSegments.add(seg);
-      }
-      notifyListeners();
-      return bytes;
-    } catch (_) {
-      return null;
-    } finally {
-      _isCapturing = false;
-      notifyListeners();
-    }
-  }
-
-  /// Chụp thủ công bằng nút shutter: chụp ngay, lưu vào góc đang active (mặc
-  /// định góc 0 nếu chưa phân loại được góc).
-  Future<void> manualCapture() =>
-      capturePhoto(immediate: true, segment: _activeSegmentIndex ?? 0);
-
-  // ── Panoramic message logic ───────────────────────────────────────────────
-
-  static const _segmentConfigs = {
-    0: ('Ba đờ sốc trước', StringSheet.frontRightGuide),
-    1: ('Ba đờ sốc sau', StringSheet.backRightGuide),
-    2: ('Ba đờ sốc sau', StringSheet.backLeftGuide),
-    3: ('Ba đờ sốc trước', StringSheet.frontLeftGuide),
-  };
-
-  Future<void> updateMessage() async {
-    if (_activeSegmentIndex == null) {
-      _setMessage(null);
-      return;
-    }
-    // Message canh ảnh toàn cảnh chỉ áp dụng trước khi vào inspection. Khi đã
-    // ở pha inspection (vd config 4 góc tắt: góc khác vào thẳng scanning mà
-    // không nằm trong _panoramicCapturedSegments) thì không ghi đè message
-    // scanning bằng hướng dẫn canh khung/"di chuyển về góc chéo".
-    if (_inspectionPhase != null) return;
-    if (_completedSegments.contains(_activeSegmentIndex)) return;
-    if (_panoramicCapturedSegments.contains(_activeSegmentIndex)) return;
-    if (_isCapturing) return;
-    _updateMessageSegment(_latestCarPartClasses, _activeSegmentIndex!);
-  }
+  // ── Message / phase helpers ────────────────────────────────────────────────
 
   void clearMessage() => _setMessage(null);
-
-  void _updateMessageSegment(Set<String> classes, int segmentIndex) {
-    const licencePlate = _licensePlateClass;
-    const door = 'Cánh cửa';
-
-    final config = _segmentConfigs[segmentIndex];
-    if (config == null) return;
-
-    final (frontBumper, initialGuide) = config;
-
-    final hasPlate = classes.contains(licencePlate);
-    final allPresent = hasPlate &&
-        classes.contains(door) &&
-        classes.contains(frontBumper);
-
-    // Chỉ giữ timer 5s khi đang ở trạng thái "đã căn đủ, chờ OCR". Rời trạng
-    // thái này (di chuyển làm mất bộ phận) → huỷ timer + reset cờ nhắc.
-    if (!(allPresent && !_latestPlateReadable)) {
-      _cancelPlateReadTimer();
-    }
-    // Rời trạng thái căn đủ → reset mốc đếm thời gian giữ yên.
-    if (!allPresent) {
-      _holdStillShownAt = null;
-    }
-
-    if (!hasPlate) {
-      _setMessage(
-          CameraMessage(message: initialGuide, type: MessageType.guide));
-    } else if (!classes.contains(door)) {
-      _setMessage(CameraMessage(
-          message: StringSheet.moveBackGuide, type: MessageType.info));
-    } else if (allPresent) {
-      // Bộ phận đã căn đủ — giữ yên để OCR đọc biển số. Chỉ chụp ảnh toàn cảnh
-      // khi OCR đọc được biển (khung đủ rõ/đủ gần), tránh chụp ảnh mờ/xa.
-      _holdStillShownAt ??= DateTime.now();
-      // Giữ message "giữ yên" tối thiểu 3s trước khi auto-capture, kể cả khi OCR
-      // đọc được biển ngay — để user kịp thấy hướng dẫn.
-      final heldLongEnough =
-          DateTime.now().difference(_holdStillShownAt!) >= _holdStillMinDuration;
-      if (_latestPlateReadable && heldLongEnough) {
-        _triggerAutoCapture();
-      } else if (_platePromptShown) {
-        // Quá 5s vẫn chưa đọc được biển → giữ nhắc di chuyển cho biển rõ nét.
-        _setMessage(CameraMessage(
-            message: StringSheet.movePlateClearGuide,
-            type: MessageType.warning));
-      } else {
-        _setMessage(CameraMessage(
-            message: StringSheet.holdStillGuide, type: MessageType.loading));
-        _ensurePlateReadTimer();
-      }
-    }
-  }
-
-  /// Bắt đầu đếm 5s chờ OCR (nếu chưa chạy). Hết 5s mà chưa đọc được biển →
-  /// bật cờ nhắc + hiển thị message di chuyển cho biển rõ.
-  void _ensurePlateReadTimer() {
-    if (_plateReadTimer != null) return;
-    _plateReadTimer = Timer(const Duration(seconds: 5), () {
-      _plateReadTimer = null;
-      _platePromptShown = true;
-      _setMessage(CameraMessage(
-        message: StringSheet.movePlateClearGuide,
-        type: MessageType.warning,
-      ));
-    });
-  }
-
-  void _cancelPlateReadTimer() {
-    _plateReadTimer?.cancel();
-    _plateReadTimer = null;
-    _platePromptShown = false;
-  }
-
-  Future<void> _triggerAutoCapture() async {
-    // Cờ "đọc được biển" chỉ dùng cho 1 lần chụp toàn cảnh; reset để góc sau
-    // phải đọc lại biển mới chụp.
-    _latestPlateReadable = false;
-    _holdStillShownAt = null;
-    _cancelPlateReadTimer();
-    // OCR vừa đọc được biển ở frame hiện tại ⇒ chụp NGAY (immediate, bỏ delay 3s)
-    // để ảnh toàn cảnh sát nhất với frame đã canh đúng khung + đọc được biển.
-    await capturePhoto(immediate: true);
-    if (_activeSegmentIndex != null) {
-      _panoramicCapturedSegments.add(_activeSegmentIndex!);
-      // Chụp toàn cảnh xong là góc đó đã được tính hoàn thành.
-      _completedSegments.add(_activeSegmentIndex!);
-    }
-    // Mốc ảnh toàn cảnh đầu tiên đã xong → khi config 4 góc tắt, các góc sau
-    // vào thẳng scanning.
-    _firstPanoramicCaptured = true;
-    _classificationLocked = true;
-    // Biển hợp lệ + đã chụp → báo thành công 3s rồi mới sang pha inspection.
-    // (Segment đã nằm trong _panoramicCapturedSegments nên updateMessage bị chặn
-    // → message thành công không bị frame carPart kế tiếp ghi đè.)
-    _setMessage(CameraMessage(
-      message: StringSheet.plateValidCaptured,
-      type: MessageType.success,
-    ));
-    await Future.delayed(const Duration(seconds: 3));
-    if (_stopped) return;
-    _setInspectionPhase(InspectionPhase.panoramicGuide);
-    _setMessage(CameraMessage(
-      message: StringSheet.inspectDamageGuide,
-      type: MessageType.info,
-    ));
-    // Đang hướng dẫn soi tổn thất: nếu sau 10 s vẫn không phát hiện tổn thất
-    // → cảnh báo rồi tự chuyển góc.
-    _startNoDetectionTimer();
-  }
-
-  // ── Inspection / damage flow ──────────────────────────────────────────────
-
-  /// Bắt đầu (hoặc quay lại) trạng thái scanning: detection chạy theo sự kiện,
-  /// đồng thời mở 10 s no-detection timeout.
-  void startDamageScanning() => _enterScanning();
-
-  void _enterScanning() {
-    _autoCaptureTimer?.cancel();
-    _autoCaptureTimer = null;
-    _detailTimer?.cancel();
-    _detailTimer = null;
-    // Quay lại quét ảnh tổng quan → reset trạng thái chụp ảnh chi tiết.
-    _inDetailStage = false;
-    _detailAutoCaptured = false;
-    // Vào pha quét thiệt hại → bật carDamage (carCorner/carPart vẫn bật).
-    _setInspectionPhase(InspectionPhase.scanning);
-    _setMessage(null);
-    _startNoDetectionTimer();
-  }
-
-  /// Khi đang quét (scanning) mà phát hiện tổn thất → hiển thị xác nhận ngay.
-  /// Pha detailGuide KHÔNG short-circuit ở đây: nó chờ đủ 3 s (cho user lại gần)
-  /// rồi mới tự đánh giá trong [_onDetailTimeout]. An toàn khi gọi nhiều lần.
-  void _maybeShowDetectionReady() {
-    if (_latestDetections.isEmpty) return;
-
-    // Vừa chụp toàn cảnh xong (đang ở màn hướng dẫn) mà đã phát hiện tổn thất
-    // → vào scanning luôn, không cần user bấm X / Chuyển góc.
-    if (_inspectionPhase == InspectionPhase.panoramicGuide) {
-      _enterScanning();
-    }
-
-    if (_inspectionPhase != InspectionPhase.scanning) return;
-    _enterDetectionReady();
-  }
-
-  /// Chuyển sang detectionReady: hiện xác nhận tổn thất + mở 5 s tự động chụp.
-  /// Dùng cho cả ảnh tổng quan (từ scanning) và ảnh chi tiết (từ detailGuide).
-  /// [_inDetailStage] do bên gọi quyết định.
-  void _enterDetectionReady() {
-    _noDetectionTimer?.cancel();
-    _noDetectionTimer = null;
-    _detailTimer?.cancel();
-    _detailTimer = null;
-    _setInspectionPhase(InspectionPhase.detectionReady);
-    _setMessage(CameraMessage(
-      message: StringSheet.damageDetectedGuide,
-      type: MessageType.info,
-    ));
-    // Sau 5 s không bấm gì → tự động chụp.
-    _autoCaptureTimer?.cancel();
-    _autoCaptureTimer = Timer(const Duration(seconds: 5), () {
-      if (_inspectionPhase == InspectionPhase.detectionReady) {
-        confirmDamage(flashTick: false);
-      }
-    });
-  }
-
-  /// Các pha đang chờ phát hiện tổn thất: hướng dẫn soi (panoramicGuide) và
-  /// đang quét (scanning). Hết 10 s mà không thấy tổn thất → cảnh báo rồi rời góc.
-  bool get _isAwaitingDamage =>
-      _inspectionPhase == InspectionPhase.scanning ||
-      _inspectionPhase == InspectionPhase.panoramicGuide;
-
-  /// 10 s không phát hiện tổn thất → cảnh báo rồi rời góc.
-  void _startNoDetectionTimer() {
-    _noDetectionTimer?.cancel();
-    _noDetectionTimer =
-        Timer(const Duration(seconds: 10), _onNoDetectionTimeout);
-  }
-
-  Future<void> _onNoDetectionTimeout() async {
-    if (!_isAwaitingDamage) return;
-    if (_latestDetections.isNotEmpty) return;
-
-    _setMessage(CameraMessage(
-      message: StringSheet.noDamageDetectedGuide,
-      type: MessageType.warning,
-    ));
-
-    await Future.delayed(const Duration(seconds: 5));
-    // Guard: angle may already have been completed/changed during the delay.
-    if (!_isAwaitingDamage) return;
-    completeCurrentAngle();
-  }
-
-  /// User pressed "Thiếu tổn thất" — không chụp, hiện nhắc đưa camera lại gần
-  /// tổn thất còn thiếu rồi quay lại scanning (về lại bước ảnh tổng quan).
-  void rejectDamage() {
-    _autoCaptureTimer?.cancel();
-    _autoCaptureTimer = null;
-    _showMessageThenScan(StringSheet.moveCameraToMissing);
-  }
-
-  /// User pressed "Xác nhận" (hoặc auto sau 5 s) — chụp ảnh tổn thất.
-  ///   - Nếu vừa chụp ảnh TỔNG QUAN → sang pha [detailGuide] để chụp ảnh chi tiết.
-  ///   - Nếu vừa chụp ảnh CHI TIẾT → nhắc "Tiếp tục di chuyển camera…" rồi quét tiếp.
-  Future<void> confirmDamage({bool flashTick = true}) async {
-    _autoCaptureTimer?.cancel();
-    _autoCaptureTimer = null;
-    final wasDetail = _inDetailStage;
-    _setInspectionPhase(InspectionPhase.capturingDamage);
-
-    await capturePhoto(immediate: true, flashTick: flashTick);
-
-    if (wasDetail) {
-      await _showMessageThenScan(StringSheet.continueToNextDamage);
-    } else {
-      _enterDetailGuide();
-    }
-  }
-
-  // ── Detail-photo stage ─────────────────────────────────────────────────────
-
-  /// Sau khi chụp ảnh tổng quan: nhắc user lại gần để chụp ảnh chi tiết. Mở 3 s
-  /// timer; trong lúc đó nếu phát hiện tổn thất → quay lại detectionReady (detail).
-  void _enterDetailGuide() {
-    _noDetectionTimer?.cancel();
-    _noDetectionTimer = null;
-    _inDetailStage = true;
-    _detailAutoCaptured = false;
-    _setInspectionPhase(InspectionPhase.detailGuide);
-    _setMessage(CameraMessage(
-      message: StringSheet.detailPhotoGuide,
-      type: MessageType.info,
-    ));
-    _startDetailTimer();
-  }
-
-  void _startDetailTimer() {
-    _detailTimer?.cancel();
-    _detailTimer = Timer(const Duration(seconds: 3), _onDetailTimeout);
-  }
-
-  /// Hết 3 s ở pha detailGuide:
-  ///   - Nếu đang có tổn thất trong khung → mở xác nhận ảnh chi tiết.
-  ///   - Chưa tự động chụp lần nào → tự động chụp 1 ảnh chi tiết rồi chờ thêm 3 s.
-  ///   - Đã tự động chụp mà vẫn không thấy tổn thất → chuyển sang vùng khác.
-  Future<void> _onDetailTimeout() async {
-    if (_inspectionPhase != InspectionPhase.detailGuide) return;
-
-    if (_latestDetections.isNotEmpty) {
-      // _inDetailStage đang true → sau khi xác nhận sẽ sang "Tiếp tục di chuyển".
-      _enterDetectionReady();
-      return;
-    }
-
-    if (!_detailAutoCaptured) {
-      _detailAutoCaptured = true;
-      await capturePhoto(immediate: true, flashTick: false);
-      // Trong lúc chụp, frame mới có thể đã đổi pha (vd phát hiện tổn thất).
-      if (_inspectionPhase != InspectionPhase.detailGuide) return;
-      _startDetailTimer();
-    } else {
-      await _showMessageThenScan(StringSheet.continueToNextDamage);
-    }
-  }
-
-  /// Hiển thị [message] trong 5 s (pha continueOrChange) rồi quay lại scanning.
-  /// Dùng cho cả "Tiếp tục di chuyển camera…" và "Thiếu tổn thất".
-  Future<void> _showMessageThenScan(String message) async {
-    _detailTimer?.cancel();
-    _detailTimer = null;
-    _setInspectionPhase(InspectionPhase.continueOrChange);
-    _setMessage(CameraMessage(message: message, type: MessageType.info));
-
-    await Future.delayed(const Duration(seconds: 5));
-    // Guard: user có thể đã bấm "Chuyển góc" trong lúc chờ.
-    if (_inspectionPhase != InspectionPhase.continueOrChange) return;
-    _enterScanning();
-  }
-
-  /// Called by ResultController after an angle's photos are successfully uploaded.
-  /// Strips photos from memory and marks the angle completed so the progress
-  /// ring stays green when the user backs out from the result screen.
-  void removeUploadedPhotos(int angleId) {
-    _capturedPhotos.remove(angleId);
-    _completedSegments.add(angleId);
-    _panoramicCapturedSegments.remove(angleId);
-    notifyListeners();
-  }
-
-  /// User pressed "Chuyển góc" — thoát inspection, mở khoá classification.
-  /// Giữ angle trong [_panoramicCapturedSegments] để khi quay lại sẽ vào
-  /// thẳng scanning (không chụp toàn cảnh lại).
-  ///
-  /// Sau khi hoàn thành, hiển thị message điều hướng tới góc chưa hoàn thành
-  /// tiếp theo theo thứ tự 0 → 1 → 2 → 3 (bỏ qua góc đã completed). Nếu cả 4
-  /// góc đã completed thì không hiển thị message điều hướng.
-  void completeCurrentAngle() {
-    _autoCaptureTimer?.cancel();
-    _autoCaptureTimer = null;
-    _noDetectionTimer?.cancel();
-    _noDetectionTimer = null;
-    _detailTimer?.cancel();
-    _detailTimer = null;
-    _inDetailStage = false;
-    _detailAutoCaptured = false;
-    final justCompleted = _activeSegmentIndex;
-    if (justCompleted != null) {
-      _completedSegments.add(justCompleted);
-    }
-    _classificationLocked = false;
-    // Quay lại chọn góc → tắt carDamage (carCorner/carPart vẫn bật).
-    _setInspectionPhase(null);
-
-    // Config 4 góc TẮT: không điều hướng "di chuyển về góc chéo …" — user tự do
-    // di chuyển ghi nhận tổn thất ở góc bất kỳ.
-    final nextSegment =
-        _require4Angles ? _nextNavigationSegment(justCompleted) : null;
-    if (nextSegment == null) {
-      _setMessage(null);
-    } else {
-      _setMessage(CameraMessage(
-        message: _segmentConfigs[nextSegment]?.$2 ?? '',
-        type: MessageType.guide,
-      ));
-    }
-  }
-
-  /// Góc chưa completed tiếp theo theo thứ tự vòng 0 → 1 → 2 → 3, bắt đầu sau
-  /// [from]. Trả về null nếu cả 4 góc đã completed.
-  int? _nextNavigationSegment(int? from) {
-    final start = from ?? -1;
-    for (int step = 1; step <= 4; step++) {
-      final idx = (start + step) % 4;
-      if (!_completedSegments.contains(idx)) return idx;
-    }
-    return null;
-  }
-
-  // ── Internal ──────────────────────────────────────────────────────────────
 
   void _setMessage(CameraMessage? msg) {
     if (_message == msg) return;
     _message = msg;
     notifyListeners();
   }
-
-  /// Active của model gating đã gửi xuống native (null = chưa gửi lần nào).
-  bool? _sentInspectionActive;
 
   /// Gán pha inspection và bật/tắt model theo pha để giảm tải:
   ///   panorama (phase == null)   → carDamage OFF, OCR ON
@@ -769,7 +277,7 @@ class CameraController extends ChangeNotifier {
     }
   }
 
-  bool _stopped = false;
+  // ── Lifecycle ───────────────────────────────────────────────────────────────
 
   /// Dừng YOLO stream và giải phóng tài nguyên native (GPU/model/camera).
   /// An toàn khi gọi nhiều lần. Gọi sớm — trước khi widget bị gỡ khỏi cây —
@@ -789,4 +297,25 @@ class CameraController extends ChangeNotifier {
     stopCamera(); // no-op nếu đã gọi trước đó
     super.dispose();
   }
+
+  // ── Cross-mixin entry points (implemented in mixins) ───────────────────────
+
+  /// [_PanoramicMixin] — cập nhật message canh khung theo bộ phận/OCR.
+  Future<void> updateMessage();
+
+  /// [_InspectionMixin] — bắt đầu (hoặc quay lại) trạng thái scanning.
+  void startDamageScanning();
+
+  /// [_InspectionMixin] — phát hiện tổn thất → mở xác nhận.
+  void _maybeShowDetectionReady();
+
+  /// [_InspectionMixin] — mở 10 s no-detection timeout.
+  void _startNoDetectionTimer();
+
+  /// [_CaptureMixin] — chụp 1 ảnh JPEG, lưu in-memory + disk.
+  Future<Uint8List?> capturePhoto({
+    bool immediate = false,
+    int? segment,
+    bool flashTick = true,
+  });
 }

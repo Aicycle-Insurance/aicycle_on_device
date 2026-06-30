@@ -1,0 +1,227 @@
+part of 'camera_controller.dart';
+
+/// Máy trạng thái soi tổn thất sau khi đã chụp ảnh toàn cảnh:
+/// scanning → detectionReady → capturingDamage → detailGuide → continueOrChange.
+mixin _InspectionMixin on _CameraControllerBase {
+  /// Bắt đầu (hoặc quay lại) trạng thái scanning: detection chạy theo sự kiện,
+  /// đồng thời mở 10 s no-detection timeout.
+  @override
+  void startDamageScanning() => _enterScanning();
+
+  void _enterScanning() {
+    _autoCaptureTimer?.cancel();
+    _autoCaptureTimer = null;
+    _detailTimer?.cancel();
+    _detailTimer = null;
+    // Quay lại quét ảnh tổng quan → reset trạng thái chụp ảnh chi tiết.
+    _inDetailStage = false;
+    _detailAutoCaptured = false;
+    // Vào pha quét thiệt hại → bật carDamage (carCorner/carPart vẫn bật).
+    _setInspectionPhase(InspectionPhase.scanning);
+    _setMessage(null);
+    _startNoDetectionTimer();
+  }
+
+  /// Khi đang quét (scanning) mà phát hiện tổn thất → hiển thị xác nhận ngay.
+  /// Pha detailGuide KHÔNG short-circuit ở đây: nó chờ đủ 3 s (cho user lại gần)
+  /// rồi mới tự đánh giá trong [_onDetailTimeout]. An toàn khi gọi nhiều lần.
+  @override
+  void _maybeShowDetectionReady() {
+    if (_latestDetections.isEmpty) return;
+
+    // Vừa chụp toàn cảnh xong (đang ở màn hướng dẫn) mà đã phát hiện tổn thất
+    // → vào scanning luôn, không cần user bấm X / Chuyển góc.
+    if (_inspectionPhase == InspectionPhase.panoramicGuide) {
+      _enterScanning();
+    }
+
+    if (_inspectionPhase != InspectionPhase.scanning) return;
+    _enterDetectionReady();
+  }
+
+  /// Chuyển sang detectionReady: hiện xác nhận tổn thất + mở 5 s tự động chụp.
+  /// Dùng cho cả ảnh tổng quan (từ scanning) và ảnh chi tiết (từ detailGuide).
+  /// [_inDetailStage] do bên gọi quyết định.
+  void _enterDetectionReady() {
+    _noDetectionTimer?.cancel();
+    _noDetectionTimer = null;
+    _detailTimer?.cancel();
+    _detailTimer = null;
+    _setInspectionPhase(InspectionPhase.detectionReady);
+    _setMessage(CameraMessage(
+      message: StringSheet.damageDetectedGuide,
+      type: MessageType.info,
+    ));
+    // Sau 5 s không bấm gì → tự động chụp.
+    _autoCaptureTimer?.cancel();
+    _autoCaptureTimer = Timer(const Duration(seconds: 5), () {
+      if (_inspectionPhase == InspectionPhase.detectionReady) {
+        confirmDamage(flashTick: false);
+      }
+    });
+  }
+
+  /// Các pha đang chờ phát hiện tổn thất: hướng dẫn soi (panoramicGuide) và
+  /// đang quét (scanning). Hết 10 s mà không thấy tổn thất → cảnh báo rồi rời góc.
+  bool get _isAwaitingDamage =>
+      _inspectionPhase == InspectionPhase.scanning ||
+      _inspectionPhase == InspectionPhase.panoramicGuide;
+
+  /// 10 s không phát hiện tổn thất → cảnh báo rồi rời góc.
+  @override
+  void _startNoDetectionTimer() {
+    _noDetectionTimer?.cancel();
+    _noDetectionTimer =
+        Timer(const Duration(seconds: 10), _onNoDetectionTimeout);
+  }
+
+  Future<void> _onNoDetectionTimeout() async {
+    if (!_isAwaitingDamage) return;
+    if (_latestDetections.isNotEmpty) return;
+
+    _setMessage(CameraMessage(
+      message: StringSheet.noDamageDetectedGuide,
+      type: MessageType.warning,
+    ));
+
+    await Future.delayed(const Duration(seconds: 5));
+    // Guard: angle may already have been completed/changed during the delay.
+    if (!_isAwaitingDamage) return;
+    completeCurrentAngle();
+  }
+
+  /// User pressed "Thiếu tổn thất" — không chụp, hiện nhắc đưa camera lại gần
+  /// tổn thất còn thiếu rồi quay lại scanning (về lại bước ảnh tổng quan).
+  void rejectDamage() {
+    _autoCaptureTimer?.cancel();
+    _autoCaptureTimer = null;
+    _showMessageThenScan(StringSheet.moveCameraToMissing);
+  }
+
+  /// User pressed "Xác nhận" (hoặc auto sau 5 s) — chụp ảnh tổn thất.
+  ///   - Nếu vừa chụp ảnh TỔNG QUAN → sang pha [detailGuide] để chụp ảnh chi tiết.
+  ///   - Nếu vừa chụp ảnh CHI TIẾT → nhắc "Tiếp tục di chuyển camera…" rồi quét tiếp.
+  Future<void> confirmDamage({bool flashTick = true}) async {
+    _autoCaptureTimer?.cancel();
+    _autoCaptureTimer = null;
+    final wasDetail = _inDetailStage;
+    _setInspectionPhase(InspectionPhase.capturingDamage);
+
+    await capturePhoto(immediate: true, flashTick: flashTick);
+
+    if (wasDetail) {
+      await _showMessageThenScan(StringSheet.continueToNextDamage);
+    } else {
+      _enterDetailGuide();
+    }
+  }
+
+  // ── Detail-photo stage ─────────────────────────────────────────────────────
+
+  /// Sau khi chụp ảnh tổng quan: nhắc user lại gần để chụp ảnh chi tiết. Mở 3 s
+  /// timer; trong lúc đó nếu phát hiện tổn thất → quay lại detectionReady (detail).
+  void _enterDetailGuide() {
+    _noDetectionTimer?.cancel();
+    _noDetectionTimer = null;
+    _inDetailStage = true;
+    _detailAutoCaptured = false;
+    _setInspectionPhase(InspectionPhase.detailGuide);
+    _setMessage(CameraMessage(
+      message: StringSheet.detailPhotoGuide,
+      type: MessageType.info,
+    ));
+    _startDetailTimer();
+  }
+
+  void _startDetailTimer() {
+    _detailTimer?.cancel();
+    _detailTimer = Timer(const Duration(seconds: 3), _onDetailTimeout);
+  }
+
+  /// Hết 3 s ở pha detailGuide:
+  ///   - Nếu đang có tổn thất trong khung → mở xác nhận ảnh chi tiết.
+  ///   - Chưa tự động chụp lần nào → tự động chụp 1 ảnh chi tiết rồi chờ thêm 3 s.
+  ///   - Đã tự động chụp mà vẫn không thấy tổn thất → chuyển sang vùng khác.
+  Future<void> _onDetailTimeout() async {
+    if (_inspectionPhase != InspectionPhase.detailGuide) return;
+
+    if (_latestDetections.isNotEmpty) {
+      // _inDetailStage đang true → sau khi xác nhận sẽ sang "Tiếp tục di chuyển".
+      _enterDetectionReady();
+      return;
+    }
+
+    if (!_detailAutoCaptured) {
+      _detailAutoCaptured = true;
+      await capturePhoto(immediate: true, flashTick: false);
+      // Trong lúc chụp, frame mới có thể đã đổi pha (vd phát hiện tổn thất).
+      if (_inspectionPhase != InspectionPhase.detailGuide) return;
+      _startDetailTimer();
+    } else {
+      await _showMessageThenScan(StringSheet.continueToNextDamage);
+    }
+  }
+
+  /// Hiển thị [message] trong 5 s (pha continueOrChange) rồi quay lại scanning.
+  /// Dùng cho cả "Tiếp tục di chuyển camera…" và "Thiếu tổn thất".
+  Future<void> _showMessageThenScan(String message) async {
+    _detailTimer?.cancel();
+    _detailTimer = null;
+    _setInspectionPhase(InspectionPhase.continueOrChange);
+    _setMessage(CameraMessage(message: message, type: MessageType.info));
+
+    await Future.delayed(const Duration(seconds: 5));
+    // Guard: user có thể đã bấm "Chuyển góc" trong lúc chờ.
+    if (_inspectionPhase != InspectionPhase.continueOrChange) return;
+    _enterScanning();
+  }
+
+  /// User pressed "Chuyển góc" — thoát inspection, mở khoá classification.
+  /// Giữ angle trong [_panoramicCapturedSegments] để khi quay lại sẽ vào
+  /// thẳng scanning (không chụp toàn cảnh lại).
+  ///
+  /// Sau khi hoàn thành, hiển thị message điều hướng tới góc chưa hoàn thành
+  /// tiếp theo theo thứ tự 0 → 1 → 2 → 3 (bỏ qua góc đã completed). Nếu cả 4
+  /// góc đã completed thì không hiển thị message điều hướng.
+  void completeCurrentAngle() {
+    _autoCaptureTimer?.cancel();
+    _autoCaptureTimer = null;
+    _noDetectionTimer?.cancel();
+    _noDetectionTimer = null;
+    _detailTimer?.cancel();
+    _detailTimer = null;
+    _inDetailStage = false;
+    _detailAutoCaptured = false;
+    final justCompleted = _activeSegmentIndex;
+    if (justCompleted != null) {
+      _completedSegments.add(justCompleted);
+    }
+    _classificationLocked = false;
+    // Quay lại chọn góc → tắt carDamage (carCorner/carPart vẫn bật).
+    _setInspectionPhase(null);
+
+    // Config 4 góc TẮT: không điều hướng "di chuyển về góc chéo …" — user tự do
+    // di chuyển ghi nhận tổn thất ở góc bất kỳ.
+    final nextSegment =
+        _require4Angles ? _nextNavigationSegment(justCompleted) : null;
+    if (nextSegment == null) {
+      _setMessage(null);
+    } else {
+      _setMessage(CameraMessage(
+        message: _segmentConfigs[nextSegment]?.$2 ?? '',
+        type: MessageType.guide,
+      ));
+    }
+  }
+
+  /// Góc chưa completed tiếp theo theo thứ tự vòng 0 → 1 → 2 → 3, bắt đầu sau
+  /// [from]. Trả về null nếu cả 4 góc đã completed.
+  int? _nextNavigationSegment(int? from) {
+    final start = from ?? -1;
+    for (int step = 1; step <= 4; step++) {
+      final idx = (start + step) % 4;
+      if (!_completedSegments.contains(idx)) return idx;
+    }
+    return null;
+  }
+}
