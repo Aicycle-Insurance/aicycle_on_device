@@ -1,5 +1,3 @@
-import 'dart:io' show Platform;
-
 import '../../../yolo/multi_task_yolo_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -43,8 +41,8 @@ class CameraScreen extends StatefulWidget {
   final String carDamageModelPath;
   final String carPartModelPath;
 
-  /// Model OCR biển số (đã tải/quản lý qua model manager). Null → fallback dùng
-  /// asset bundle tạm.
+  /// Model OCR biển số (đã tải/quản lý qua model manager, network-only).
+  /// Null → native bỏ qua OCR.
   final String? licensePlateModelPath;
   final Function()? onComplete;
 
@@ -223,11 +221,6 @@ class _CameraScreenState extends State<CameraScreen> {
   Widget build(BuildContext context) {
     ScreenUtil.init(context);
     final model = widget.aiCycleConfig.modelConfig;
-    // Ưu tiên model đã tải qua model manager; fallback asset bundle khi chưa có.
-    final ocrPath = widget.licensePlateModelPath ??
-        (Platform.isIOS
-            ? 'assets/models/license_plate_ocr.mlpackage.zip'
-            : 'assets/models/license_plate_ocr.tflite');
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
@@ -262,8 +255,9 @@ class _CameraScreenState extends State<CameraScreen> {
                   detectModelPath: widget.carDamageModelPath,
                   classifyModelPath: widget.carCornerModelPath,
                   secondDetectModelPath: widget.carPartModelPath,
-                  // OCR biển số: model đã tải/quản lý, hoặc asset bundle nếu chưa.
-                  ocrModelPath: ocrPath,
+                  // OCR biển số: chỉ dùng model đã tải/quản lý qua network
+                  // (null khi chưa tải → native bỏ qua OCR).
+                  ocrModelPath: widget.licensePlateModelPath,
                   ocrConfidenceThreshold: model.licensePlateConfThreshold,
                   controller: _cameraController.yoloController,
                   secondDetectConfidenceThreshold: model.carPartConfThreshold,

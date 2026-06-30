@@ -43,7 +43,3 @@ flutter:
         pluginClass: YOLOPlugin
   assets:
     - assets/images/
-    # Bundled License-Plate OCR model (CoreML). Temporary: will be served from
-    # the API like the other models. Zipped .mlpackage, extracted at runtime by
-    # YOLOModelResolver.
-    - assets/models/
