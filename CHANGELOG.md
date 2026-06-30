@@ -1,4 +1,10 @@
-## 0.0.9
+## 0.1.1
+
+* Add License Plate OCR functionality
+* Implement phase-based gating for OCR and carDamage models
+* Enhance OCR functionality with improved CPU handling and user guidance
+
+## 0.1.0
 
 * Prevent uploading to AICycle server twice
 

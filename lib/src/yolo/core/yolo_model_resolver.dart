@@ -422,13 +422,22 @@ class YOLOModelResolver {
     return true;
   }
 
+  /// Package whose bundled assets are exposed under `packages/<name>/...`.
+  static const String _packageName = 'aicycle_on_device';
+
   static Future<List<int>?> _loadAssetBytes(String assetPath) async {
-    try {
-      final asset = await rootBundle.load(assetPath);
-      return asset.buffer.asUint8List();
-    } catch (_) {
-      return null;
+    // Try the bare key first (assets provided by the host app), then the
+    // package-prefixed key — assets declared in *this* package's pubspec are
+    // bundled under `packages/aicycle_on_device/...`, not the bare path.
+    for (final key in [assetPath, 'packages/$_packageName/$assetPath']) {
+      try {
+        final asset = await rootBundle.load(key);
+        return asset.buffer.asUint8List();
+      } catch (_) {
+        // try next candidate
+      }
     }
+    return null;
   }
 
   static Future<void> _downloadToFile(

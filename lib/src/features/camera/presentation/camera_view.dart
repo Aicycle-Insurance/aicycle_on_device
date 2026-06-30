@@ -32,6 +32,7 @@ class AICycleOnDeviceCamera extends StatefulWidget {
     this.carCornerModelPath,
     this.carDamageModelPath,
     this.carPartModelPath,
+    this.licensePlateModelPath,
   });
 
   final AICycleConfig aiCycleConfig;
@@ -43,6 +44,7 @@ class AICycleOnDeviceCamera extends StatefulWidget {
   final String? carCornerModelPath;
   final String? carDamageModelPath;
   final String? carPartModelPath;
+  final String? licensePlateModelPath;
 
   @override
   State<AICycleOnDeviceCamera> createState() => _AICycleOnDeviceCameraState();
@@ -71,6 +73,7 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
         AiModelType.carCorner: widget.carCornerModelPath,
         AiModelType.carDamage: widget.carDamageModelPath,
         AiModelType.carPart: widget.carPartModelPath,
+        AiModelType.licensePlate: widget.licensePlateModelPath,
       },
     );
   }
@@ -88,6 +91,8 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
         carDamageModelPath:
             _modelController.modelPathOf(AiModelType.carDamage)!,
         carPartModelPath: _modelController.modelPathOf(AiModelType.carPart)!,
+        licensePlateModelPath:
+            _modelController.modelPathOf(AiModelType.licensePlate),
         onComplete: widget.onComplete,
         // Bấm "Xem kết quả" → chuyển sang pha upload: CameraScreen bị gỡ khỏi
         // cây (camera idle/giải phóng), bootstrap render UploadView.

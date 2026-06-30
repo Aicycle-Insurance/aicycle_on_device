@@ -60,6 +60,7 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
   final _carCornerConfController = TextEditingController(text: '0.3');
   final _carDamageConfController = TextEditingController(text: '0.3');
   final _carDamageIouController = TextEditingController(text: '0.45');
+  final _licensePlateConfController = TextEditingController(text: '0.5');
 
   // VBI Config (chỉ bắt buộc khi Organization = vbi)
   final _vbiApiVersionCodeController = TextEditingController(text: 'v1');
@@ -209,6 +210,11 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
             _textField(
               'Car Damage IOU Threshold (0.0 - 1.0)',
               _carDamageIouController,
+              isNumber: true,
+            ),
+            _textField(
+              'License Plate OCR Conf Threshold (0.0 - 1.0)',
+              _licensePlateConfController,
               isNumber: true,
             ),
 
@@ -398,6 +404,9 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
         carCornerConfThreshold: double.parse(_carCornerConfController.text),
         carDamageConfThreshold: double.parse(_carDamageConfController.text),
         carDamageIouThreshold: double.parse(_carDamageIouController.text),
+        licensePlateConfThreshold: double.parse(
+          _licensePlateConfController.text,
+        ),
       ),
       displayConfig: DisplayConfig(showBackButton: _showBackButton),
       validateConfig: ValidateConfig(

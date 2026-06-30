@@ -77,7 +77,7 @@ class ModelManagerController extends ChangeNotifier {
       _selectedIds[type] != null &&
       _downloadedById.containsKey(_selectedIds[type]);
 
-  /// Chỉ được chuyển sang màn camera khi cả 3 loại đều sẵn sàng.
+  /// Chỉ được chuyển sang màn camera khi các loại quản lý qua network đều sẵn sàng.
   bool get canContinue => AiModelType.values.every(isTypeReady);
 
   /// Model đã chọn cho từng loại — dùng truyền sang màn camera.

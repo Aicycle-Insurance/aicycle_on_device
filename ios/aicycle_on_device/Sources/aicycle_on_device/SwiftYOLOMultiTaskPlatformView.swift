@@ -62,6 +62,9 @@ public final class SwiftYOLOMultiTaskPlatformView: NSObject,
     let secondDetectModelPath = dict["secondDetectModel"] as? String
     let secondDetectConfidenceThreshold = dict["secondDetectConfidenceThreshold"] as? Double ?? confidenceThreshold
     let secondDetectIouThreshold = dict["secondDetectIouThreshold"] as? Double ?? iouThreshold
+    // License-plate OCR model — gated by the carPart detector (optional).
+    let ocrModelPath = dict["ocrModel"] as? String
+    let ocrConfidenceThreshold = dict["ocrConfidenceThreshold"] as? Double ?? 0.85
 
     let view = YOLOMultiTaskView(frame: frame)
     multiTaskView = view
@@ -77,6 +80,8 @@ public final class SwiftYOLOMultiTaskPlatformView: NSObject,
       classifyPath: classifyPath,
       thirdModelPath: secondDetectModelPath,
       thirdModelTask: "detect",
+      ocrModelPath: ocrModelPath,
+      ocrConfidenceThreshold: ocrConfidenceThreshold,
       useGpu: useGpu,
       detectConfidenceThreshold: detectConfidenceThreshold,
       detectIouThreshold: detectIouThreshold,
@@ -133,6 +138,25 @@ public final class SwiftYOLOMultiTaskPlatformView: NSObject,
         }
         let active = self.multiTaskView?.setTorchMode(enable) ?? false
         result(active)
+      case "setViewport":
+        guard let args = call.arguments as? [String: Any],
+          let top = args["top"] as? Double,
+          let bottom = args["bottom"] as? Double
+        else {
+          result(FlutterError(code: "bad_args", message: "top/bottom (double) required", details: nil))
+          return
+        }
+        self.multiTaskView?.setOcrViewport(top: CGFloat(top), bottom: CGFloat(bottom))
+        result(nil)
+      case "setInspectionActive":
+        guard let args = call.arguments as? [String: Any],
+          let active = args["active"] as? Bool
+        else {
+          result(FlutterError(code: "bad_args", message: "active (bool) required", details: nil))
+          return
+        }
+        self.multiTaskView?.setInspectionActive(active)
+        result(nil)
       default:
         result(FlutterMethodNotImplemented)
       }

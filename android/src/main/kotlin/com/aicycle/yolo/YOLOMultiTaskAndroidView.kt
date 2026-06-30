@@ -40,6 +40,19 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     companion object {
         private const val TAG = "YOLOMultiTaskAndroidView"
         private val CLASS_NAMES = listOf("Móp/bẹp", "Vỡ/nứt", "Thủng/rách", "Trầy/xước")
+        /** carPart's class name for the license plate (matches the Dart gating logic). */
+        private const val LICENSE_PLATE_CLASS = "Biển số xe"
+        /** Inset so a readable plate isn't flush against the viewport edge. */
+        private const val OCR_VIEWPORT_MARGIN = 0.02f
+        /**
+         * Inset on the PERPENDICULAR axis (preview-horizontal = buffer Y). The
+         * viewport band only gates the buffer X axis (preview-vertical, where the
+         * top/bottom bars are), leaving plates flush against the LEFT/RIGHT edge of
+         * the screen readable — which produced badly-framed panoramas. Require the
+         * plate to sit away from those edges too so a readable plate means the car
+         * is reasonably centered.
+         */
+        private const val OCR_EDGE_MARGIN = 0.05f
         private const val REQUEST_CODE_PERMISSIONS = 1001
         private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
 
@@ -63,6 +76,26 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     private var classifyPredictor: Predictor? = null
     private var thirdPredictor:    Predictor? = null
     private var thirdTaskType:     String = "detect"
+
+    // License-plate OCR (gated by the carPart / third detector). Not a YOLO
+    // predictor; runs on its own executor so it never blocks inference/camera.
+    @Volatile private var ocrModel: LicensePlateOCR? = null
+    private val ocrExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val ocrBusy = AtomicBoolean(false)
+
+    // Visible viewport (preview-space vertical band, which maps to the box X axis —
+    // see _filterToViewport in the Dart controller). OCR only considers plate boxes
+    // fully inside this band so a readable plate is guaranteed to sit inside the
+    // saved (viewport-cropped) photo. Defaults to the full frame until set.
+    @Volatile private var ocrViewportTop = 0f
+    @Volatile private var ocrViewportBottom = 1f
+
+    // Phase-based gating. Defaults match the initial framing phase:
+    //   panorama/framing → carDamage OFF, OCR ON
+    //   inspection       → carDamage ON,  OCR OFF
+    // carCorner (classify) and carPart (third) always run.
+    @Volatile private var detectEnabled = false
+    @Volatile private var ocrEnabled = true
     /** Stable id for the third predictor's results so consumers can tell two detect models apart. */
     private var thirdModelId:      String = "detect2"
 
@@ -122,6 +155,8 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         thirdModelPath: String? = null,
         thirdModelTask: String = "detect",
         thirdModelId: String = "detect2",
+        ocrModelPath: String? = null,
+        ocrConfidenceThreshold: Double = 0.85,
         useGpu: Boolean,
         detectConfidenceThreshold: Double,
         detectIouThreshold: Double,
@@ -135,6 +170,25 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         this.thirdModelId = thirdModelId
         val totalModels = if (thirdModelPath != null) 3 else 2
         val loadedCount = AtomicInteger(0)
+
+        // OCR is not a YOLO predictor and must not gate camera start — load it on
+        // its own executor and attach when ready (frames before that skip OCR).
+        if (ocrModelPath != null) {
+            ocrExecutor.execute {
+                ocrModel = try {
+                    // Force CPU (Float32): the GPU delegate runs fp16, whose lower
+                    // precision flips argmax on the CCT transformer and misreads
+                    // plates (mirrors the iOS ANE issue). OCR runs gated/infrequently
+                    // so CPU is fine. Matches the Python pipeline's CPU execution.
+                    LicensePlateOCR(context, ocrModelPath, false, ocrConfidenceThreshold).also {
+                        Log.d(TAG, "✅ OCR model loaded")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "⚠️ OCR load failed: ${e.message}")
+                    null
+                }
+            }
+        }
 
         fun tryDone() {
             if (loadedCount.incrementAndGet() == totalModels) {
@@ -230,11 +284,13 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
 
         // Snapshot rồi xoá tham chiếu ngay để onFrame (đã bị chặn bởi isStopped)
         // không còn dùng tới. Việc đóng model nặng làm ở luồng nền bên dưới.
-        val executors = listOf(detectExecutor, classifyExecutor, thirdExecutor, cameraExecutor)
+        val executors = listOf(detectExecutor, classifyExecutor, thirdExecutor, cameraExecutor, ocrExecutor)
         val predictors = listOf(detectPredictor, classifyPredictor, thirdPredictor)
+        val ocr = ocrModel
         detectPredictor = null
         classifyPredictor = null
         thirdPredictor = null
+        ocrModel = null
 
         // Đóng model/GPU delegate có thể tốn hàng trăm ms; chạy trên main thread sẽ
         // treo UI đúng lúc rời màn camera. Đẩy sang luồng nền: chờ inference đang
@@ -244,6 +300,7 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
             executors.forEach { it.shutdownNow() }
             executors.forEach { runCatching { it.awaitTermination(2, TimeUnit.SECONDS) } }
             predictors.forEach { (it as? BasePredictor)?.close() }
+            ocr?.close()
         }.apply { isDaemon = true; name = "yolo-release" }.start()
     }
 
@@ -436,9 +493,9 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         }
     }
 
-    /** carDamage: chạy mỗi frame khi rảnh (không giới hạn nhịp). */
+    /** carDamage: chạy mỗi frame khi rảnh — trừ pha panorama (input bị chặn). */
     private fun claimDetect(): Boolean {
-        if (detectPredictor == null) return false
+        if (detectPredictor == null || !detectEnabled) return false
         return detectBusy.compareAndSet(false, true)
     }
 
@@ -474,6 +531,9 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
                 val result = predictor.predict(bitmap, w, h, rotateForCamera = false, isLandscape = true)
                 val data = buildTaskData(result, slot, camFpsNow)
                 mainHandler.post { onMultiTaskStream?.invoke(data) }
+                // carPart frame → try to OCR the license plate (gated, off-thread).
+                // Done before `release` so the shared bitmap is still alive to crop.
+                if (slot == Slot.THIRD) maybeRunOcr(result, bitmap)
             } catch (e: Exception) {
                 Log.e(TAG, "$slot predict error: ${e.message}")
             } finally {
@@ -481,6 +541,82 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
                 release.run()
             }
         }
+    }
+
+    /**
+     * If carPart found a license-plate box and OCR is idle, crop that region from
+     * the (still-alive) shared bitmap and recognize it on the OCR executor. Emits a
+     * separate `type == "ocr"` stream event with `readable` used as the framing
+     * signal (a readable plate ⇒ this frame is a good panoramic shot).
+     */
+    private fun maybeRunOcr(result: YOLOResult, bitmap: Bitmap) {
+        val ocr = ocrModel ?: return
+        if (!ocrEnabled) return // gated off during inspection
+        if (!ocrBusy.compareAndSet(false, true)) return
+
+        // Only the highest-confidence plate box that sits FULLY inside the visible
+        // viewport (so the saved viewport-cropped photo will contain the whole plate).
+        val lo = ocrViewportTop + OCR_VIEWPORT_MARGIN
+        val hi = ocrViewportBottom - OCR_VIEWPORT_MARGIN
+        val box = result.boxes
+            .filter {
+                it.cls == LICENSE_PLATE_CLASS &&
+                    it.xywhn.left >= lo && it.xywhn.right <= hi &&
+                    it.xywhn.top >= OCR_EDGE_MARGIN && it.xywhn.bottom <= 1f - OCR_EDGE_MARGIN
+            }
+            .maxByOrNull { it.conf }
+        if (box == null) { ocrBusy.set(false); return }
+
+        val bw = bitmap.width
+        val bh = bitmap.height
+        val left = (box.xywhn.left.coerceIn(0f, 1f) * bw).toInt()
+        val top = (box.xywhn.top.coerceIn(0f, 1f) * bh).toInt()
+        val right = (box.xywhn.right.coerceIn(0f, 1f) * bw).toInt()
+        val bottom = (box.xywhn.bottom.coerceIn(0f, 1f) * bh).toInt()
+        val cw = right - left
+        val ch = bottom - top
+        if (cw < 1 || ch < 1) { ocrBusy.set(false); return }
+
+        // Copy the plate region into an independent bitmap so it survives the shared
+        // bitmap being recycled once all predictors finish this frame.
+        val crop = try {
+            Bitmap.createBitmap(bitmap, left, top, cw, ch)
+        } catch (e: Exception) {
+            ocrBusy.set(false)
+            return
+        }
+
+        ocrExecutor.execute {
+            try {
+                val read = ocr.read(crop)
+                val event = mapOf(
+                    "type" to "ocr",
+                    "modelId" to "ocr",
+                    "plate" to (read?.first ?: ""),
+                    "score" to (read?.second ?: 0.0),
+                    "readable" to (read != null),
+                )
+                mainHandler.post { onMultiTaskStream?.invoke(event) }
+            } finally {
+                crop.recycle()
+                ocrBusy.set(false)
+            }
+        }
+    }
+
+    /** Updates the visible viewport used to gate OCR (preview-space vertical band). */
+    fun setOcrViewport(top: Float, bottom: Float) {
+        ocrViewportTop = top
+        ocrViewportBottom = bottom
+    }
+
+    /**
+     * Phase-based gating: inspection runs carDamage and stops OCR; framing/panorama
+     * runs OCR and stops carDamage. carCorner/carPart always run.
+     */
+    fun setInspectionActive(active: Boolean) {
+        detectEnabled = active
+        ocrEnabled = !active
     }
 
     // endregion

@@ -6,9 +6,11 @@ class StringSheet {
   static const carCornerName = 'Nhận diện góc xe';
   static const carDamageName = 'Nhận diện thiệt hại';
   static const carPartName = 'Nhận diện bộ phận xe';
+  static const licensePlateName = 'Nhận diện biển số xe';
   static const carCornerShortName = 'Góc xe';
   static const carDamageShortName = 'Thiệt hại';
   static const carPartShortName = 'Bộ phận xe';
+  static const licensePlateShortName = 'Biển số xe';
 
   // ----- Model manager screen -----
   static const modelManagerTitle = 'Quản lý mô hình AI';
@@ -44,10 +46,12 @@ class StringSheet {
       'Vui lòng di chuyển về góc chéo cuối xe bên ghế phụ';
 
   static String downloadingModel(String name) => 'Đang tải mô hình $name';
-  static const moveBackGuide =
-      'Lùi camera ra xa để xe nằm trọn vẹn trong khung hình';
+  static const moveBackGuide = 'Lùi camera ra xa để chụp ảnh toàn cảnh xe';
   static const holdStillGuide =
-      'Hãy giữ yên điện thoại. Ảnh sẽ được chụp tự động';
+      'Hãy giữ yên điện thoại. Đang nhận diện biển số';
+  static const movePlateClearGuide =
+      'Vui lòng di chuyển camera để biển số rõ nét trong khung hình';
+  static const plateValidCaptured = 'Biển số hợp lệ, chụp ảnh thành công';
   static const captureSuccess = 'Chụp thành công';
   static const inspectDamageGuide =
       'Đưa camera lại gần vị trí tổn thất.\nNếu không có tổn thất, hãy chuyển sang vị trí khác';
@@ -56,8 +60,10 @@ class StringSheet {
       'Các tổn thất đã được ghi nhận. Vui lòng kiểm tra và xác nhận';
   static const missingDamage = 'Thiếu tổn thất';
   static const confirm = 'Xác nhận';
-  static const continueOrChangeGuide =
-      'Tiếp tục di chuyển camera đến vùng có tổn thất khác hoặc chuyển góc';
+  static const detailPhotoGuide =
+      'Di chuyển camera đến gần vùng có tổn thất để chụp ảnh chi tiết';
+  static const continueToNextDamage =
+      'Tiếp tục di chuyển camera đến vùng có tổn thất khác';
   static const moveCameraToMissing =
       'Hãy đưa camera lại gần vị trí tổn thất còn thiếu';
   static const noDamageDetectedGuide =

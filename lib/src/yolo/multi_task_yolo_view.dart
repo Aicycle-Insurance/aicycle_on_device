@@ -13,7 +13,7 @@ import 'core/yolo_model_resolver.dart';
 /// active YOLO tasks.
 ///
 /// [data] contains:
-/// - `"type"`: `"detect"` | `"classify"` — the task kind
+/// - `"type"`: `"detect"` | `"classify"` | `"ocr"` — the task kind
 /// - `"modelId"`: which configured model produced this result. Use this (not `"type"`)
 ///   to route results, since two detection models both report `"type": "detect"`:
 ///   `"detect"` (primary detect model), `"detect2"` (second detect model),
@@ -23,6 +23,9 @@ import 'core/yolo_model_resolver.dart';
 /// - `"processingTimeMs"`: inference time in ms
 /// - `"detections"`: list of detection maps (detect models)
 /// - `"classification"`: map with `top1`, `top1Confidence`, `top5` (classify model)
+/// - `"readable"` (bool), `"plate"` (String), `"score"` (double): OCR result
+///   (`type == "ocr"`) — emitted only when an OCR model is configured and a
+///   license-plate box was found in a carPart frame.
 typedef MultiTaskStreamCallback = void Function(Map<String, dynamic> data);
 
 /// Controller for [MultiTaskYOLOView]. Pass to the widget and call [capturePhoto]
@@ -82,6 +85,28 @@ class MultiTaskYOLOController {
 
   Future<bool> toggleTorch() => setTorch(!_torchEnabled);
 
+  /// Forwards the visible viewport (preview-space vertical band, normalized
+  /// [0,1]) so native can gate license-plate OCR to plates fully inside what the
+  /// user sees. Returns `false` if the view isn't attached yet (caller should
+  /// retry once it is). Fire-and-forget on the native side.
+  bool setViewport(double top, double bottom) {
+    final ch = _channel;
+    if (ch == null) return false;
+    ch.invokeMethod<void>('setViewport', {'top': top, 'bottom': bottom});
+    return true;
+  }
+
+  /// Phase-based model gating to cut inference load. `active == true` (inspection)
+  /// runs carDamage and stops license-plate OCR; `active == false`
+  /// (framing/panorama) runs OCR and stops carDamage. carCorner/carPart always
+  /// run. Returns `false` if the view isn't attached yet.
+  bool setInspectionActive(bool active) {
+    final ch = _channel;
+    if (ch == null) return false;
+    ch.invokeMethod<void>('setInspectionActive', {'active': active});
+    return true;
+  }
+
   /// Stops the camera and releases all CoreML model predictors from memory.
   /// Call this before removing [MultiTaskYOLOView] from the tree so GPU/ANE
   /// memory is freed immediately rather than waiting for a potentially-delayed deinit.
@@ -106,6 +131,8 @@ class MultiTaskYOLOView extends StatefulWidget {
     required this.detectModelPath,
     required this.classifyModelPath,
     required this.secondDetectModelPath,
+    this.ocrModelPath,
+    this.ocrConfidenceThreshold = 0.85,
     this.controller,
     this.onStreamingData,
     this.lensFacing = 'back',
@@ -127,6 +154,15 @@ class MultiTaskYOLOView extends StatefulWidget {
   /// detect + classify models; pass null to run only detect + classify. Results arrive
   /// via [onStreamingData] with `data["type"] == "detect"` and `data["modelId"] == "detect2"`.
   final String? secondDetectModelPath;
+
+  /// License-plate OCR model (CoreML/TFLite recognizer, not a YOLO model). When
+  /// non-null, native runs it on carPart frames containing a license-plate box and
+  /// streams a `data["type"] == "ocr"` event with `readable`/`plate`/`score`. Used
+  /// purely as a framing signal — a readable plate marks a good panoramic frame.
+  final String? ocrModelPath;
+
+  /// Minimum mean digit-confidence for an OCR read to count as `readable`.
+  final double ocrConfidenceThreshold;
 
   final MultiTaskYOLOController? controller;
   final MultiTaskStreamCallback? onStreamingData;
@@ -163,6 +199,7 @@ class _MultiTaskYOLOViewState extends State<MultiTaskYOLOView> {
   String? _detectResolved;
   String? _classifyResolved;
   String? _secondDetectResolved;
+  String? _ocrResolved;
   String? _resolutionError;
 
   @override
@@ -180,11 +217,23 @@ class _MultiTaskYOLOViewState extends State<MultiTaskYOLOView> {
         YOLOModelResolver.preparePath(widget.secondDetectModelPath!),
       ];
       final results = await Future.wait(futures);
+      // OCR model is optional and non-blocking — resolve it separately so a
+      // failure here never prevents the camera/YOLO models from starting.
+      String? ocrResolved;
+      final ocrPath = widget.ocrModelPath;
+      if (ocrPath != null) {
+        try {
+          ocrResolved = await YOLOModelResolver.preparePath(ocrPath);
+        } catch (_) {
+          ocrResolved = null;
+        }
+      }
       if (!mounted) return;
       setState(() {
         _detectResolved = results[0];
         _classifyResolved = results[1];
         _secondDetectResolved = results[2];
+        _ocrResolved = ocrResolved;
       });
     } catch (e) {
       if (!mounted) return;
@@ -236,6 +285,11 @@ class _MultiTaskYOLOViewState extends State<MultiTaskYOLOView> {
         widget.secondDetectConfidenceThreshold ?? widget.confidenceThreshold;
     params['secondDetectIouThreshold'] =
         widget.secondDetectIouThreshold ?? widget.iouThreshold;
+    // OCR is optional; only forward it if the (optional) model resolved.
+    if (_ocrResolved != null) {
+      params['ocrModel'] = _ocrResolved!;
+      params['ocrConfidenceThreshold'] = widget.ocrConfidenceThreshold;
+    }
     return params;
   }
 

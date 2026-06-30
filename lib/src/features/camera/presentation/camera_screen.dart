@@ -31,6 +31,7 @@ class CameraScreen extends StatefulWidget {
     required this.carCornerModelPath,
     required this.carDamageModelPath,
     required this.carPartModelPath,
+    this.licensePlateModelPath,
     this.onComplete,
     this.onViewResult,
   });
@@ -39,6 +40,10 @@ class CameraScreen extends StatefulWidget {
   final String carCornerModelPath;
   final String carDamageModelPath;
   final String carPartModelPath;
+
+  /// Model OCR biển số (đã tải/quản lý qua model manager, network-only).
+  /// Null → native bỏ qua OCR.
+  final String? licensePlateModelPath;
   final Function()? onComplete;
 
   /// Bấm "Xem kết quả": trả ảnh đã chụp lên bootstrap để chuyển sang pha upload
@@ -61,8 +66,11 @@ class _CameraScreenState extends State<CameraScreen> {
     WakelockPlus.enable();
 
     final sessionId = widget.aiCycleConfig.generalConfig.documentId;
-    _cameraController = CameraController(sessionId: sessionId)
-      ..loadCachedPhotos();
+    _cameraController = CameraController(
+      sessionId: sessionId,
+      require4Angles:
+          widget.aiCycleConfig.validateConfig.require4AnglePanoramicPhotos,
+    )..loadCachedPhotos();
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowGuide());
   }
@@ -155,18 +163,9 @@ class _CameraScreenState extends State<CameraScreen> {
       onCloseButtonPressed: _cameraController.startDamageScanning,
       // ── Secondary button ─────────────────────────────────────────────────
       // detectionReady → "Thiếu tổn thất"
-      // panoramicGuide / continueOrChange → "Chuyển góc"
-      // Ẩn "Chuyển góc" khi đang hiện message "Thiếu tổn thất" (moveCameraToMissing).
-      showSecondaryButton: phase == InspectionPhase.detectionReady ||
-          phase == InspectionPhase.panoramicGuide ||
-          (phase == InspectionPhase.continueOrChange &&
-              msg.message != StringSheet.moveCameraToMissing),
-      secondaryButtonLabel: phase == InspectionPhase.detectionReady
-          ? StringSheet.missingDamage
-          : StringSheet.changeAngle,
-      onSecondaryButtonPressed: phase == InspectionPhase.detectionReady
-          ? _cameraController.rejectDamage
-          : _cameraController.completeCurrentAngle,
+      showSecondaryButton: phase == InspectionPhase.detectionReady,
+      secondaryButtonLabel: StringSheet.missingDamage,
+      onSecondaryButtonPressed: _cameraController.rejectDamage,
       // ── Primary button ("Xác nhận") — only during detectionReady ────────
       showPrimaryButton: phase == InspectionPhase.detectionReady,
       primaryButtonLabel: StringSheet.confirm,
@@ -191,6 +190,7 @@ class _CameraScreenState extends State<CameraScreen> {
         builder: (_, __) => CarProgressDialog(
           activeIndex: _cameraController.activeSegmentIndex,
           completedIndices: _cameraController.completedSegments,
+          completedTakesPriority: _cameraController.completedTakesPriority,
         ),
       ),
     );
@@ -245,6 +245,10 @@ class _CameraScreenState extends State<CameraScreen> {
                   detectModelPath: widget.carDamageModelPath,
                   classifyModelPath: widget.carCornerModelPath,
                   secondDetectModelPath: widget.carPartModelPath,
+                  // OCR biển số: chỉ dùng model đã tải/quản lý qua network
+                  // (null khi chưa tải → native bỏ qua OCR).
+                  ocrModelPath: widget.licensePlateModelPath,
+                  ocrConfidenceThreshold: model.licensePlateConfThreshold,
                   controller: _cameraController.yoloController,
                   secondDetectConfidenceThreshold: model.carPartConfThreshold,
                   secondDetectIouThreshold: model.carPartIouThreshold,
@@ -322,6 +326,8 @@ class _CameraScreenState extends State<CameraScreen> {
                               _cameraController.activeSegmentIndex,
                           completedSegments:
                               _cameraController.completedSegments,
+                          completedTakesPriority:
+                              _cameraController.completedTakesPriority,
                           onShowProgress: _showCarProgressDialog,
                           onCapture: _cameraController.manualCapture,
                         ),

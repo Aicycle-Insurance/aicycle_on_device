@@ -20,6 +20,7 @@ class CarProgressRing extends StatelessWidget {
     this.activeColor = const Color(0xFFFFD53E),
     this.completedColor = const Color(0xFF01D6A8),
     this.inactiveColor = const Color(0xFFCCCCCC),
+    this.completedTakesPriority = false,
   });
 
   final int? activeIndex;
@@ -28,6 +29,10 @@ class CarProgressRing extends StatelessWidget {
   final Color activeColor;
   final Color completedColor;
   final Color inactiveColor;
+
+  /// Khi true: cung đã hoàn thành (có ảnh) luôn hiện màu [completedColor], kể
+  /// cả khi đang là cung active. Khi false (mặc định): active đè lên completed.
+  final bool completedTakesPriority;
 
   @override
   Widget build(BuildContext context) {
@@ -46,6 +51,7 @@ class CarProgressRing extends StatelessWidget {
               activeColor: activeColor,
               completedColor: completedColor,
               inactiveColor: inactiveColor,
+              completedTakesPriority: completedTakesPriority,
             ),
           ),
           SizedBox(
@@ -73,6 +79,7 @@ class _CarRingPainter extends CustomPainter {
     required this.activeColor,
     required this.completedColor,
     required this.inactiveColor,
+    required this.completedTakesPriority,
   });
 
   final int? activeIndex;
@@ -80,6 +87,7 @@ class _CarRingPainter extends CustomPainter {
   final Color activeColor;
   final Color completedColor;
   final Color inactiveColor;
+  final bool completedTakesPriority;
 
   static const int _count = 4;
   static const double _gapDeg = 5.0;
@@ -137,7 +145,11 @@ class _CarRingPainter extends CustomPainter {
       final isDone = completedIndices.contains(i);
       if (!isActive && !isDone) continue;
 
-      colorPaint.color = isActive ? activeColor : completedColor;
+      // completedTakesPriority: cung có ảnh luôn xanh (kể cả đang active).
+      // Mặc định: active (vàng) đè lên completed (xanh).
+      colorPaint.color = completedTakesPriority
+          ? (isDone ? completedColor : activeColor)
+          : (isActive ? activeColor : completedColor);
       canvas.drawArc(
         Rect.fromCircle(center: center, radius: track),
         _start(i),
@@ -177,5 +189,6 @@ class _CarRingPainter extends CustomPainter {
       old.completedIndices != completedIndices ||
       old.activeColor != activeColor ||
       old.completedColor != completedColor ||
-      old.inactiveColor != inactiveColor;
+      old.inactiveColor != inactiveColor ||
+      old.completedTakesPriority != completedTakesPriority;
 }

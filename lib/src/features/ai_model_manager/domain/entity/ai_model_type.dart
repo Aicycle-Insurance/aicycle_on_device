@@ -16,9 +16,18 @@ enum AiModelType {
     'CarPart',
     StringSheet.carPartName,
     StringSheet.carPartShortName,
+  ),
+  licensePlate(
+    'LicensePlate',
+    StringSheet.licensePlateName,
+    StringSheet.licensePlateShortName,
   );
 
-  const AiModelType(this.apiValue, this.displayName, this.shortName);
+  const AiModelType(
+    this.apiValue,
+    this.displayName,
+    this.shortName,
+  );
 
   /// Giá trị `modelType` gửi lên API.
   final String apiValue;
