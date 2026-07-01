@@ -42,17 +42,20 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         private val CLASS_NAMES = listOf("Móp/bẹp", "Vỡ/nứt", "Thủng/rách", "Trầy/xước")
         /** carPart's class name for the license plate (matches the Dart gating logic). */
         private const val LICENSE_PLATE_CLASS = "Biển số xe"
-        /** Inset so a readable plate isn't flush against the viewport edge. */
-        private const val OCR_VIEWPORT_MARGIN = 0.02f
+        /**
+         * Inset from the viewport band edge (buffer X = preview-vertical). Kept large
+         * so a plate clipped near the top/bottom bar boundary (only half visible) is
+         * NOT accepted — the whole plate must sit clearly inside the frame, not just
+         * touch it.
+         */
+        private const val OCR_VIEWPORT_MARGIN = 0.08f
         /**
          * Inset on the PERPENDICULAR axis (preview-horizontal = buffer Y). The
-         * viewport band only gates the buffer X axis (preview-vertical, where the
-         * top/bottom bars are), leaving plates flush against the LEFT/RIGHT edge of
-         * the screen readable — which produced badly-framed panoramas. Require the
-         * plate to sit away from those edges too so a readable plate means the car
-         * is reasonably centered.
+         * viewport band only gates the buffer X axis, leaving plates flush against the
+         * LEFT/RIGHT edge of the screen readable — which produced badly-framed /
+         * half-plate captures. Require the plate to sit well away from those edges too.
          */
-        private const val OCR_EDGE_MARGIN = 0.05f
+        private const val OCR_EDGE_MARGIN = 0.08f
         private const val REQUEST_CODE_PERMISSIONS = 1001
         private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
 
