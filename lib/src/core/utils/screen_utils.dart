@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 class ScreenUtil {
   static const Size defaultSize = Size(375, 812);
+  static const Size landscapeDesignSize = Size(812, 375);
   static final ScreenUtil _instance = ScreenUtil._();
 
   late Size _designSize;

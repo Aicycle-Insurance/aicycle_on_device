@@ -77,7 +77,9 @@ class VehiclePartModel {
     );
   }
 
-  VehiclePart toEntity() {
+  /// [masksByImageId] — map imageId → PartMask list để merge khi convert,
+  /// mặc định empty (không áp mask).
+  VehiclePart toEntity([Map<int, List<PartMask>> masksByImageId = const {}]) {
     return VehiclePart(
       vehiclePartExcelId: vehiclePartExcelId,
       vehiclePartName: vehiclePartName,
@@ -87,7 +89,9 @@ class VehiclePartModel {
       dentedLevel: dentedLevel,
       punctureLevel: punctureLevel,
       damages: damages.map((e) => e.toEntity()).toList(),
-      images: images.map((e) => e.toEntity()).toList(),
+      images: images
+          .map((img) => img.toEntity(masksByImageId[img.imageId]))
+          .toList(),
       repairPlan: repairPlan,
       paintPrice: paintPrice,
       dentedPrice: dentedPrice,
@@ -157,6 +161,7 @@ class ResultImageModel {
     this.imageUrl,
     this.imageDrawUrl,
     this.damageImageInfo = const [],
+    this.partsMasks = const [],
   });
 
   final int? imageId;
@@ -176,6 +181,7 @@ class ResultImageModel {
   final String? imageUrl;
   final String? imageDrawUrl;
   final List<DamageMaskModel> damageImageInfo;
+  final List<PartMaskModel> partsMasks;
 
   factory ResultImageModel.fromJson(Map<String, dynamic> json) {
     final extra = json['extraInfo'];
@@ -205,10 +211,16 @@ class ResultImageModel {
           .whereType<Map<String, dynamic>>()
           .map(DamageMaskModel.fromJson)
           .toList(),
+      partsMasks: (json['partsMasks'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(PartMaskModel.fromJson)
+          .toList(),
     );
   }
 
-  ResultImage toEntity() {
+  /// [overrideMasks] — khi được truyền vào, dùng thay cho [partsMasks] của model
+  /// (dùng khi repository merge dữ liệu từ endpoint `/images`).
+  ResultImage toEntity([List<PartMask>? overrideMasks]) {
     return ResultImage(
       imageId: imageId,
       claimId: claimId,
@@ -227,6 +239,7 @@ class ResultImageModel {
       imageUrl: imageUrl,
       imageDrawUrl: imageDrawUrl,
       damageImageInfo: damageImageInfo.map((e) => e.toEntity()).toList(),
+      partsMasks: overrideMasks ?? partsMasks.map((e) => e.toEntity()).toList(),
     );
   }
 }
@@ -263,6 +276,90 @@ class ImageExtraInfoModel {
       carModel: carModel,
       carColor: carColor,
       plateNumber: plateNumber,
+    );
+  }
+}
+
+/// `claimfolders/{sessionId}/images`.
+class PartMaskModel {
+  const PartMaskModel({
+    this.maskUrl,
+    this.masksPath,
+    this.boxes,
+    this.vehiclePartName,
+    this.vehicleColor,
+    this.scores,
+    this.isPart,
+  });
+
+  final String? maskUrl;
+  final String? masksPath;
+  final List<double>? boxes;
+  final String? vehiclePartName;
+  final String? vehicleColor;
+  final num? scores;
+  final bool? isPart;
+
+  factory PartMaskModel.fromJson(Map<String, dynamic> json) {
+    return PartMaskModel(
+      maskUrl: json['maskUrl'] as String?,
+      masksPath: json['masksPath'] as String?,
+      boxes: (json['boxes'] as List<dynamic>?)
+          ?.whereType<num>()
+          .map((e) => e.toDouble())
+          .toList(),
+      vehiclePartName: json['vehiclePartName'] as String?,
+      vehicleColor: json['vehicleColor'] as String?,
+      scores: json['scores'] as num?,
+      isPart: json['isPart'] is bool
+          ? json['isPart'] as bool
+          : json['isPart']?.toString().contains('true'),
+    );
+  }
+
+  PartMask toEntity() {
+    return PartMask(
+      maskUrl: maskUrl,
+      masksPath: masksPath,
+      boxes: boxes,
+      vehiclePartName: vehiclePartName,
+      vehicleColor: vehicleColor,
+      scores: scores,
+      isPart: isPart,
+    );
+  }
+}
+
+/// Một phần tử response của endpoint `claimfolders/{sessionId}/images`,
+/// gắn liền với một [ResultImage] cụ thể qua [imageId].
+class PartViewImageModel {
+  const PartViewImageModel({
+    this.imageId,
+    this.url,
+    this.imageSize,
+    this.directionName,
+    this.partsMasks = const [],
+  });
+
+  final int? imageId;
+  final String? url;
+  final List<int>? imageSize;
+  final String? directionName;
+  final List<PartMaskModel> partsMasks;
+
+  factory PartViewImageModel.fromJson(Map<String, dynamic> json) {
+    return PartViewImageModel(
+      imageId: (json['imageId'] as num?)?.toInt(),
+      url: json['url'] as String?,
+      imageSize: (json['imageSize'] as List<dynamic>?)
+          ?.whereType<num>()
+          .map((e) => e.toInt())
+          .toList(),
+      directionName: json['directionName'] as String?,
+      partsMasks: (json['partsMasks'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(PartMaskModel.fromJson)
+          .toList(),
     );
   }
 }

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../../../core/cache/photo_session_cache.dart';
 import '../../../../core/utils/gallery_helper.dart';
+import '../../../camera/data/model/car_angle.dart';
 import '../../domain/entity/inspection_result.dart';
 import '../../domain/repository/result_repository.dart';
 
@@ -55,6 +56,25 @@ class ResultController extends ChangeNotifier {
 
   double get uploadProgress =>
       _totalCount == 0 ? 0 : _uploadedCount / _totalCount;
+
+  /// Group tất cả [ResultImage] từ [_result] theo 4 góc xe.
+  ///
+  /// Dedup theo [ResultImage.imageId] vì cùng 1 ảnh có thể xuất hiện trong
+  /// `images[]` của nhiều [VehiclePart] khác nhau (nhiều bộ phận cùng được
+  /// detect trong 1 ảnh).
+  Map<int, List<ResultImage>> get groupedImages {
+    final map = <int, List<ResultImage>>{0: [], 1: [], 2: [], 3: []};
+    final seenIds = <int>{};
+    for (final part in _result ?? []) {
+      for (final img in part.images) {
+        final id = img.imageId;
+        if (id != null && !seenIds.add(id)) continue;
+        final idx = CarAngle.angleFromEngineSlug(img.directionEngineSlug);
+        if (idx != null) map[idx]!.add(img);
+      }
+    }
+    return map;
+  }
 
   Future<void> start() async {
     // Snapshot at call time — camera may add photos while we upload.

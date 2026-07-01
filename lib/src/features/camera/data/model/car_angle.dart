@@ -40,4 +40,22 @@ enum CarAngle {
   /// Trả về segment index (0–3) từ tên class top1.
   /// Trả về null nếu class không thuộc bộ phân loại góc xe.
   static int? segmentOf(String label) => fromLabel(label)?.segmentIndex;
+
+  /// Nhãn hiển thị cho từng segment index (0–3).
+  static const segmentLabels = [
+    'Phải trước',
+    'Phải sau',
+    'Trái sau',
+    'Trái trước',
+  ];
+
+  /// về segment index (0–3). Trả về null nếu không nhận ra.
+  static int? angleFromEngineSlug(String? slug) {
+    if (slug == null) return null;
+    if (slug.contains('phai-truoc')) return 0;
+    if (slug.contains('phai-sau')) return 1;
+    if (slug.contains('trai-sau')) return 2;
+    if (slug.contains('trai-truoc')) return 3;
+    return null;
+  }
 }

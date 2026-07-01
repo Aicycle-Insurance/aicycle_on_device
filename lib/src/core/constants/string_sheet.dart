@@ -96,7 +96,14 @@ class StringSheet {
   static const noDamageFound = 'Không phát hiện vết hỏng';
   static const addDamagePhoto = 'Thêm ảnh tổn thất';
   static const done = 'Xong';
+  static const estimateDamage = 'Ước tính thiệt hại';
   static const viewResult = 'Xem kết quả';
+  static const resultAngleLabels = [
+    'Đầu phải và biển',
+    'Đuôi phải và biển',
+    'Đuôi trái và biển',
+    'Đầu trái và biển',
+  ];
 
   static const unknown = 'Không xác định';
 

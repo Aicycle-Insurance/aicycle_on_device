@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -6,9 +8,12 @@ import '../../../core/di/injection.dart';
 import '../../../core/themes/app_colors.dart';
 import '../../../core/themes/app_textstyle.dart';
 import '../../../core/utils/screen_utils.dart';
+import '../../camera/data/model/car_angle.dart';
+import '../../folder_result/domain/entity/inspection_result.dart';
 import 'controller/result_controller.dart';
-import 'widgets/result_card.dart';
-import 'widgets/step_line.dart';
+import 'widgets/result_bottom_bar.dart';
+import 'widgets/result_thumbnail_strip.dart';
+import 'widgets/scaled_result_image.dart';
 
 class ResultView extends StatefulWidget {
   const ResultView({
@@ -42,9 +47,14 @@ class ResultView extends StatefulWidget {
 class _ResultViewState extends State<ResultView> {
   late final ResultController _controller;
 
+  int _selectedAngle = 0;
+  int _selectedImageIndex = 0;
+  bool _initialAngleSynced = false;
+
   @override
   void initState() {
     super.initState();
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     _controller = ResultController(
       sessionId: widget.sessionId,
       capturedPhotos: widget.capturedPhotos,
@@ -55,40 +65,110 @@ class _ResultViewState extends State<ResultView> {
 
   @override
   void dispose() {
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     _controller.dispose();
     super.dispose();
   }
 
-  /// "Thêm ảnh tổn thất": dùng hành vi do nơi push truyền vào, mặc định pop.
-  void _addPhoto() {
+  void _selectAngle(int angle) {
+    setState(() {
+      _selectedAngle = angle;
+      _selectedImageIndex = 0;
+    });
+  }
+
+  void _selectImage(int index) {
+    setState(() => _selectedImageIndex = index);
+  }
+
+  void _onBack(BuildContext context) {
     if (widget.onAddPhoto != null) {
       widget.onAddPhoto!(context);
-    } else {
-      Navigator.of(context).pop();
+      return;
     }
+    Navigator.of(context).maybePop();
+  }
+
+  void _syncInitialAngle(Map<int, List<ResultImage>> grouped) {
+    if (_initialAngleSynced) return;
+    _initialAngleSynced = true;
+    if ((grouped[_selectedAngle] ?? []).isNotEmpty) return;
+    for (var i = 0; i < CarAngle.segmentLabels.length; i++) {
+      if ((grouped[i] ?? []).isNotEmpty) {
+        setState(() {
+          _selectedAngle = i;
+          _selectedImageIndex = 0;
+        });
+        return;
+      }
+    }
+  }
+
+  String _angleLabel(int angle) {
+    if (angle < StringSheet.resultAngleLabels.length) {
+      return StringSheet.resultAngleLabels[angle];
+    }
+    return CarAngle.segmentLabels[angle];
   }
 
   @override
   Widget build(BuildContext context) {
-    ScreenUtil.init(context);
+    final mq = MediaQuery.of(context);
+    final landscapeMq = mq.copyWith(
+      size: Size(mq.size.height, mq.size.width),
+      padding: EdgeInsets.fromLTRB(
+        mq.padding.bottom,
+        mq.padding.left,
+        mq.padding.top,
+        mq.padding.right,
+      ),
+      viewPadding: EdgeInsets.fromLTRB(
+        mq.viewPadding.bottom,
+        mq.viewPadding.left,
+        mq.viewPadding.top,
+        mq.viewPadding.right,
+      ),
+      viewInsets: EdgeInsets.fromLTRB(
+        mq.viewInsets.bottom,
+        mq.viewInsets.left,
+        mq.viewInsets.top,
+        mq.viewInsets.right,
+      ),
+    );
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.dark,
-      child: Scaffold(
-        backgroundColor: AppColors.backgroundLight,
-        body: AnimatedBuilder(
-          animation: _controller,
-          builder: (context, _) {
-            switch (_controller.status) {
-              case ResultStatus.uploading:
-                return _buildUploading();
-              case ResultStatus.fetchingResult:
-                return _buildFetchingResult();
-              case ResultStatus.success:
-                return _buildResult();
-              case ResultStatus.error:
-                return _buildError();
-            }
-          },
+      value: SystemUiOverlayStyle.light,
+      child: SafeArea(
+        child: Scaffold(
+          backgroundColor: AppColors.black,
+          body: MediaQuery(
+            data: landscapeMq,
+            child: RotatedBox(
+              quarterTurns: 1,
+              child: Builder(
+                builder: (innerCtx) {
+                  ScreenUtil.init(
+                    innerCtx,
+                    designSize: ScreenUtil.landscapeDesignSize,
+                  );
+                  return AnimatedBuilder(
+                    animation: _controller,
+                    builder: (context, _) {
+                      switch (_controller.status) {
+                        case ResultStatus.uploading:
+                          return _buildUploading();
+                        case ResultStatus.fetchingResult:
+                          return _buildFetchingResult();
+                        case ResultStatus.success:
+                          return _buildResult();
+                        case ResultStatus.error:
+                          return _buildError();
+                      }
+                    },
+                  );
+                },
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -107,7 +187,7 @@ class _ResultViewState extends State<ResultView> {
             child: CircularProgressIndicator(
               value: _controller.uploadProgress,
               strokeWidth: 4,
-              color: AppColors.primaryA500,
+              color: AppColors.primaryA600,
               backgroundColor: AppColors.primaryA200,
             ),
           ),
@@ -143,106 +223,69 @@ class _ResultViewState extends State<ResultView> {
   }
 
   Widget _buildResult() {
-    return Scaffold(
-      backgroundColor: AppColors.divider,
-      appBar: AppBar(
-        centerTitle: true,
-        title: Text(StringSheet.carPhoto),
-        backgroundColor: AppColors.white,
-      ),
-      body: Column(
-        children: [
-          /// step line
-          Container(
-            height: 68.h,
-            padding: EdgeInsets.symmetric(horizontal: 50.h),
-            child: Center(
-              child: StepLine(
-                steps: [
-                  StepData(
-                    label: StringSheet.scenePhoto,
-                    activeIcon: Icons.check_rounded,
-                  ),
-                  StepData(label: StringSheet.damagePhoto)
-                ],
-                currentIndex: 1,
+    final grouped = _controller.groupedImages;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _syncInitialAngle(grouped);
+    });
+    final images = grouped[_selectedAngle] ?? [];
+    final clampedIndex =
+        images.isEmpty ? 0 : _selectedImageIndex.clamp(0, images.length - 1);
+
+    return Column(
+      children: [
+        Expanded(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: images.isEmpty
+                    ? _buildEmpty()
+                    : _buildMainImage(
+                        context,
+                        images[clampedIndex],
+                      ),
               ),
-            ),
+              if (images.isNotEmpty)
+                ResultThumbnailStrip(
+                  images: images,
+                  selectedIndex: clampedIndex,
+                  onSelected: _selectImage,
+                ),
+            ],
           ),
-          if (_controller.result != null && _controller.result!.isNotEmpty)
-            Expanded(
-              child: ListView.separated(
-                itemCount: _controller.result!.length,
-                itemBuilder: (context, index) {
-                  return ResultCard(
-                    item: _controller.result![index],
-                    onAddPhoto: _addPhoto,
-                  );
-                },
-                separatorBuilder: (context, index) {
-                  return SizedBox(height: 8.h);
-                },
-              ),
-            )
-          else
-            Expanded(child: _buildEmpty()),
-        ],
-      ),
-      bottomNavigationBar: _buildBottomBar(),
+        ),
+        ResultBottomBar(
+          selectedAngle: _selectedAngle,
+          angleLabel: _angleLabel(_selectedAngle),
+          grouped: grouped,
+          onAngleSelected: _selectAngle,
+          onEstimate: () {
+            final result =
+                _controller.result?.map((e) => e.toJson()).toList() ?? [];
+            widget.onComplete?.call(result);
+          },
+        ),
+      ],
     );
   }
 
-  Widget _buildBottomBar() {
-    return Container(
-      color: AppColors.white,
-      child: SafeArea(
-        minimum: EdgeInsets.fromLTRB(16.w, 8.h, 16.w, 12.h),
-        child: Row(
+  Widget _buildMainImage(BuildContext outerCtx, ResultImage image) {
+    return Builder(
+      builder: (context) {
+        final inset = MediaQuery.paddingOf(context);
+        return Stack(
+          fit: StackFit.expand,
           children: [
-            // Thêm ảnh tổn thất → quay lại camera để chụp thêm.
-            Expanded(
-              child: FilledButton(
-                onPressed: _addPhoto,
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.primaryA500,
-                  padding: EdgeInsets.symmetric(vertical: 14.h),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(28.r),
-                  ),
-                ),
-                child: Text(
-                  StringSheet.addDamagePhoto,
-                  style: AppTextStyles.baseWhite.s14.w600(),
-                ),
-              ),
-            ),
-            12.horizontalSpace,
-            // Xong → báo host hoàn tất rồi đóng màn kết quả.
-            Expanded(
-              child: OutlinedButton(
-                onPressed: () {
-                  List<Map<String, dynamic>> result =
-                      _controller.result?.map((e) => e.toJson()).toList() ?? [];
-                  widget.onComplete?.call(result);
-                },
-                style: OutlinedButton.styleFrom(
-                  padding: EdgeInsets.symmetric(vertical: 14.h),
-                  side: BorderSide(color: AppColors.primaryA500),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(28.r),
-                  ),
-                ),
-                child: Text(
-                  StringSheet.done,
-                  style: AppTextStyles.base.s14.w600().copyWith(
-                        color: AppColors.primaryA500,
-                      ),
-                ),
-              ),
+            ScaledResultImage(image: image),
+            Positioned(
+              top: inset.top + 8.h,
+              left: inset.left + 8.w,
+              child: _BackButton(onTap: () => _onBack(outerCtx)),
             ),
           ],
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -253,14 +296,14 @@ class _ResultViewState extends State<ResultView> {
         children: [
           Icon(
             Icons.check_circle_outline,
-            size: 48.w,
+            size: 48.r,
             color: AppColors.greenA500,
           ),
           12.verticalSpace,
           Text(
             StringSheet.noDamageFound,
             style: AppTextStyles.base.s16.w600().copyWith(
-                  color: AppColors.inkA500,
+                  color: AppColors.white,
                 ),
             textAlign: TextAlign.center,
           ),
@@ -272,11 +315,11 @@ class _ResultViewState extends State<ResultView> {
   Widget _buildError() {
     return Center(
       child: Padding(
-        padding: EdgeInsets.all(24.w),
+        padding: EdgeInsets.all(24.r),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.error_outline, size: 40.w, color: AppColors.redA400),
+            Icon(Icons.error_outline, size: 40.r, color: AppColors.redA400),
             12.verticalSpace,
             Text(
               _controller.errorMessage ?? StringSheet.unknownError,
@@ -295,6 +338,34 @@ class _ResultViewState extends State<ResultView> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BackButton extends StatelessWidget {
+  const _BackButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: 40.r,
+        height: 40.r,
+        decoration: BoxDecoration(
+          color: AppColors.black.withValues(alpha: 0.62),
+          borderRadius: BorderRadius.circular(12.r),
+        ),
+        alignment: Alignment.center,
+        child: Icon(
+          Icons.arrow_back_ios_new_rounded,
+          color: AppColors.white,
+          size: 20.r,
         ),
       ),
     );

@@ -9,6 +9,7 @@ import '../../../core/di/injection.dart';
 import '../../../core/themes/app_colors.dart';
 import '../../../core/themes/app_textstyle.dart';
 import '../../../core/utils/screen_utils.dart';
+import '../../folder_result/presentation/result_view.dart';
 import 'camera_screen.dart';
 import 'controller/camera_model_controller.dart';
 import 'upload_view.dart';
@@ -56,6 +57,9 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
   /// Khi != null: đang ở pha upload (đã bấm "Xem kết quả"). CameraScreen bị gỡ
   /// khỏi cây widget → camera dispose (idle/giải phóng), bootstrap hiện UploadView.
   Map<int, List<Uint8List>>? _uploadPhotos;
+
+  /// Khi `true`: upload hoàn tất, chuyển sang hiện ResultView.
+  bool _showResult = false;
 
   @override
   void initState() {
@@ -116,17 +120,39 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
         }
         if (_modelController.isPreparing) return _buildPreparing();
         if (_modelController.isReady) {
-          // Đang upload → hiện UploadView (camera đã được gỡ → idle).
           if (_uploadPhotos != null) {
+            final isAicycle = widget.aiCycleConfig.generalConfig.organization ==
+                AiCycleOrg.aicycle;
+            // Chỉ org aicycle mới có màn ResultView sau upload.
+            if (_showResult && isAicycle) {
+              return ResultView(
+                sessionId: widget.aiCycleConfig.generalConfig.documentId,
+                capturedPhotos: const {},
+                onComplete: (_) => widget.onComplete?.call(),
+                onAddPhoto: (_) => setState(() {
+                  _uploadPhotos = null;
+                  _showResult = false;
+                }),
+              );
+            }
+            // Đang upload → hiện UploadView (camera đã được gỡ → idle).
             return UploadView(
               sessionId: widget.aiCycleConfig.generalConfig.documentId,
               capturedPhotos: _uploadPhotos!,
-              onComplete: widget.onComplete,
+              onComplete: () {
+                if (isAicycle) {
+                  // aicycle: tiếp tục sang ResultView để fetch + hiện kết quả.
+                  setState(() => _showResult = true);
+                } else {
+                  // vbi / others: upload xong là kết thúc SDK.
+                  widget.onComplete?.call();
+                }
+              },
               onImageUploaded: widget.onImageUploaded,
               onError: widget.onError,
             );
           }
-          // Model tải xong → CameraScreen. ResultView đã bỏ khỏi flow.
+          // Model tải xong → CameraScreen.
           return _buildCamera();
         }
         return _buildError(

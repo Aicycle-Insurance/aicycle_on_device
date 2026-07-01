@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/cupertino.dart';
 
 import '../../../../../aicycle_on_device.dart';
 import '../../../../config/config_holder.dart';
@@ -120,17 +121,42 @@ class ResultRemoteDataSource {
     return null;
   }
 
-  /// GET insurance/v2/claimfolders/$sessionId/external-segment-result
-  Future<List<VehiclePartModel>> fetchResult() async {
-    final config = AICycleConfigHolder.config;
-    final sessionId = config.generalConfig.documentId;
-    final endPoint = config.generalConfig.organization == AiCycleOrg.aicycle
-        ? '/insurance/v2/claimfolders/$sessionId/segment-classify-result'
-        : '/insurance/v2/claimfolders/$sessionId/external-segment-result';
-    final list = await _client.get<List<dynamic>>(endPoint);
-    return list
-        .whereType<Map<String, dynamic>>()
-        .map(VehiclePartModel.fromJson)
-        .toList();
-  }
+  // /// GET insurance/v2/claimfolders/$sessionId/segment-classify-result
+  // /// Không còn dùng: [ResultRepositoryImpl] build kết quả trực tiếp từ upload
+  // /// response cache, không cần gọi thêm endpoint này.
+  // Future<List<VehiclePartModel>> fetchResult() async {
+  //   final config = AICycleConfigHolder.config;
+  //   final sessionId = config.generalConfig.documentId;
+  //   final endPoint = config.generalConfig.organization == AiCycleOrg.aicycle
+  //       ? '/insurance/v2/claimfolders/$sessionId/segment-classify-result'
+  //       : '/insurance/v2/claimfolders/$sessionId/external-segment-result';
+  //   final list = await _client.get<List<dynamic>>(endPoint);
+  //   return list
+  //       .whereType<Map<String, dynamic>>()
+  //       .map(VehiclePartModel.fromJson)
+  //       .toList();
+  // }
+
+  // /// GET insurance/v2/claimfolders/$sessionId/images
+  // Future<List<PartViewImageModel>> fetchPartMasks() async {
+  //   final config = AICycleConfigHolder.config;
+  //   final sessionId = config.generalConfig.documentId;
+  //   final response = await _client.get<dynamic>(
+  //     '/insurance/v2/claimfolders/$sessionId/images',
+  //   );
+  //   final list = _unwrapPartViewImages(response);
+  //   return list
+  //       .whereType<Map<String, dynamic>>()
+  //       .map(PartViewImageModel.fromJson)
+  //       .toList();
+  // }
+
+  // List<dynamic> _unwrapPartViewImages(dynamic response) {
+  //   if (response is List<dynamic>) return response;
+  //   if (response is Map) {
+  //     final result = response['result'];
+  //     if (result is List<dynamic>) return result;
+  //   }
+  //   return const [];
+  // }
 }

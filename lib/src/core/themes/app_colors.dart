@@ -7,6 +7,7 @@ class AppColors {
   static const Color buyMeColor = Color(0xFFF3D0FF);
 
   /// primary
+  static const Color primaryA600 = Color(0xFF004DEC);
   static const Color primaryA500 = Color(0xFF5768FF);
   static const Color primaryA400 = Color(0xFF7987FF);
   static const Color primaryA300 = Color(0xFFAEB7FF);
@@ -28,6 +29,7 @@ class AppColors {
 
   ///support colors
   static const Color backgroundLight = Color(0xFFF8F9FC);
+  static const Color bottombarBackground = Color(0xFFEAECF0);
   static const Color backgroundNeutral = Color(0xFFE8EAF3);
   static const Color iconColor = Color(0xFF555B7C);
   static const Color iconColor2 = Color(0xFFBCC0D5);

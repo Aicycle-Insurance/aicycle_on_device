@@ -115,6 +115,7 @@ class ResultImage {
     this.imageUrl,
     this.imageDrawUrl,
     this.damageImageInfo = const [],
+    this.partsMasks = const [],
   });
 
   final int? imageId;
@@ -135,6 +136,8 @@ class ResultImage {
   final String? imageDrawUrl;
   final List<DamageMask> damageImageInfo;
 
+  final List<PartMask> partsMasks;
+
   Map<String, dynamic> toJson() {
     return {
       'imageId': imageId,
@@ -154,6 +157,7 @@ class ResultImage {
       'imageUrl': imageUrl,
       'imageDrawUrl': imageDrawUrl,
       'damageImageInfo': damageImageInfo.map((e) => e.toJson()).toList(),
+      'partsMasks': partsMasks.map((e) => e.toJson()).toList(),
     };
   }
 }
@@ -178,6 +182,43 @@ class ImageExtraInfo {
       'carModel': carModel,
       'carColor': carColor,
       'plateNumber': plateNumber,
+    };
+  }
+}
+
+/// Mask của một bộ phận xe (segmentation), lấy từ endpoint
+/// `claimfolders/{sessionId}/images`.
+///
+/// [boxes] là `[x1, y1, x2, y2]` normalized 0..1 theo `imageSize` gốc của BE
+/// — dùng chung với [ResultImage.resolution] để tính vị trí hiển thị.
+class PartMask {
+  const PartMask({
+    this.maskUrl,
+    this.masksPath,
+    this.boxes,
+    this.vehiclePartName,
+    this.vehicleColor,
+    this.scores,
+    this.isPart,
+  });
+
+  final String? maskUrl;
+  final String? masksPath;
+  final List<double>? boxes;
+  final String? vehiclePartName;
+  final String? vehicleColor;
+  final num? scores;
+  final bool? isPart;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'maskUrl': maskUrl,
+      'masksPath': masksPath,
+      'boxes': boxes,
+      'vehiclePartName': vehiclePartName,
+      'vehicleColor': vehicleColor,
+      'scores': scores,
+      'isPart': isPart,
     };
   }
 }
