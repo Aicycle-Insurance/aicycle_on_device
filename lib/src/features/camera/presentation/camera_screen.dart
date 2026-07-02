@@ -154,28 +154,24 @@ class _CameraScreenState extends State<CameraScreen> {
   Widget _buildTooltip() {
     final phase = _cameraController.inspectionPhase;
     final msg = _cameraController.message!;
-    final isPanoramicGuide = phase == InspectionPhase.panoramicGuide;
     final isDetectionReady = phase == InspectionPhase.detectionReady;
     return CameraToolTip(
       preffixIcon: msg.icon,
       message: msg.message,
-      // Nút đóng mặc định không dùng trong flow mới; các hành động chính là
-      // "Chuyển góc" sau ảnh toàn cảnh và "Xác nhận" khi thấy tổn thất.
+      // Không còn nút "Chuyển góc"; chuyển góc được xử lý tự động khi model
+      // nhận diện user đã di chuyển sang góc xe khác.
       showCloseButton: false,
       // ── Secondary button ─────────────────────────────────────────────────
       // detectionReady → "Thiếu tổn thất"
       showSecondaryButton: isDetectionReady,
       secondaryButtonLabel: StringSheet.missingDamage,
       onSecondaryButtonPressed: _cameraController.rejectDamage,
-      // panoramicGuide → "Chuyển góc"; detectionReady → "Xác nhận".
-      showPrimaryButton: isPanoramicGuide || isDetectionReady,
-      primaryButtonLabel:
-          isPanoramicGuide ? StringSheet.changeAngle : StringSheet.confirm,
-      onPrimaryButtonPressed: isPanoramicGuide
-          ? _cameraController.completeCurrentAngle
-          : () {
-              _cameraController.confirmDamage();
-            },
+      // detectionReady → "Xác nhận".
+      showPrimaryButton: isDetectionReady,
+      primaryButtonLabel: StringSheet.confirm,
+      onPrimaryButtonPressed: () {
+        _cameraController.confirmDamage();
+      },
     );
   }
 

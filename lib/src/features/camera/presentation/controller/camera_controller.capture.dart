@@ -18,8 +18,8 @@ mixin _CaptureMixin on _CameraControllerBase {
   // ── Photo capture ─────────────────────────────────────────────────────────
 
   /// Captures a JPEG frame, stores it in memory and on disk.
-  /// Does NOT modify [_completedSegments] — completion is via
-  /// [_InspectionMixin.completeCurrentAngle].
+  /// Does NOT modify [_completedSegments] in 4-angle mode — completion happens
+  /// when the classifier detects that the user moved to another car angle.
   @override
   Future<Uint8List?> capturePhoto({
     bool immediate = false,
@@ -49,8 +49,7 @@ mixin _CaptureMixin on _CameraControllerBase {
       if (seg != null) {
         _capturedPhotos.putIfAbsent(seg, () => []).add(bytes);
         PhotoSessionCache.instance.savePhoto(_sessionId, seg, bytes);
-        // Config 4 góc TẮT: góc nào đã có ảnh là hiện màu xanh trên vòng tròn
-        // góc (không cần qua bước "Chuyển góc" như flow 4 góc).
+        // Config 4 góc TẮT: góc nào đã có ảnh là hiện màu xanh trên vòng tròn.
         if (!_require4Angles) _completedSegments.add(seg);
       }
       notifyListeners();

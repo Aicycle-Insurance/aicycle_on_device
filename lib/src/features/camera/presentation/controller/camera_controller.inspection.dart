@@ -30,7 +30,7 @@ mixin _InspectionMixin on _CameraControllerBase {
     if (_latestDetections.isEmpty) return;
 
     // Vừa chụp toàn cảnh xong (đang ở màn hướng dẫn) mà đã phát hiện tổn thất
-    // → vào scanning luôn, không cần user bấm "Chuyển góc". Khi đang hiện
+    // → vào scanning luôn. Khi đang hiện
     // "Thiếu tổn thất" / "Tiếp tục di chuyển", detection mới cũng được nhận
     // ngay theo sơ đồ.
     if (_inspectionPhase == InspectionPhase.panoramicGuide ||
@@ -42,7 +42,7 @@ mixin _InspectionMixin on _CameraControllerBase {
     _enterDetectionReady();
   }
 
-  /// Chuyển sang detectionReady: hiện xác nhận tổn thất + mở 5 s tự động chụp.
+  /// Chuyển sang detectionReady: hiện xác nhận tổn thất + mở timer 5 s chụp ngầm.
   /// Dùng cho cả ảnh tổng quan (từ scanning) và ảnh chi tiết (từ detailGuide).
   /// [_inDetailStage] do bên gọi quyết định.
   void _enterDetectionReady() {
@@ -54,12 +54,15 @@ mixin _InspectionMixin on _CameraControllerBase {
       message: StringSheet.damageDetectedGuide,
       type: MessageType.info,
     ));
-    // Sau 5 s không bấm gì → tự động chụp.
+    // Cứ mỗi 5 s không bấm gì → tự động chụp ngầm, nhưng vẫn giữ tooltip xác
+    // nhận cho tới khi user bấm "Xác nhận" hoặc "Thiếu tổn thất".
     _autoCaptureTimer?.cancel();
-    _autoCaptureTimer = Timer(const Duration(seconds: 5), () {
-      if (_inspectionPhase == InspectionPhase.detectionReady) {
-        confirmDamage(flashTick: false);
+    _autoCaptureTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      if (_inspectionPhase != InspectionPhase.detectionReady) {
+        timer.cancel();
+        return;
       }
+      capturePhoto(immediate: true, flashTick: false);
     });
   }
 
@@ -178,12 +181,12 @@ mixin _InspectionMixin on _CameraControllerBase {
     _setMessage(CameraMessage(message: message, type: MessageType.info));
 
     await Future.delayed(const Duration(seconds: 5));
-    // Guard: user có thể đã bấm "Chuyển góc" trong lúc chờ.
+    // Guard: flow có thể đã tự chuyển góc trong lúc chờ.
     if (_inspectionPhase != InspectionPhase.continueOrChange) return;
     _enterScanning();
   }
 
-  /// User pressed "Chuyển góc" — thoát inspection, mở khoá classification.
+  /// Rời góc hiện tại — thoát inspection, mở khoá classification.
   /// Giữ angle trong [_panoramicCapturedSegments] để khi quay lại sẽ vào
   /// thẳng scanning (không chụp toàn cảnh lại).
   ///
@@ -229,5 +232,43 @@ mixin _InspectionMixin on _CameraControllerBase {
       if (!_completedSegments.contains(idx)) return idx;
     }
     return null;
+  }
+
+  bool get _canAutoSwitchAngle =>
+      _inspectionPhase == InspectionPhase.panoramicGuide ||
+      _inspectionPhase == InspectionPhase.scanning ||
+      _inspectionPhase == InspectionPhase.continueOrChange;
+
+  @override
+  void _autoSwitchToDetectedSegment(int segment) {
+    if (!_classificationLocked) return;
+    if (!_canAutoSwitchAngle) return;
+    if (segment == _activeSegmentIndex) return;
+
+    _autoCaptureTimer?.cancel();
+    _autoCaptureTimer = null;
+    _cancelNoDetectionWarningTimer();
+    _detailTimer?.cancel();
+    _detailTimer = null;
+    _inDetailStage = false;
+    _detailAutoCaptured = false;
+
+    final previousSegment = _activeSegmentIndex;
+    if (previousSegment != null) {
+      _completedSegments.add(previousSegment);
+    }
+
+    _setInspectionPhase(null);
+    _classificationLocked = false;
+    _activeSegmentIndex = segment;
+
+    final skipPanoramic = _panoramicCapturedSegments.contains(segment) ||
+        (!_require4Angles && _firstPanoramicCaptured);
+    if (skipPanoramic) {
+      _classificationLocked = true;
+      startDamageScanning();
+    } else {
+      updateMessage();
+    }
   }
 }

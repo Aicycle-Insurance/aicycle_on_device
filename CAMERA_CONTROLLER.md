@@ -55,19 +55,19 @@ flowchart TD
     B --> C
     C --> D
     D -->|"Bấm xác nhận"| E
-    D -->|"Không bấm gì sau 5s"| F
+    D -->|"Không bấm gì sau mỗi 5s"| F
     D -->|"Bấm 'Thiếu tổn thất'"| G
     E --> H
-    F --> H
+    F -->|"Chụp ngầm, vẫn giữ D"| D
     H -->|"Nhận diện được tổn thất"| J
     H -->|"Không Nhận diện được tổn thất sau 3s"| I
     I -->|"Nhận diện được tổn thất"| J
     I -->|"sau 3s vẫn k nhận diện được tổn thất"| N
     J -->|"Bấm xác nhận"| K
-    J -->|"Không bấm gì sau 5s"| L
+    J -->|"Không bấm gì sau mỗi 5s"| L
     J -->|"Bấm 'Thiếu tổn thất'"| M
     K --> N
-    L --> N
+    L -->|"Chụp ngầm, vẫn giữ J"| J
     N --> C
 ```
 
@@ -84,7 +84,7 @@ flowchart TD
     A["GIAI ĐOẠN 1: CHỤP ẢNH TOÀN CẢNH (panorama)<br/>inspectionPhase == null → carDamage OFF, OCR ON<br/>Mục tiêu: canh đủ bộ phận + đọc được biển số → tự chụp"]
     B["GIAI ĐOẠN 2: SOI TỔN THẤT (inspection)<br/>inspectionPhase != null → carDamage ON, OCR OFF<br/>panoramicGuide → scanning → detectionReady → capturing → detailGuide → continueOrChange"]
     A -->|"chụp toàn cảnh xong"| B
-    B -->|"completeCurrentAngle() · rời góc"| A
+    B -->|"classifier nhận diện góc khác<br/>→ _autoSwitchToDetectedSegment()"| A
 ```
 
 ---
@@ -100,7 +100,9 @@ flowchart TD
     G -->|rồi| T{"type?"}
 
     T -->|"classify (carCorner)"| C["Xác định góc (segment)"]
-    C --> C1{"góc đổi & chưa khoá?"}
+    C --> C0{"đang khoá góc<br/>và detect góc khác?"}
+    C0 -->|"có, ở pha cho phép auto-switch"| C4["_autoSwitchToDetectedSegment()<br/>hoàn tất góc cũ, kích hoạt góc mới"]
+    C0 -->|"không"| C1{"góc đổi & chưa khoá?"}
     C1 -->|"góc đã có ảnh / 4-góc OFF & đã có ảnh đầu"| C2["startDamageScanning() → GĐ2"]
     C1 -->|"ngược lại"| C3["updateMessage() → GĐ1"]
 
@@ -153,20 +155,22 @@ flowchart TD
 stateDiagram-v2
     [*] --> panoramicGuide
 
-    panoramicGuide: panoramicGuide\nmsg inspectDamageGuide (info)\nnut [Chuyen goc]
+    panoramicGuide: panoramicGuide\nmsg inspectDamageGuide (info)\nkhong co nut Chuyen goc
     scanning: scanning\nmsg null
-    detectionReady: detectionReady\nmsg damageDetectedGuide (info)\nnut [Xac nhan][Thieu ton that]\n5s -> tu confirmDamage
-    capturingDamage: capturingDamage\ncapturePhoto (BLINK, tru auto 5s)
+    detectionReady: detectionReady\nmsg damageDetectedGuide (info)\nnut [Xac nhan][Thieu ton that]\nmoi 5s -> chup ngam
+    capturingDamage: capturingDamage\ncapturePhoto khi bam Xac nhan
     detailGuide: detailGuide\nmsg detailPhotoGuide (info)
     continueOrChange: continueOrChange\nmsg continueToNextDamage / moveCameraToMissing (info)
 
     panoramicGuide --> scanning: co detection
-    panoramicGuide --> rgoc: bam Chuyen goc
+    panoramicGuide --> rgoc: classifier detect goc khac
     scanning --> detectionReady: co detection
     scanning --> warning: 10s khong thay ton that
+    scanning --> rgoc: classifier detect goc khac
     panoramicGuide --> warning: 10s khong thay ton that
     warning --> detectionReady: co detection
-    detectionReady --> capturingDamage: Xac nhan (hoac auto 5s)
+    detectionReady --> detectionReady: moi 5s chup ngam
+    detectionReady --> capturingDamage: Xac nhan
     detectionReady --> continueOrChange: Thieu ton that (rejectDamage)
     capturingDamage --> detailGuide: vua chup anh tong quan
     capturingDamage --> continueOrChange: vua chup anh chi tiet
@@ -174,10 +178,11 @@ stateDiagram-v2
     detailGuide --> capturingDamage: het 3s, tu chup chi tiet
     detailGuide --> continueOrChange: da auto-chup & van trong
     continueOrChange --> detectionReady: co detection moi
+    continueOrChange --> rgoc: classifier detect goc khac
     continueOrChange --> scanning: sau 5s
 
     warning: warning\nmsg noDamageDetectedGuide\nkhong tu roi goc
-    rgoc: completeCurrentAngle()\nve GD1
+    rgoc: _autoSwitchToDetectedSegment()\nhoan tat goc cu, kich hoat goc moi
     rgoc --> [*]
 ```
 
@@ -189,14 +194,15 @@ flowchart TD
     N1 --> N2["Tiếp tục chờ detection<br/>không tự completeCurrentAngle()"]
 ```
 
-### Rời góc — `completeCurrentAngle()`
+### Tự động chuyển góc — `_autoSwitchToDetectedSegment()`
 
 ```mermaid
 flowchart TD
-    R0["completeCurrentAngle()"] --> R1["huỷ mọi timer<br/>_classificationLocked=false<br/>setInspectionPhase(null) → về GĐ1"]
-    R1 --> R2{"config 4 góc?"}
-    R2 -->|BẬT| R3["msg: guide tới góc chưa xong tiếp theo<br/>(frontLeft/Right…) hoặc null nếu đã đủ 4 góc"]
-    R2 -->|TẮT| R4["msg: null (user tự do di chuyển)"]
+    R0["Classifier detect góc khác<br/>khi đang panoramicGuide / scanning / continueOrChange"] --> R1["huỷ timer, đánh dấu góc cũ completed<br/>setInspectionPhase(null)"]
+    R1 --> R2["set _activeSegmentIndex = góc mới"]
+    R2 --> R3{"góc mới bỏ qua panorama?"}
+    R3 -->|có| R4["lock góc mới<br/>startDamageScanning()"]
+    R3 -->|không| R5["updateMessage() để canh/chụp panorama góc mới"]
 ```
 
 ---
@@ -227,7 +233,7 @@ flowchart TD
 | Toàn cảnh từ biển số | `capturePhoto(immediate:true)` | ✅ |
 | Thủ công (nút shutter) | `capturePhoto(immediate:true)` | ✅ |
 | Xác nhận tổn thất (bấm tay) | `capturePhoto(immediate:true, flashTick:true)` | ✅ |
-| Auto-chụp tổn thất sau 5s | `confirmDamage(flashTick:false)` | ❌ (cố ý) |
+| Auto-chụp ngầm mỗi 5s khi đang xác nhận tổn thất | `capturePhoto(immediate:true, flashTick:false)` | ❌ (cố ý) |
 | Auto-chụp ảnh chi tiết | `capturePhoto(flashTick:false)` | ❌ (cố ý) |
 
 > Blink được vẽ **ngay trước** lệnh native capture (`notifyListeners()` sau khi

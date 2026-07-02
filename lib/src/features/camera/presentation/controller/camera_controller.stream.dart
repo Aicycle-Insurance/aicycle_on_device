@@ -47,29 +47,39 @@ mixin _StreamMixin on _CameraControllerBase {
   void _handleClassify(Map<String, dynamic> data) {
     final output = ClassifyOutput.fromJson(data);
     final segment = CarAngle.segmentOf(output.classification.top1);
+    if (segment == null) return;
     // Luôn highlight góc đang nhận diện được, kể cả khi flow đã khoá.
-    final highlightChanged =
-        segment != null && segment != _detectedSegmentIndex;
+    final highlightChanged = segment != _detectedSegmentIndex;
     if (highlightChanged) _detectedSegmentIndex = segment;
+
+    if (_classificationLocked && segment != _activeSegmentIndex) {
+      _autoSwitchToDetectedSegment(segment);
+      if (highlightChanged) notifyListeners();
+      return;
+    }
 
     // Cập nhật luồng (chỉ khi chưa khoá và góc đổi). Các hàm bên trong
     // (startDamageScanning/updateMessage) tự notify khi message đổi.
     if (!_classificationLocked && segment != _activeSegmentIndex) {
-      _activeSegmentIndex = segment;
-      // Vào thẳng scanning (bỏ qua chụp toàn cảnh) khi:
-      //  - góc này đã có ảnh toàn cảnh rồi, HOẶC
-      //  - config 4 góc TẮT và đã chụp xong ảnh toàn cảnh đầu tiên (các góc
-      //    sau chỉ ghi nhận tổn thất, không yêu cầu chụp toàn cảnh).
-      final skipPanoramic = _panoramicCapturedSegments.contains(segment) ||
-          (!_require4Angles && _firstPanoramicCaptured);
-      if (skipPanoramic) {
-        _classificationLocked = true;
-        startDamageScanning();
-      } else {
-        updateMessage();
-      }
+      _activateDetectedSegment(segment);
     }
     if (highlightChanged) notifyListeners();
+  }
+
+  void _activateDetectedSegment(int segment) {
+    _activeSegmentIndex = segment;
+    // Vào thẳng scanning (bỏ qua chụp toàn cảnh) khi:
+    //  - góc này đã có ảnh toàn cảnh rồi, HOẶC
+    //  - config 4 góc TẮT và đã chụp xong ảnh toàn cảnh đầu tiên (các góc
+    //    sau chỉ ghi nhận tổn thất, không yêu cầu chụp toàn cảnh).
+    final skipPanoramic = _panoramicCapturedSegments.contains(segment) ||
+        (!_require4Angles && _firstPanoramicCaptured);
+    if (skipPanoramic) {
+      _classificationLocked = true;
+      startDamageScanning();
+    } else {
+      updateMessage();
+    }
   }
 
   /// OCR (native) — tín hiệu canh khung. Đọc được biển ⇒ frame đủ tốt để

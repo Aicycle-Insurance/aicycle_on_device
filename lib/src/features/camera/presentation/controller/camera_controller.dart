@@ -18,7 +18,8 @@ part 'camera_controller.inspection.dart';
 /// Sub-states of the damage inspection flow (active when panoramic photo is taken).
 enum InspectionPhase {
   /// Initial message: "Đưa camera lại gần tổn thất…". Damage detections can
-  /// move straight to confirmation; "Chuyển góc" completes the current angle.
+  /// move straight to confirmation; detecting a different car angle completes
+  /// the current angle automatically.
   panoramicGuide,
 
   /// Scanning for damage. Detection is event-driven: ngay khi có detection
@@ -26,8 +27,10 @@ enum InspectionPhase {
   scanning,
 
   /// Detections found — showing "Xác nhận / Thiếu tổn thất". Sau 5 s không
-  /// bấm gì sẽ tự động chụp. Dùng cho cả ảnh tổng quan (overview) lẫn ảnh chi
-  /// tiết (detail) — phân biệt bằng [_CameraControllerBase._inDetailStage].
+  /// bấm gì sẽ tự động chụp ngầm lặp lại, nhưng vẫn giữ tooltip cho tới khi
+  /// user bấm "Xác nhận" hoặc "Thiếu tổn thất". Dùng cho cả ảnh tổng quan
+  /// (overview) lẫn ảnh chi tiết (detail) — phân biệt bằng
+  /// [_CameraControllerBase._inDetailStage].
   detectionReady,
 
   /// Đang chụp ảnh tổn thất (tự động hoặc do bấm "Xác nhận").
@@ -132,7 +135,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// When true, classify frames are ignored to lock the current angle.
   bool _classificationLocked = false;
 
-  /// Angles fully completed (user pressed "Chuyển góc").
+  /// Angles fully completed (auto-switched to another detected car angle).
   final Set<int> _completedSegments = {};
 
   /// Class names bộ phận từ frame car-part detect (model thứ 2) mới nhất.
@@ -165,8 +168,8 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// Current phase of the damage inspection sub-flow. null = not in inspection.
   InspectionPhase? _inspectionPhase;
 
-  /// 5s timer chạy ở detectionReady: hết 5s mà user không bấm gì thì tự
-  /// động chụp ảnh tổn thất.
+  /// 5s timer chạy ở detectionReady: cứ mỗi 5s tự động chụp ngầm một ảnh tổn
+  /// thất cho tới khi user bấm "Xác nhận" hoặc "Thiếu tổn thất".
   Timer? _autoCaptureTimer;
 
   /// One-shot timer: nếu sau 10 s vẫn chưa phát hiện tổn thất ở pha chờ/quét
@@ -311,6 +314,10 @@ abstract class _CameraControllerBase extends ChangeNotifier {
 
   /// [_InspectionMixin] — mở 10 s no-detection warning timeout.
   void _startNoDetectionWarningTimer();
+
+  /// [_InspectionMixin] — tự động rời góc hiện tại khi classifier nhận diện
+  /// user đã di chuyển sang góc xe khác.
+  void _autoSwitchToDetectedSegment(int segment);
 
   /// [_CaptureMixin] — chụp 1 ảnh JPEG, lưu in-memory + disk.
   Future<Uint8List?> capturePhoto({
