@@ -30,9 +30,8 @@ mixin _PanoramicMixin on _CameraControllerBase {
     final (frontBumper, initialGuide) = config;
 
     final hasPlate = classes.contains(licencePlate);
-    final allPresent = hasPlate &&
-        classes.contains(door) &&
-        classes.contains(frontBumper);
+    final allPresent =
+        hasPlate && classes.contains(door) && classes.contains(frontBumper);
 
     // Chỉ giữ timer 5s khi đang ở trạng thái "đã căn đủ, chờ OCR". Rời trạng
     // thái này (di chuyển làm mất bộ phận) → huỷ timer + reset cờ nhắc.
@@ -56,8 +55,8 @@ mixin _PanoramicMixin on _CameraControllerBase {
       _holdStillShownAt ??= DateTime.now();
       // Giữ message "giữ yên" tối thiểu 3s trước khi auto-capture, kể cả khi OCR
       // đọc được biển ngay — để user kịp thấy hướng dẫn.
-      final heldLongEnough =
-          DateTime.now().difference(_holdStillShownAt!) >= _holdStillMinDuration;
+      final heldLongEnough = DateTime.now().difference(_holdStillShownAt!) >=
+          _holdStillMinDuration;
       if (_latestPlateReadable && heldLongEnough) {
         _triggerAutoCapture();
       } else if (_platePromptShown) {
@@ -125,8 +124,6 @@ mixin _PanoramicMixin on _CameraControllerBase {
       message: StringSheet.inspectDamageGuide,
       type: MessageType.info,
     ));
-    // Đang hướng dẫn soi tổn thất: nếu sau 10 s vẫn không phát hiện tổn thất
-    // → cảnh báo rồi tự chuyển góc.
-    _startNoDetectionTimer();
+    _startNoDetectionWarningTimer();
   }
 }

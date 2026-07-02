@@ -17,7 +17,8 @@ part 'camera_controller.inspection.dart';
 
 /// Sub-states of the damage inspection flow (active when panoramic photo is taken).
 enum InspectionPhase {
-  /// Initial message: "Đưa camera lại gần tổn thất…" — X → scanning, Chuyển góc → done.
+  /// Initial message: "Đưa camera lại gần tổn thất…". Damage detections can
+  /// move straight to confirmation; "Chuyển góc" completes the current angle.
   panoramicGuide,
 
   /// Scanning for damage. Detection is event-driven: ngay khi có detection
@@ -168,10 +169,9 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// động chụp ảnh tổn thất.
   Timer? _autoCaptureTimer;
 
-  /// One-shot timer: if no damage is detected within 10 s of unlocking
-  /// detection (right after the panoramic photo is taken), the current
-  /// angle is auto-completed.
-  Timer? _noDetectionTimer;
+  /// One-shot timer: nếu sau 10 s vẫn chưa phát hiện tổn thất ở pha chờ/quét
+  /// thì hiển thị warning, nhưng không tự rời góc.
+  Timer? _noDetectionWarningTimer;
 
   /// 3s timer của pha [InspectionPhase.detailGuide] (chụp ảnh chi tiết).
   Timer? _detailTimer;
@@ -291,7 +291,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   @override
   void dispose() {
     _autoCaptureTimer?.cancel();
-    _noDetectionTimer?.cancel();
+    _noDetectionWarningTimer?.cancel();
     _detailTimer?.cancel();
     _plateReadTimer?.cancel();
     stopCamera(); // no-op nếu đã gọi trước đó
@@ -309,8 +309,8 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// [_InspectionMixin] — phát hiện tổn thất → mở xác nhận.
   void _maybeShowDetectionReady();
 
-  /// [_InspectionMixin] — mở 10 s no-detection timeout.
-  void _startNoDetectionTimer();
+  /// [_InspectionMixin] — mở 10 s no-detection warning timeout.
+  void _startNoDetectionWarningTimer();
 
   /// [_CaptureMixin] — chụp 1 ảnh JPEG, lưu in-memory + disk.
   Future<Uint8List?> capturePhoto({

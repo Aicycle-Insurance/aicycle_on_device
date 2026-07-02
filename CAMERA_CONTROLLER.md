@@ -62,7 +62,7 @@ flowchart TD
     H -->|"Nhận diện được tổn thất"| J
     H -->|"Không Nhận diện được tổn thất sau 3s"| I
     I -->|"Nhận diện được tổn thất"| J
-    I -->|"sau 3s vẫn k nhận diện được tổn thất"| J
+    I -->|"sau 3s vẫn k nhận diện được tổn thất"| N
     J -->|"Bấm xác nhận"| K
     J -->|"Không bấm gì sau 5s"| L
     J -->|"Bấm 'Thiếu tổn thất'"| M
@@ -142,7 +142,7 @@ flowchart TD
     T0["_triggerAutoCapture()"] --> T1["reset readable / _holdStillShownAt, huỷ timer"]
     T1 --> T2["capturePhoto(immediate:true) 💥 BLINK trắng<br/>lưu ảnh → _panoramicCapturedSegments + _completedSegments<br/>_firstPanoramicCaptured=true · _classificationLocked=true"]
     T2 --> T3["msg: plateValidCaptured (success)<br/>'Biển số hợp lệ, chụp thành công' — giữ 3s"]
-    T3 --> T4["setInspectionPhase(panoramicGuide) → GĐ2<br/>msg: inspectDamageGuide (info)<br/>+ _startNoDetectionTimer (10s)"]
+    T3 --> T4["setInspectionPhase(panoramicGuide) → GĐ2<br/>msg: inspectDamageGuide (info)<br/>+ _startNoDetectionWarningTimer (10s)"]
 ```
 
 ---
@@ -153,16 +153,19 @@ flowchart TD
 stateDiagram-v2
     [*] --> panoramicGuide
 
-    panoramicGuide: panoramicGuide\nmsg inspectDamageGuide (info)\nnut [X]=quet  [Chuyen goc]
+    panoramicGuide: panoramicGuide\nmsg inspectDamageGuide (info)\nnut [Chuyen goc]
     scanning: scanning\nmsg null
     detectionReady: detectionReady\nmsg damageDetectedGuide (info)\nnut [Xac nhan][Thieu ton that]\n5s -> tu confirmDamage
     capturingDamage: capturingDamage\ncapturePhoto (BLINK, tru auto 5s)
     detailGuide: detailGuide\nmsg detailPhotoGuide (info)
     continueOrChange: continueOrChange\nmsg continueToNextDamage / moveCameraToMissing (info)
 
-    panoramicGuide --> scanning: co detection / bam X
+    panoramicGuide --> scanning: co detection
+    panoramicGuide --> rgoc: bam Chuyen goc
     scanning --> detectionReady: co detection
-    scanning --> rgoc: 10s khong thay ton that
+    scanning --> warning: 10s khong thay ton that
+    panoramicGuide --> warning: 10s khong thay ton that
+    warning --> detectionReady: co detection
     detectionReady --> capturingDamage: Xac nhan (hoac auto 5s)
     detectionReady --> continueOrChange: Thieu ton that (rejectDamage)
     capturingDamage --> detailGuide: vua chup anh tong quan
@@ -170,18 +173,20 @@ stateDiagram-v2
     detailGuide --> detectionReady: co ton that (trong 3s)
     detailGuide --> capturingDamage: het 3s, tu chup chi tiet
     detailGuide --> continueOrChange: da auto-chup & van trong
+    continueOrChange --> detectionReady: co detection moi
     continueOrChange --> scanning: sau 5s
 
+    warning: warning\nmsg noDamageDetectedGuide\nkhong tu roi goc
     rgoc: completeCurrentAngle()\nve GD1
     rgoc --> [*]
 ```
 
-### 10s không thấy tổn thất — `_onNoDetectionTimeout()`
+### 10s không thấy tổn thất — warning-only
 
 ```mermaid
 flowchart TD
-    N0["_onNoDetectionTimeout()<br/>(pha scanning / panoramicGuide)"] --> N1["msg: noDamageDetectedGuide (warning)<br/>'Tổn thất chưa nhận diện…'"]
-    N1 -->|"giữ 5s"| N2["completeCurrentAngle() — RỜI GÓC"]
+    N0["_onNoDetectionWarningTimeout()<br/>(pha scanning / panoramicGuide)"] --> N1["msg: noDamageDetectedGuide (warning)<br/>'Tổn thất chưa nhận diện…'"]
+    N1 --> N2["Tiếp tục chờ detection<br/>không tự completeCurrentAngle()"]
 ```
 
 ### Rời góc — `completeCurrentAngle()`
@@ -210,7 +215,7 @@ flowchart TD
 | `moveCameraToMissing` | info | Bấm "Thiếu tổn thất" |
 | `detailPhotoGuide` | info | detailGuide |
 | `continueToNextDamage` | info | Sau khi chụp chi tiết / auto-capture trống |
-| `noDamageDetectedGuide` | warning | 10s không thấy tổn thất (trước khi rời góc) |
+| `noDamageDetectedGuide` | warning | 10s không thấy tổn thất (chỉ cảnh báo, không tự rời góc) |
 | `null` | — | scanning, hoặc rời góc (4-góc TẮT / đã đủ góc) |
 
 ---

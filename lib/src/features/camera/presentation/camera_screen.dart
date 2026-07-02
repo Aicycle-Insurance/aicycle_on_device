@@ -154,22 +154,28 @@ class _CameraScreenState extends State<CameraScreen> {
   Widget _buildTooltip() {
     final phase = _cameraController.inspectionPhase;
     final msg = _cameraController.message!;
+    final isPanoramicGuide = phase == InspectionPhase.panoramicGuide;
+    final isDetectionReady = phase == InspectionPhase.detectionReady;
     return CameraToolTip(
       preffixIcon: msg.icon,
       message: msg.message,
-      // ── Close button ────────────────────────────────────────────────────
-      // Visible only on panoramicGuide. Pressing it starts damage scanning.
-      showCloseButton: phase == InspectionPhase.panoramicGuide,
-      onCloseButtonPressed: _cameraController.startDamageScanning,
+      // Nút đóng mặc định không dùng trong flow mới; các hành động chính là
+      // "Chuyển góc" sau ảnh toàn cảnh và "Xác nhận" khi thấy tổn thất.
+      showCloseButton: false,
       // ── Secondary button ─────────────────────────────────────────────────
       // detectionReady → "Thiếu tổn thất"
-      showSecondaryButton: phase == InspectionPhase.detectionReady,
+      showSecondaryButton: isDetectionReady,
       secondaryButtonLabel: StringSheet.missingDamage,
       onSecondaryButtonPressed: _cameraController.rejectDamage,
-      // ── Primary button ("Xác nhận") — only during detectionReady ────────
-      showPrimaryButton: phase == InspectionPhase.detectionReady,
-      primaryButtonLabel: StringSheet.confirm,
-      onPrimaryButtonPressed: _cameraController.confirmDamage,
+      // panoramicGuide → "Chuyển góc"; detectionReady → "Xác nhận".
+      showPrimaryButton: isPanoramicGuide || isDetectionReady,
+      primaryButtonLabel:
+          isPanoramicGuide ? StringSheet.changeAngle : StringSheet.confirm,
+      onPrimaryButtonPressed: isPanoramicGuide
+          ? _cameraController.completeCurrentAngle
+          : () {
+              _cameraController.confirmDamage();
+            },
     );
   }
 
