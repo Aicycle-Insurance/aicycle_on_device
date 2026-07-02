@@ -11,5 +11,5 @@ class AppAssets {
   static const arrows = '$_images/arrows.png';
   static const spinner = '$_images/spinner.png';
 
-  static const List<String> carAngleSamples = [sample1, sample3, sample4, sample2];
+  static const List<String> carAngleSamples = [sample2, sample3, sample4, sample1];
 }

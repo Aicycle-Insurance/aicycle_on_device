@@ -128,39 +128,44 @@ class _ScaledResultImageState extends State<ScaledResultImage> {
 
           final imWidth = displaySize.width;
           final imHeight = displaySize.height;
+          final masks = _buildPartMasks(
+            widget.image.partsMasks,
+            imWidth,
+            imHeight,
+          );
 
           return Center(
             child: SizedBox(
               width: imWidth,
               height: imHeight,
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Image.network(
-                    url,
-                    width: imWidth,
-                    height: imHeight,
-                    fit: BoxFit.fill,
-                    loadingBuilder: (context, child, progress) {
-                      if (progress == null) return child;
-                      return const SizedBox.expand(
-                        child: _ImagePlaceholder(loading: true),
-                      );
-                    },
-                    errorBuilder: (_, __, ___) {
-                      return const SizedBox.expand(
-                        child: _ImagePlaceholder(
-                          icon: Icons.broken_image_outlined,
-                        ),
-                      );
-                    },
-                  ),
-                  ..._buildPartMasks(
-                    widget.image.partsMasks,
-                    imWidth,
-                    imHeight,
-                  ),
-                ],
+              child: Image.network(
+                url,
+                width: imWidth,
+                height: imHeight,
+                fit: BoxFit.fill,
+                gaplessPlayback: true,
+                // frame != null = ảnh đã decode xong và sẵn sàng vẽ frame đầu tiên.
+                // Chặt hơn loadingBuilder (progress==null chỉ báo tải xong bytes).
+                frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                  final mainReady = frame != null;
+                  return Stack(
+                    fit: StackFit.expand,
+                    clipBehavior: Clip.none,
+                    children: [
+                      Positioned.fill(
+                        child: mainReady
+                            ? child
+                            : const _ImagePlaceholder(loading: true),
+                      ),
+                      if (mainReady) ...masks,
+                    ],
+                  );
+                },
+                errorBuilder: (_, __, ___) {
+                  return const _ImagePlaceholder(
+                    icon: Icons.broken_image_outlined,
+                  );
+                },
               ),
             ),
           );
@@ -197,7 +202,9 @@ class _ScaledResultImageState extends State<ScaledResultImage> {
           rect: rect,
           child: Image.network(
             url,
+            key: ValueKey(url),
             fit: BoxFit.fill,
+            gaplessPlayback: true,
             color: hexToColor(mask.vehicleColor).withValues(
               alpha: _partMaskOpacity,
             ),
@@ -249,8 +256,8 @@ class _DamageBoundingBox extends StatelessWidget {
         DecoratedBox(
           decoration: BoxDecoration(
             color: color.withValues(alpha: _fillOpacity),
-            borderRadius: BorderRadius.circular(10.r),
-            border: Border.all(color: color, width: 1.5.w),
+            borderRadius: BorderRadius.circular(3.r),
+            border: Border.all(color: color, width: 0.7.w),
           ),
         ),
         if (label.isNotEmpty)
