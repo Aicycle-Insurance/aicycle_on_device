@@ -1,3 +1,7 @@
+## 0.1.2
+
+* Update OCR viewport margins for improved license plate detection accuracy
+
 ## 0.1.1
 
 * Add License Plate OCR functionality
