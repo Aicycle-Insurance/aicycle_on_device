@@ -38,6 +38,8 @@ class AppColors {
   static const Color drawerBackground = Color(0xFFF1F3FA);
   static const Color inactive = Color(0xFFC3CBFF);
   static const Color active = Color(0xFF4D63FF);
+  static const Color partChip = Color(0xFFEEF4FF);
+  static const Color partChipBorder = Color(0xFFC7D7FE);
   static const LinearGradient skeleton = LinearGradient(
     colors: [
       Color(0xFFE7E8EE),

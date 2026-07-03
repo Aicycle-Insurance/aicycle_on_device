@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../core/themes/app_colors.dart';
@@ -5,37 +6,59 @@ import '../../../../core/utils/color_utils.dart';
 import '../../../../core/utils/image_fit_utils.dart';
 import '../../../../core/utils/screen_utils.dart';
 import '../../domain/entity/inspection_result.dart';
+import '../models/mask_tap_result.dart';
+import 'add_damage_tap_button.dart';
+import 'mask_hit_tester.dart';
 
 /// Opacity cố định cho mask overlay bộ phận xe.
 const double _partMaskOpacity = 0.3;
 
 /// Ảnh kết quả: contain (không méo) + pinch zoom qua [InteractiveViewer].
-///
-/// Ảnh và mask (sau này) nằm trong cùng [Stack] bên trong viewer — zoom
-/// transform toàn layer, không cần tính lại mask.
+/// Tap vào mask bộ phận (`isPart == true`) → callback [onMaskTap] kèm tọa độ
+
 class ScaledResultImage extends StatefulWidget {
   const ScaledResultImage({
     super.key,
     required this.image,
     this.maxScale = 3.5,
+    this.activeTap,
+    this.onMaskTap,
+    this.onAddDamage,
   });
 
   final ResultImage image;
   final double maxScale;
+
+  final MaskTapResult? activeTap;
+
+  final void Function(MaskTapResult?)? onMaskTap;
+
+  final VoidCallback? onAddDamage;
 
   @override
   State<ScaledResultImage> createState() => _ScaledResultImageState();
 }
 
 class _ScaledResultImageState extends State<ScaledResultImage> {
+  final _tc = TransformationController();
+  final _hitTester = MaskHitTester();
+
   Size? _logicalSize;
   ImageStream? _imageStream;
   ImageStreamListener? _imageListener;
+
+  Size _displaySize = Size.zero;
+
+  Size _containerSize = Size.zero;
+
+  /// Vị trí pointer khi bắt đầu chạm — dùng để phân biệt tap vs pan.
+  Offset? _pointerDownPos;
 
   @override
   void initState() {
     super.initState();
     _resolveLogicalSize();
+    _hitTester.preload(widget.image.partsMasks);
   }
 
   @override
@@ -47,11 +70,16 @@ class _ScaledResultImageState extends State<ScaledResultImage> {
       _logicalSize = null;
       _resolveLogicalSize();
     }
+    if (oldWidget.image != widget.image) {
+      _hitTester.preload(widget.image.partsMasks);
+    }
   }
 
   @override
   void dispose() {
     _clearImageStream();
+    _tc.dispose();
+    _hitTester.dispose();
     super.dispose();
   }
 
@@ -88,6 +116,64 @@ class _ScaledResultImageState extends State<ScaledResultImage> {
     _imageListener = null;
   }
 
+
+  /// Xử lý tap tại [localInViewer] (local coords của InteractiveViewer).
+  ///
+  /// Convert sang image-space rồi delegate cho [MaskHitTester].
+  /// Luôn gọi [onMaskTap] — trả về `null` nếu không trúng mask nào.
+  void _handleTap(Offset localInViewer) {
+    if (widget.onMaskTap == null) return;
+    if (_displaySize == Size.zero || _containerSize == Size.zero) return;
+
+    // Viewer local → scene (LayoutBuilder) coords.
+    final scenePos = _tc.toScene(localInViewer);
+
+    // SizedBox (imWidth x imHeight) được căn giữa bởi Center trong LayoutBuilder.
+    final offsetX = (_containerSize.width - _displaySize.width) / 2;
+    final offsetY = (_containerSize.height - _displaySize.height) / 2;
+    final imagePos = scenePos - Offset(offsetX, offsetY);
+
+    final partMasks =
+        widget.image.partsMasks.where((m) => m.isPart == true).toList();
+
+    final hit = _hitTester.hitTest(
+      scenePos: imagePos,
+      masks: partMasks,
+      imWidth: _displaySize.width,
+      imHeight: _displaySize.height,
+    );
+
+    if (hit == null) {
+      if (!_isTapOnActiveButton(imagePos)) {
+        widget.onMaskTap?.call(null);
+      }
+      return;
+    }
+
+    final imageId = widget.image.imageId;
+    if (imageId == null) return;
+
+    final normalized = displayPositionToNormalized(
+      imagePos,
+      _displaySize.width,
+      _displaySize.height,
+    );
+    final logical = normalizedToLogicalPixel(
+      normalized,
+      widget.image.resolution,
+    );
+
+    widget.onMaskTap?.call(
+      MaskTapResult(
+        imageId: imageId,
+        mask: hit,
+        normalizedPosition: normalized,
+        displayPosition: imagePos,
+        logicalPixelPosition: logical,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final url = widget.image.imageUrl;
@@ -113,69 +199,112 @@ class _ScaledResultImageState extends State<ScaledResultImage> {
 
     final logicalSize = _logicalSize!;
 
-    return InteractiveViewer(
-      maxScale: widget.maxScale,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final displaySize = fitImageContain(
-            logicalSize: logicalSize,
-            maxWidth: constraints.maxWidth,
-            maxHeight: constraints.maxHeight,
-          );
-          if (displaySize == Size.zero) {
-            return const SizedBox.shrink();
-          }
+    return Listener(
+      onPointerDown: (e) => _pointerDownPos = e.localPosition,
+      onPointerUp: (e) {
+        final down = _pointerDownPos;
+        _pointerDownPos = null;
+        if (down == null) return;
+        final delta = (e.localPosition - down).distance;
+        if (delta < kTouchSlop) _handleTap(e.localPosition);
+      },
+      child: InteractiveViewer(
+        transformationController: _tc,
+        maxScale: widget.maxScale,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final displaySize = fitImageContain(
+              logicalSize: logicalSize,
+              maxWidth: constraints.maxWidth,
+              maxHeight: constraints.maxHeight,
+            );
+            if (displaySize == Size.zero) {
+              return const SizedBox.shrink();
+            }
 
-          final imWidth = displaySize.width;
-          final imHeight = displaySize.height;
-          final masks = _buildPartMasks(
-            widget.image.partsMasks,
-            imWidth,
-            imHeight,
-          );
+            // Cập nhật cache tọa độ — không cần setState vì chỉ dùng ở hit-test.
+            _displaySize = displaySize;
+            _containerSize = Size(constraints.maxWidth, constraints.maxHeight);
 
-          return Center(
-            child: SizedBox(
-              width: imWidth,
-              height: imHeight,
-              child: Image.network(
-                url,
+            final imWidth = displaySize.width;
+            final imHeight = displaySize.height;
+            final masks = _buildPartMasks(
+              widget.image.partsMasks,
+              imWidth,
+              imHeight,
+            );
+
+            final activeTap = widget.activeTap;
+            final showTapButton = activeTap != null &&
+                activeTap.imageId == widget.image.imageId;
+
+            return Center(
+              child: SizedBox(
                 width: imWidth,
                 height: imHeight,
-                fit: BoxFit.fill,
-                gaplessPlayback: true,
-                // frame != null = ảnh đã decode xong và sẵn sàng vẽ frame đầu tiên.
-                // Chặt hơn loadingBuilder (progress==null chỉ báo tải xong bytes).
-                frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-                  final mainReady = frame != null;
-                  return Stack(
-                    fit: StackFit.expand,
-                    clipBehavior: Clip.none,
-                    children: [
-                      Positioned.fill(
-                        child: mainReady
-                            ? child
-                            : const _ImagePlaceholder(loading: true),
-                      ),
-                      if (mainReady) ...masks,
-                    ],
-                  );
-                },
-                errorBuilder: (_, __, ___) {
-                  return const _ImagePlaceholder(
-                    icon: Icons.broken_image_outlined,
-                  );
-                },
+                child: Image.network(
+                  url,
+                  width: imWidth,
+                  height: imHeight,
+                  fit: BoxFit.fill,
+                  gaplessPlayback: true,
+                  frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                    final mainReady = frame != null;
+                    return Stack(
+                      fit: StackFit.expand,
+                      clipBehavior: Clip.none,
+                      children: [
+                        Positioned.fill(
+                          child: mainReady
+                              ? child
+                              : const _ImagePlaceholder(loading: true),
+                        ),
+                        if (mainReady) ...masks,
+                        if (mainReady && showTapButton)
+                          _buildTapButtonOverlay(activeTap),
+                      ],
+                    );
+                  },
+                  errorBuilder: (_, __, ___) {
+                    return const _ImagePlaceholder(
+                      icon: Icons.broken_image_outlined,
+                    );
+                  },
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }
 
+  /// Nút "Thêm tổn thất" — icon tròn căn tại [tap.displayPosition], chữ nằm bên phải.
+  Widget _buildTapButtonOverlay(MaskTapResult tap) {
+    final iconSize = 22.r;
+    return Positioned(
+      left: tap.displayPosition.dx - iconSize / 2,
+      top: tap.displayPosition.dy - iconSize / 2,
+      child: AddDamageTapButton(onTap: () => widget.onAddDamage?.call()),
+    );
+  }
+
+  bool _isTapOnActiveButton(Offset imagePos) {
+    final tap = widget.activeTap;
+    if (tap == null) return false;
+
+    final iconRadius = 11.r;
+    final origin = tap.displayPosition - Offset(iconRadius, iconRadius);
+    final btnRect = Rect.fromLTWH(
+      origin.dx,
+      origin.dy - 2.h,
+      148.w,
+      34.h,
+    );
+    return btnRect.contains(imagePos);
+  }
+
   /// Vẽ overlay mask bộ phận (isPart=true) và bounding box damage (isPart=false).
-  /// Cả hai nằm trong cùng [Stack]/[InteractiveViewer] — zoom áp dụng đồng nhất.
   List<Widget> _buildPartMasks(
     List<PartMask> masks,
     double imWidth,
@@ -184,7 +313,6 @@ class _ScaledResultImageState extends State<ScaledResultImage> {
     final seenUrls = <String>{};
     final widgets = <Widget>[];
 
-    // Render part masks trước (nằm dưới) rồi damage bbox lên trên.
     final partMasks = masks.where((m) => m.isPart == true);
     final damageMasks = masks.where((m) => m.isPart != true);
 

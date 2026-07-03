@@ -95,6 +95,15 @@ class StringSheet {
   static const unknownError = 'Đã xảy ra lỗi. Vui lòng thử lại';
   static const noDamageFound = 'Không phát hiện vết hỏng';
   static const addDamagePhoto = 'Thêm ảnh tổn thất';
+  static const addDamage = 'Thêm tổn thất';
+  static const saveChanges = 'Lưu thay đổi';
+  static const damageTypeSection = 'Loại tổn thất';
+  static const damageTypeScratch = 'Trầy, xước';
+  static const damageTypeDent = 'Móp, bẹp';
+  static const damageTypeCrack = 'Vỡ, nứt';
+  static const damageTypeLoose = 'Long, rụng';
+  static const damageTypePuncture = 'Thủng, rách';
+  static const damageTypeMissing = 'Mất';
   static const done = 'Xong';
   static const estimateDamage = 'Ước tính thiệt hại';
   static const viewResult = 'Xem kết quả';

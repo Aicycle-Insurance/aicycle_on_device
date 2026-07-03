@@ -12,6 +12,8 @@ class AngleThumb extends StatelessWidget {
     required this.selected,
     required this.hasImages,
     required this.onTap,
+    this.width,
+    this.height,
   });
 
   final int index;
@@ -21,13 +23,23 @@ class AngleThumb extends StatelessWidget {
   final bool hasImages;
   final VoidCallback onTap;
 
+  /// Kích thước tùy chỉnh; mặc định 84×44 theo design.
+  final double? width;
+  final double? height;
+
+  static const double _defaultWidth = 84;
+  static const double _defaultHeight = 44;
+
   @override
   Widget build(BuildContext context) {
+    final w = width ?? _defaultWidth.w;
+    final h = height ?? _defaultHeight.h;
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 84.w,
-        height: 44.h,
+        width: w,
+        height: h,
         padding: EdgeInsets.all(3.r),
         decoration: BoxDecoration(
           color: AppColors.white,

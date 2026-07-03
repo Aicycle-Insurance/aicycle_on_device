@@ -10,7 +10,10 @@ import '../../../core/themes/app_textstyle.dart';
 import '../../../core/utils/screen_utils.dart';
 import '../../camera/data/model/car_angle.dart';
 import '../../folder_result/domain/entity/inspection_result.dart';
+import 'add_damage_view.dart';
 import 'controller/result_controller.dart';
+import 'models/damage_annotation_draft.dart';
+import 'models/mask_tap_result.dart';
 import 'widgets/result_bottom_bar.dart';
 import 'widgets/result_thumbnail_strip.dart';
 import 'widgets/scaled_result_image.dart';
@@ -51,6 +54,12 @@ class _ResultViewState extends State<ResultView> {
   int _selectedImageIndex = 0;
   bool _initialAngleSynced = false;
 
+  /// Tap đang active — hiện nút "Thêm tổn thất" tại vị trí chạm.
+  MaskTapResult? _activeTap;
+
+  /// Các tổn thất đã xác nhận — chờ gửi BE (imageId, tọa độ, loại tổn thất).
+  final List<DamageAnnotationDraft> _pendingDamageAnnotations = [];
+
   @override
   void initState() {
     super.initState();
@@ -74,11 +83,46 @@ class _ResultViewState extends State<ResultView> {
     setState(() {
       _selectedAngle = angle;
       _selectedImageIndex = 0;
+      _activeTap = null;
     });
   }
 
   void _selectImage(int index) {
-    setState(() => _selectedImageIndex = index);
+    setState(() {
+      _selectedImageIndex = index;
+      _activeTap = null;
+    });
+  }
+
+  /// Tap trúng mask → lưu state + hiện nút. Tap trượt → ẩn nút.
+  void _handleMaskTap(MaskTapResult? result) {
+    setState(() => _activeTap = result);
+  }
+
+  /// Mở màn chọn loại tổn thất; lưu draft khi user bấm "Lưu thay đổi".
+  Future<void> _openAddDamageScreen(
+    BuildContext context,
+    ResultImage image,
+  ) async {
+    final tap = _activeTap;
+    if (tap == null) return;
+
+    final draft = await Navigator.of(context).push<DamageAnnotationDraft>(
+      MaterialPageRoute(
+        builder: (_) => AddDamageView(
+          tapResult: tap,
+          imageUrl: image.imageUrl,
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+    if (draft != null) {
+      setState(() {
+        _pendingDamageAnnotations.add(draft);
+        _activeTap = null;
+      });
+    }
   }
 
   void _onBack(BuildContext context) {
@@ -277,7 +321,12 @@ class _ResultViewState extends State<ResultView> {
         return Stack(
           fit: StackFit.expand,
           children: [
-            ScaledResultImage(image: image),
+            ScaledResultImage(
+              image: image,
+              activeTap: _activeTap,
+              onMaskTap: _handleMaskTap,
+              onAddDamage: () => _openAddDamageScreen(outerCtx, image),
+            ),
             Positioned(
               top: inset.top + 8.h,
               left: inset.left + 8.w,

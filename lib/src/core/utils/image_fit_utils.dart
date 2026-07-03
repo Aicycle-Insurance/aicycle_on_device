@@ -53,3 +53,33 @@ Rect maskDisplayRect(List<double> boxes, double imWidth, double imHeight) {
     boxes[3] * imHeight,
   );
 }
+
+/// Map vị trí tap (pixel display) sang tọa độ normalized `[x, y]` 0..1.
+List<double> displayPositionToNormalized(
+  Offset displayPosition,
+  double displayWidth,
+  double displayHeight,
+) {
+  if (displayWidth <= 0 || displayHeight <= 0) {
+    return const [0, 0];
+  }
+  return [
+    (displayPosition.dx / displayWidth).clamp(0.0, 1.0),
+    (displayPosition.dy / displayHeight).clamp(0.0, 1.0),
+  ];
+}
+
+/// Map normalized `[x, y]` sang pixel gốc theo `resolution` BE `[width, height]`.
+List<int>? normalizedToLogicalPixel(
+  List<double> normalized,
+  List<int>? resolution,
+) {
+  if (resolution == null || resolution.length < 2) return null;
+  final w = resolution[0];
+  final h = resolution[1];
+  if (w <= 0 || h <= 0) return null;
+  return [
+    (normalized[0] * w).round(),
+    (normalized[1] * h).round(),
+  ];
+}
