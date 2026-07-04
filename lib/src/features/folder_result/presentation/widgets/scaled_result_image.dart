@@ -6,6 +6,7 @@ import '../../../../core/utils/color_utils.dart';
 import '../../../../core/utils/image_fit_utils.dart';
 import '../../../../core/utils/screen_utils.dart';
 import '../../domain/entity/inspection_result.dart';
+import '../../domain/utils/damage_box_merger.dart';
 import '../models/mask_tap_result.dart';
 import 'add_damage_tap_button.dart';
 import 'mask_hit_tester.dart';
@@ -13,8 +14,6 @@ import 'mask_hit_tester.dart';
 /// Opacity cố định cho mask overlay bộ phận xe.
 const double _partMaskOpacity = 0.3;
 
-/// Ảnh kết quả: contain (không méo) + pinch zoom qua [InteractiveViewer].
-/// Tap vào mask bộ phận (`isPart == true`) → callback [onMaskTap] kèm tọa độ
 
 class ScaledResultImage extends StatefulWidget {
   const ScaledResultImage({
@@ -342,17 +341,17 @@ class _ScaledResultImageState extends State<ScaledResultImage> {
       );
     }
 
-    for (final mask in damageMasks) {
-      if (mask.boxes == null || mask.boxes!.length < 4) continue;
-      final rect = maskDisplayRect(mask.boxes!, imWidth, imHeight);
-      final color = hexToColor(mask.vehicleColor);
+    final mergedDamages = DamageBoxMerger.merge(damageMasks.toList());
+    for (final damage in mergedDamages) {
+      final rect = maskDisplayRect(damage.boxes, imWidth, imHeight);
+      final color = hexToColor(damage.color);
       if (color == Colors.transparent) continue;
 
       widgets.add(
         Positioned.fromRect(
           rect: rect,
           child: _DamageBoundingBox(
-            label: mask.vehiclePartName ?? '',
+            label: damage.label,
             color: color,
           ),
         ),

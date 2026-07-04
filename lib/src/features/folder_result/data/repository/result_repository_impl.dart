@@ -105,6 +105,7 @@ class ResultRepositoryImpl implements ResultRepository {
           vehicleColor: d['damageColor'] as String?,
           scores: d['score'] as num?,
           isPart: false,
+          damageTypeSlug: d['damageKey'] as String?,
         ));
       }
     }
