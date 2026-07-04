@@ -200,6 +200,7 @@ class PartMask {
     this.vehicleColor,
     this.scores,
     this.isPart,
+    this.damageTypeSlug,
   });
 
   final String? maskUrl;
@@ -210,6 +211,11 @@ class PartMask {
   final num? scores;
   final bool? isPart;
 
+  /// Slug loại hư hỏng (vd `scratch`, `dent`, `crack`...), `null` với mask
+  /// bộ phận xe (`isPart == true`). Dùng để group/merge bbox và chọn màu
+  /// theo priority — xem [DamageBoxMerger].
+  final String? damageTypeSlug;
+
   Map<String, dynamic> toJson() {
     return {
       'maskUrl': maskUrl,
@@ -219,6 +225,7 @@ class PartMask {
       'vehicleColor': vehicleColor,
       'scores': scores,
       'isPart': isPart,
+      'damageTypeSlug': damageTypeSlug,
     };
   }
 }
