@@ -38,8 +38,8 @@ enum InspectionPhase {
 
   /// Sau khi chụp ảnh tổng quan: nhắc "Di chuyển camera đến gần vùng có tổn
   /// thất để chụp ảnh chi tiết". Trong 3 s: phát hiện tổn thất → quay lại
-  /// detectionReady (detail); hết 3 s không thấy → tự động chụp 1 ảnh chi tiết,
-  /// chờ tiếp 3 s (thấy → detectionReady; vẫn không → continueOrChange).
+  /// detectionReady (detail); cứ hết 3 s không thấy → tự động chụp ngầm 1 ảnh
+  /// chi tiết rồi tiếp tục chờ ở detailGuide.
   detailGuide,
 
   /// Hiển thị message "Tiếp tục di chuyển camera…" trong 5 s rồi quay lại
@@ -53,6 +53,10 @@ const _licensePlateClass = 'Biển số xe';
 /// Giữ message holdStill tối thiểu khoảng này, tránh OCR đọc nhanh khiến message
 /// flash qua quá nhanh user không kịp thấy.
 const _holdStillMinDuration = Duration(seconds: 3);
+
+/// Giữ message yêu cầu căn biển rõ tối thiểu khoảng này trước khi cho phép
+/// auto-capture lại, để user kịp đọc và điều chỉnh camera.
+const _plateClearPromptMinDuration = Duration(seconds: 3);
 
 /// Cấu hình mỗi góc: (tên ba đờ sốc cần thấy, message điều hướng tới góc đó).
 const _segmentConfigs = {
@@ -153,6 +157,10 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// tiếp không ghi đè message về holdStill.
   bool _platePromptShown = false;
 
+  /// Mốc bắt đầu hiển thị nhắc "di chuyển cho biển rõ". Dùng để giữ warning tối
+  /// thiểu 3s trước khi auto-capture lại nếu OCR đọc được biển ngay sau đó.
+  DateTime? _platePromptShownAt;
+
   /// Mốc thời điểm bắt đầu hiển thị "giữ yên" (đã căn đủ bộ phận). Dùng để giữ
   /// message holdStill tối thiểu 3s, tránh OCR đọc nhanh khiến message flash qua
   /// quá nhanh user không kịp thấy.
@@ -182,10 +190,6 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// True khi detectionReady đến từ pha detailGuide (đang chờ xác nhận ảnh chi
   /// tiết) — phân biệt với ảnh tổng quan để biết bước kế tiếp sau khi chụp.
   bool _inDetailStage = false;
-
-  /// Đã tự động chụp 1 ảnh chi tiết trong pha detailGuide hiện tại hay chưa
-  /// (để không tự động chụp lặp lại; lần hết giờ thứ 2 sẽ chuyển sang góc khác).
-  bool _detailAutoCaptured = false;
 
   /// Active của model gating đã gửi xuống native (null = chưa gửi lần nào).
   bool? _sentInspectionActive;

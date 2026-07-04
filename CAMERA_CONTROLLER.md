@@ -61,8 +61,7 @@ flowchart TD
     F -->|"Chụp ngầm, vẫn giữ D"| D
     H -->|"Nhận diện được tổn thất"| J
     H -->|"Không Nhận diện được tổn thất sau 3s"| I
-    I -->|"Nhận diện được tổn thất"| J
-    I -->|"sau 3s vẫn k nhận diện được tổn thất"| N
+    I -->|"Chụp ngầm, vẫn giữ H"| H
     J -->|"Bấm xác nhận"| K
     J -->|"Không bấm gì sau mỗi 5s"| L
     J -->|"Bấm 'Thiếu tổn thất'"| M
@@ -71,9 +70,10 @@ flowchart TD
     N --> C
 ```
 
-> 2 sơ đồ trên là **bản thiết kế gốc**. Một vài chi tiết được nói rõ hơn / khác
-> với code hiện tại: OCR biển số chạy **on-device** (không phải "call API");
-> delay giữ yên hiện là **3s** (không phải 2s). Phần dưới mô tả đúng theo code.
+> 2 sơ đồ trên đang phản ánh flow theo feedback mới của khách. Một vài chi tiết
+> được nói rõ hơn / khác với bản vẽ ban đầu: OCR biển số chạy **on-device**
+> (không phải "call API"); delay giữ yên hiện là **3s** (không phải 2s).
+> Phần dưới mô tả đúng theo code.
 
 ---
 
@@ -82,7 +82,7 @@ flowchart TD
 ```mermaid
 flowchart TD
     A["GIAI ĐOẠN 1: CHỤP ẢNH TOÀN CẢNH (panorama)<br/>inspectionPhase == null → carDamage OFF, OCR ON<br/>Mục tiêu: canh đủ bộ phận + đọc được biển số → tự chụp"]
-    B["GIAI ĐOẠN 2: SOI TỔN THẤT (inspection)<br/>inspectionPhase != null → carDamage ON, OCR OFF<br/>panoramicGuide → scanning → detectionReady → capturing → detailGuide → continueOrChange"]
+    B["GIAI ĐOẠN 2: SOI TỔN THẤT (inspection)<br/>inspectionPhase != null → carDamage ON, OCR OFF<br/>panoramicGuide → scanning → detectionReady → capturing → detailGuide"]
     A -->|"chụp toàn cảnh xong"| B
     B -->|"classifier nhận diện góc khác<br/>→ _autoSwitchToDetectedSegment()"| A
 ```
@@ -130,10 +130,10 @@ flowchart TD
     Q2 -->|chưa| M2["msg: moveBackGuide (info)<br/>'Lùi camera ra xa…'"]
     Q2 -->|"có (allPresent)"| H["set _holdStillShownAt (lần đầu)<br/>đo tối thiểu 3s"]
 
-    H --> Q3{"readable && đã giữ ≥3s?"}
+    H --> Q3{"readable && đã giữ ≥3s<br/>&& prompt rõ biển đã hiện đủ 3s?"}
     Q3 -->|có| CAP["★ _triggerAutoCapture()"]
     Q3 -->|không| Q4{"_platePromptShown<br/>(đã quá 5s)?"}
-    Q4 -->|có| M3["msg: movePlateClearGuide (warning)<br/>'Di chuyển để biển rõ nét…'"]
+    Q4 -->|có| M3["msg: movePlateClearGuide (warning)<br/>'Di chuyển để biển rõ nét…'<br/>giữ tối thiểu 3s"]
     Q4 -->|không| M4["msg: holdStillGuide (loading)<br/>'Giữ yên… đang nhận diện biển số'<br/>+ _ensurePlateReadTimer (5s)"]
 ```
 
@@ -174,9 +174,8 @@ stateDiagram-v2
     detectionReady --> continueOrChange: Thieu ton that (rejectDamage)
     capturingDamage --> detailGuide: vua chup anh tong quan
     capturingDamage --> continueOrChange: vua chup anh chi tiet
-    detailGuide --> detectionReady: co ton that (trong 3s)
-    detailGuide --> capturingDamage: het 3s, tu chup chi tiet
-    detailGuide --> continueOrChange: da auto-chup & van trong
+    detailGuide --> detectionReady: co ton that (tai moc 3s)
+    detailGuide --> detailGuide: het 3s khong detection -> chup ngam
     continueOrChange --> detectionReady: co detection moi
     continueOrChange --> rgoc: classifier detect goc khac
     continueOrChange --> scanning: sau 5s
@@ -220,7 +219,7 @@ flowchart TD
 | `damageDetectedGuide` | info | detectionReady |
 | `moveCameraToMissing` | info | Bấm "Thiếu tổn thất" |
 | `detailPhotoGuide` | info | detailGuide |
-| `continueToNextDamage` | info | Sau khi chụp chi tiết / auto-capture trống |
+| `continueToNextDamage` | info | Sau khi user xác nhận ảnh chi tiết |
 | `noDamageDetectedGuide` | warning | 10s không thấy tổn thất (chỉ cảnh báo, không tự rời góc) |
 | `null` | — | scanning, hoặc rời góc (4-góc TẮT / đã đủ góc) |
 
@@ -234,7 +233,7 @@ flowchart TD
 | Thủ công (nút shutter) | `capturePhoto(immediate:true)` | ✅ |
 | Xác nhận tổn thất (bấm tay) | `capturePhoto(immediate:true, flashTick:true)` | ✅ |
 | Auto-chụp ngầm mỗi 5s khi đang xác nhận tổn thất | `capturePhoto(immediate:true, flashTick:false)` | ❌ (cố ý) |
-| Auto-chụp ảnh chi tiết | `capturePhoto(flashTick:false)` | ❌ (cố ý) |
+| Auto-chụp ảnh chi tiết mỗi 3s khi detailGuide không có detection | `capturePhoto(immediate:true, flashTick:false)` | ❌ (cố ý) |
 
 > Blink được vẽ **ngay trước** lệnh native capture (`notifyListeners()` sau khi
 > tăng `_captureFlashTick`) để đồng bộ đúng khoảnh khắc chụp.
@@ -243,8 +242,8 @@ flowchart TD
 
 ## Ghi chú gating OCR (canh khung biển số)
 
-- Ảnh toàn cảnh chỉ được crop theo **trục dọc** preview (`cropTop`/`cropBottom`
-  = dải giữa 2 thanh trên/dưới), tương ứng trục X của buffer landscape.
-- OCR (native) chỉ coi là "đọc được biển" khi box biển nằm trọn trong dải
-  viewport (trục X) **và** cách mép trái/phải màn hình (trục Y) ≥ `ocrEdgeMargin`
-  (0.05) — tránh chụp khi xe canh lệch sát mép.
+- Ảnh toàn cảnh được crop theo viewport preview dưới aspect-fill. Native tính lại
+  crop rect normalized chính xác như `capturePhoto`, bao gồm offset do cover/crop.
+- OCR chỉ coi là "đọc được biển" khi toàn bộ bbox biển số nằm trong crop rect đó
+  sau khi inset margin an toàn ở cả 2 trục. Nhờ vậy biển số đọc được nhưng bị lẹm
+  ở mép ảnh crop sẽ không được dùng để xác nhận ảnh toàn cảnh hợp lệ.

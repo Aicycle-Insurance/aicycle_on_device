@@ -15,7 +15,6 @@ mixin _InspectionMixin on _CameraControllerBase {
     _detailTimer = null;
     // Quay lại quét ảnh tổng quan → reset trạng thái chụp ảnh chi tiết.
     _inDetailStage = false;
-    _detailAutoCaptured = false;
     // Vào pha quét thiệt hại → bật carDamage (carCorner/carPart vẫn bật).
     _setInspectionPhase(InspectionPhase.scanning);
     _setMessage(null);
@@ -131,7 +130,6 @@ mixin _InspectionMixin on _CameraControllerBase {
   void _enterDetailGuide() {
     _cancelNoDetectionWarningTimer();
     _inDetailStage = true;
-    _detailAutoCaptured = false;
     _setInspectionPhase(InspectionPhase.detailGuide);
     _setMessage(CameraMessage(
       message: StringSheet.detailPhotoGuide,
@@ -147,8 +145,7 @@ mixin _InspectionMixin on _CameraControllerBase {
 
   /// Hết 3 s ở pha detailGuide:
   ///   - Nếu đang có tổn thất trong khung → mở xác nhận ảnh chi tiết.
-  ///   - Chưa tự động chụp lần nào → tự động chụp 1 ảnh chi tiết rồi chờ thêm 3 s.
-  ///   - Đã tự động chụp mà vẫn không thấy tổn thất → chuyển sang vùng khác.
+  ///   - Nếu chưa thấy tổn thất → chụp ngầm 1 ảnh chi tiết rồi tiếp tục chờ.
   Future<void> _onDetailTimeout() async {
     if (_inspectionPhase != InspectionPhase.detailGuide) return;
 
@@ -158,15 +155,10 @@ mixin _InspectionMixin on _CameraControllerBase {
       return;
     }
 
-    if (!_detailAutoCaptured) {
-      _detailAutoCaptured = true;
-      await capturePhoto(immediate: true, flashTick: false);
-      // Trong lúc chụp, frame mới có thể đã đổi pha (vd phát hiện tổn thất).
-      if (_inspectionPhase != InspectionPhase.detailGuide) return;
-      _startDetailTimer();
-    } else {
-      await _showMessageThenScan(StringSheet.continueToNextDamage);
-    }
+    await capturePhoto(immediate: true, flashTick: false);
+    // Trong lúc chụp, frame mới có thể đã đổi pha (vd phát hiện tổn thất).
+    if (_inspectionPhase != InspectionPhase.detailGuide) return;
+    _startDetailTimer();
   }
 
   /// Hiển thị [message] trong 5 s rồi quay lại scanning. Nếu trong lúc message
@@ -200,7 +192,6 @@ mixin _InspectionMixin on _CameraControllerBase {
     _detailTimer?.cancel();
     _detailTimer = null;
     _inDetailStage = false;
-    _detailAutoCaptured = false;
     final justCompleted = _activeSegmentIndex;
     if (justCompleted != null) {
       _completedSegments.add(justCompleted);
@@ -251,7 +242,6 @@ mixin _InspectionMixin on _CameraControllerBase {
     _detailTimer?.cancel();
     _detailTimer = null;
     _inDetailStage = false;
-    _detailAutoCaptured = false;
 
     final previousSegment = _activeSegmentIndex;
     if (previousSegment != null) {

@@ -267,16 +267,23 @@ public class YOLOMultiTaskView: UIView {
     guard let ocr = ocrModel, ocrEnabled, !ocrBusy, let buffer = thirdInFlightBuffer else { return }
     thirdInFlightBuffer = nil
 
-    // Only the highest-confidence plate box that sits FULLY inside the visible
-    // viewport (so the saved viewport-cropped photo will contain the whole plate).
-    let lo = ocrViewportTop + Self.ocrViewportMargin
-    let hi = ocrViewportBottom - Self.ocrViewportMargin
-    let edge = Self.ocrEdgeMargin
+    // Only the highest-confidence plate box that sits FULLY inside the exact
+    // aspect-fill crop rect used by capturePhoto. Comparing directly with
+    // ocrViewportTop/bottom is not enough because capturePhoto applies
+    // aspect-fill offsets before cropping.
+    let cropRect = ocrCropRectInFrame(
+      frameSize: result.orig_shape,
+      previewSize: previewLayer?.bounds.size ?? bounds.size)
+    let loX = cropRect.minX + Self.ocrViewportMargin
+    let hiX = cropRect.maxX - Self.ocrViewportMargin
+    let loY = cropRect.minY + Self.ocrEdgeMargin
+    let hiY = cropRect.maxY - Self.ocrEdgeMargin
+    guard loX < hiX, loY < hiY else { return }
     let plateBox = result.boxes
       .filter {
         $0.cls == Self.licensePlateClass
-          && $0.xywhn.minX >= lo && $0.xywhn.maxX <= hi
-          && $0.xywhn.minY >= edge && $0.xywhn.maxY <= 1 - edge
+          && $0.xywhn.minX >= loX && $0.xywhn.maxX <= hiX
+          && $0.xywhn.minY >= loY && $0.xywhn.maxY <= hiY
       }
       .max { $0.conf < $1.conf }
     guard let box = plateBox else { return }
@@ -296,6 +303,54 @@ public class YOLOMultiTaskView: UIView {
       DispatchQueue.main.async { [weak self] in self?.onMultiTaskStream?(event) }
       self.cameraQueue.async { [weak self] in self?.ocrBusy = false }
     }
+  }
+
+  private func ocrCropRectInFrame(frameSize: CGSize, previewSize: CGSize) -> CGRect {
+    let wp = frameSize.width
+    let hp = frameSize.height
+    let wv = previewSize.width
+    let hv = previewSize.height
+    guard wp > 0, hp > 0, wv > 0, hv > 0 else {
+      return CGRect(x: 0, y: 0, width: 1, height: 1)
+    }
+
+    let left: CGFloat
+    let top: CGFloat
+    let right: CGFloat
+    let bottom: CGFloat
+    if (wp >= hp) != (wv >= hv) {
+      // Same mapping as capturePhoto: preview vertical band maps to frame/photo
+      // horizontal coordinates after the 90° transpose.
+      let s = max(wv / hp, hv / wp)
+      let offU = (hp * s - wv) / 2
+      let offV = (wp * s - hv) / 2
+      let u0 = offU / s
+      let u1 = (wv + offU) / s
+      let v0 = (ocrViewportTop * hv + offV) / s
+      let v1 = (ocrViewportBottom * hv + offV) / s
+      left = v0
+      right = v1
+      top = hp - u1
+      bottom = hp - u0
+    } else {
+      let s = max(wv / wp, hv / hp)
+      let offX = (wp * s - wv) / 2
+      let offY = (hp * s - hv) / 2
+      left = offX / s
+      right = (wv + offX) / s
+      top = (ocrViewportTop * hv + offY) / s
+      bottom = (ocrViewportBottom * hv + offY) / s
+    }
+
+    let l = min(max(left / wp, 0), 1)
+    let r = min(max(right / wp, 0), 1)
+    let t = min(max(top / hp, 0), 1)
+    let b = min(max(bottom / hp, 0), 1)
+    return CGRect(
+      x: min(l, r),
+      y: min(t, b),
+      width: abs(r - l),
+      height: abs(b - t))
   }
 
   /// Updates the visible viewport used to gate OCR (preview-space vertical band).
