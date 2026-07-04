@@ -18,6 +18,7 @@ import 'widgets/camera_corner_bracket.dart';
 import 'widgets/camera_guide_sheet.dart';
 import 'widgets/camera_top_bar.dart';
 import 'widgets/car_progress_dialog.dart';
+import 'widgets/dev_gallery_pick_button.dart'; // DEV ONLY
 import 'widgets/tool_tip.dart';
 import 'widgets/view_result_button.dart';
 
@@ -308,6 +309,9 @@ class _CameraScreenState extends State<CameraScreen> {
                               ),
                             ),
                           ),
+
+                        // DEV ONLY — chọn ảnh từ máy thay vì chụp.
+                        DevGalleryPickButton(controller: _cameraController),
 
                         // Top bar
                         CameraTopBar(

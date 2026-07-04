@@ -68,6 +68,14 @@ mixin _CaptureMixin on _CameraControllerBase {
   Future<void> manualCapture() =>
       capturePhoto(immediate: true, segment: _activeSegmentIndex ?? 0);
 
+  /// DEV ONLY — thêm ảnh từ gallery vào góc [segment], hành vi giống sau khi chụp.
+  void addDevPhoto({required int segment, required Uint8List bytes}) {
+    _capturedPhotos.putIfAbsent(segment, () => []).add(bytes);
+    PhotoSessionCache.instance.savePhoto(_sessionId, segment, bytes);
+    if (!_require4Angles) _completedSegments.add(segment);
+    notifyListeners();
+  }
+
   /// Called by ResultController after an angle's photos are successfully uploaded.
   /// Strips photos from memory and marks the angle completed so the progress
   /// ring stays green when the user backs out from the result screen.
