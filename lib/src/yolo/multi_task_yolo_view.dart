@@ -346,7 +346,9 @@ class _MultiTaskYOLOViewState extends State<MultiTaskYOLOView> {
     _eventSubscription?.cancel();
     _eventSubscription = null;
     widget.controller?._detach();
-    _methodChannel?.invokeMethod('stop');
+    // Native PlatformView.dispose owns resource release. Sending another stop
+    // from here races the route/widget transition and can stall the first upload
+    // frame when heavy camera/model cleanup starts immediately.
     super.dispose();
   }
 }

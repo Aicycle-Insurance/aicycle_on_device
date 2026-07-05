@@ -198,10 +198,10 @@ class _CameraScreenState extends State<CameraScreen> {
     );
   }
 
-  /// "Xem kết quả": dừng YOLO trước (tránh đơ trong dispose), snapshot ảnh,
-  /// rồi báo bootstrap chuyển sang pha upload.
+  /// "Xem kết quả": snapshot ảnh rồi báo bootstrap chuyển sang pha upload.
+  /// Bootstrap sẽ giữ camera phía sau thêm một nhịp ngắn để UploadView render
+  /// trước, sau đó mới tháo platform view và cleanup camera/model native.
   void _goToResult() {
-    _cameraController.stopCamera();
     final photos = {
       for (final e in _cameraController.capturedPhotos.entries)
         e.key: List<Uint8List>.from(e.value),

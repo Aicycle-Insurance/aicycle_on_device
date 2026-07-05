@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -51,11 +52,16 @@ class AICycleOnDeviceCamera extends StatefulWidget {
 }
 
 class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
-  late final CameraModelController _modelController;
+  static const _resultTransitionHold = Duration(milliseconds: 350);
 
-  /// Khi != null: đang ở pha upload (đã bấm "Xem kết quả"). CameraScreen bị gỡ
-  /// khỏi cây widget → camera dispose (idle/giải phóng), bootstrap hiện UploadView.
+  late final CameraModelController _modelController;
+  Timer? _releaseCameraAfterTransition;
+
+  /// Khi != null: đang ở pha upload (đã bấm "Xem kết quả"). Bootstrap render
+  /// UploadView ngay, rồi gỡ CameraScreen sau một nhịp ngắn để tránh cleanup
+  /// native chặn frame chuyển màn.
   Map<int, List<Uint8List>>? _uploadPhotos;
+  bool _keepCameraDuringResultTransition = false;
 
   @override
   void initState() {
@@ -80,8 +86,23 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
 
   @override
   void dispose() {
+    _releaseCameraAfterTransition?.cancel();
     _modelController.dispose();
     super.dispose();
+  }
+
+  void _openUploadView(Map<int, List<Uint8List>> photos) {
+    if (_uploadPhotos != null) return;
+    setState(() {
+      _uploadPhotos = photos;
+      _keepCameraDuringResultTransition = true;
+    });
+
+    _releaseCameraAfterTransition?.cancel();
+    _releaseCameraAfterTransition = Timer(_resultTransitionHold, () {
+      if (!mounted || _uploadPhotos == null) return;
+      setState(() => _keepCameraDuringResultTransition = false);
+    });
   }
 
   Widget _buildCamera() => CameraScreen(
@@ -94,9 +115,9 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
         licensePlateModelPath:
             _modelController.modelPathOf(AiModelType.licensePlate),
         onComplete: widget.onComplete,
-        // Bấm "Xem kết quả" → chuyển sang pha upload: CameraScreen bị gỡ khỏi
-        // cây (camera idle/giải phóng), bootstrap render UploadView.
-        onViewResult: (photos) => setState(() => _uploadPhotos = photos),
+        // Bấm "Xem kết quả" → chuyển sang pha upload: bootstrap render
+        // UploadView ngay, rồi mới gỡ camera sau một nhịp ngắn.
+        onViewResult: _openUploadView,
       );
 
   @override
@@ -116,24 +137,38 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
         }
         if (_modelController.isPreparing) return _buildPreparing();
         if (_modelController.isReady) {
-          // Đang upload → hiện UploadView (camera đã được gỡ → idle).
-          if (_uploadPhotos != null) {
-            return UploadView(
-              sessionId: widget.aiCycleConfig.generalConfig.documentId,
-              capturedPhotos: _uploadPhotos!,
-              onComplete: widget.onComplete,
-              onImageUploaded: widget.onImageUploaded,
-              onError: widget.onError,
-            );
-          }
-          // Model tải xong → CameraScreen. ResultView đã bỏ khỏi flow.
-          return _buildCamera();
+          return _buildReadyContent();
         }
         return _buildError(
           _modelController.modelError ?? StringSheet.requirementHint,
           onRetry: _modelController.retryModels,
         );
       },
+    );
+  }
+
+  Widget _buildReadyContent() {
+    final photos = _uploadPhotos;
+
+    // Render UploadView trước, giữ camera phía sau thêm một nhịp ngắn rồi mới
+    // tháo platform view. Cleanup camera/model native có thể nặng; nếu tháo ngay
+    // trong cùng frame với nút "Xem kết quả" thì user thấy màn camera khựng.
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (photos == null || _keepCameraDuringResultTransition)
+          _buildCamera()
+        else
+          const SizedBox.shrink(),
+        if (photos != null)
+          UploadView(
+            sessionId: widget.aiCycleConfig.generalConfig.documentId,
+            capturedPhotos: photos,
+            onComplete: widget.onComplete,
+            onImageUploaded: widget.onImageUploaded,
+            onError: widget.onError,
+          ),
+      ],
     );
   }
 
