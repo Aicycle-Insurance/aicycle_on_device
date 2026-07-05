@@ -5,6 +5,7 @@
 //  run concurrently via Apple's CoreML async scheduling.
 
 import AVFoundation
+import CoreML
 import CoreVideo
 import UIKit
 import UltralyticsYOLO
@@ -544,7 +545,7 @@ public class YOLOMultiTaskView: UIView {
       let u = URL(fileURLWithPath: nameOrPath)
       var isDir: ObjCBool = false
       if fm.fileExists(atPath: u.path, isDirectory: &isDir) {
-        return u
+        return compiledModelURL(for: u) ?? u
       }
     }
 
@@ -571,6 +572,48 @@ public class YOLOMultiTaskView: UIView {
     if let u = Bundle.main.url(forResource: nameOrPath, withExtension: "mlmodelc") { return u }
     if let u = Bundle.main.url(forResource: nameOrPath, withExtension: "mlpackage") { return u }
     return nil
+  }
+
+  private func compiledModelURL(for sourceURL: URL) -> URL? {
+    let fm = FileManager.default
+    let compiledURL = sourceURL.deletingPathExtension().appendingPathExtension("mlmodelc")
+
+    if fm.fileExists(atPath: compiledURL.path) {
+      do {
+        let sourceAttrs = try fm.attributesOfItem(atPath: sourceURL.path)
+        let compiledAttrs = try fm.attributesOfItem(atPath: compiledURL.path)
+        let sourceDate = sourceAttrs[.modificationDate] as? Date ?? .distantPast
+        let compiledDate = compiledAttrs[.modificationDate] as? Date ?? .distantPast
+        if compiledDate >= sourceDate {
+          return compiledURL
+        }
+        try fm.removeItem(at: compiledURL)
+      } catch {
+        NSLog(
+          "YOLOMultiTaskView: ⚠️ failed to inspect cached compiled model %@: %@",
+          compiledURL.path,
+          error.localizedDescription
+        )
+        try? fm.removeItem(at: compiledURL)
+      }
+    }
+
+    do {
+      let temporaryCompiledURL = try MLModel.compileModel(at: sourceURL)
+      if fm.fileExists(atPath: compiledURL.path) {
+        try fm.removeItem(at: compiledURL)
+      }
+      try fm.copyItem(at: temporaryCompiledURL, to: compiledURL)
+      NSLog("YOLOMultiTaskView: ✅ compiled mlmodel: %@", compiledURL.path)
+      return compiledURL
+    } catch {
+      NSLog(
+        "YOLOMultiTaskView: ⚠️ failed to compile mlmodel %@: %@",
+        sourceURL.path,
+        error.localizedDescription
+      )
+      return nil
+    }
   }
 
   // MARK: - Camera

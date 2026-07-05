@@ -1,5 +1,9 @@
 ## 0.1.2
 
+* Fix bugs and update auto capture flow
+
+## 0.1.2
+
 * Update OCR viewport margins for improved license plate detection accuracy
 
 ## 0.1.1

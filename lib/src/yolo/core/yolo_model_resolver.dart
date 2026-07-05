@@ -184,11 +184,13 @@ class YOLOModelResolver {
   }
 
   static Future<String> _resolveAbsoluteIosPath(String source) async {
-    if (source.endsWith('.mlpackage.zip')) {
-      final targetPath = source.replaceFirst('.mlpackage.zip', '.mlpackage');
-      // Already extracted on a previous call
+    if (source.endsWith('.zip')) {
+      final targetPath = source.endsWith('.mlpackage.zip')
+          ? source.replaceFirst('.mlpackage.zip', '.mlpackage')
+          : '${source.replaceFirst(RegExp(r'\.zip$'), '')}.mlpackage';
       if (await _hasValidMlPackage(Directory(targetPath))) return targetPath;
-      if (FileSystemEntity.typeSync(source) == FileSystemEntityType.file) {
+      if (FileSystemEntity.typeSync(source) == FileSystemEntityType.file &&
+          _looksLikeZipArchive(File(source))) {
         return _extractZipToMlPackage(File(source), targetPath);
       }
       return source;
