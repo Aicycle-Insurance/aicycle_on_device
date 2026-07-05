@@ -538,13 +538,20 @@ public class YOLOMultiTaskView: UIView {
     let lc = nameOrPath.lowercased()
     let fm = FileManager.default
 
-    // Direct path: .mlpackage (must be a directory), .mlmodelc, .mlmodel
-    if lc.hasSuffix(".mlmodelc") || lc.hasSuffix(".mlpackage") || lc.hasSuffix(".mlmodel") {
+    // Direct path: .mlmodel can be a file. .mlpackage/.mlmodelc are bundle
+    // directories; zip archives should already have been extracted by Dart.
+    if lc.hasSuffix(".mlmodel") {
       let u = URL(fileURLWithPath: nameOrPath)
       var isDir: ObjCBool = false
       if fm.fileExists(atPath: u.path, isDirectory: &isDir) {
-        // Only return if it's a directory (proper bundle) — files are unextracted zips
-        // handled by the Dart layer; if they reach here, skip them.
+        return u
+      }
+    }
+
+    if lc.hasSuffix(".mlmodelc") || lc.hasSuffix(".mlpackage") {
+      let u = URL(fileURLWithPath: nameOrPath)
+      var isDir: ObjCBool = false
+      if fm.fileExists(atPath: u.path, isDirectory: &isDir) {
         if isDir.boolValue { return u }
         NSLog("YOLOMultiTaskView: ⚠️ path is a file (unextracted zip?): %@", nameOrPath)
         return nil
