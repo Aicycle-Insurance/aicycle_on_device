@@ -67,6 +67,7 @@ mixin _StreamMixin on _CameraControllerBase {
   }
 
   void _activateDetectedSegment(int segment) {
+    _resetPanoramicFramingState(clearCarParts: true);
     _activeSegmentIndex = segment;
     // Vào thẳng scanning (bỏ qua chụp toàn cảnh) khi:
     //  - góc này đã có ảnh toàn cảnh rồi, HOẶC
@@ -86,9 +87,13 @@ mixin _StreamMixin on _CameraControllerBase {
   /// làm ảnh toàn cảnh; cập nhật cờ rồi re-evaluate để có thể kích hoạt chụp.
   void _handleOcr(Map<String, dynamic> data) {
     final readable = data['readable'] == true;
-    if (readable != _latestPlateReadable) {
+    if (readable) {
       _latestPlateReadable = readable;
-      if (readable) updateMessage(); // tự notify khi message đổi
+      _latestPlateReadableAt = DateTime.now();
+      updateMessage(); // tự notify khi message đổi / tự chụp nếu đủ điều kiện
+    } else if (_latestPlateReadable) {
+      _clearPlateRead();
+      updateMessage();
     }
   }
 
@@ -103,7 +108,7 @@ mixin _StreamMixin on _CameraControllerBase {
     _latestCarPartDetections = visible;
     // Biển không còn trong khung → cờ "đọc được" cũ không còn hiệu lực.
     if (!_latestCarPartClasses.contains(_licensePlateClass)) {
-      _latestPlateReadable = false;
+      _clearPlateRead();
     }
     updateMessage(); // tự notify khi message đổi
     // Bỏ qua redraw nếu không có nhãn bộ phận nào để vẽ (trước & sau đều rỗng).

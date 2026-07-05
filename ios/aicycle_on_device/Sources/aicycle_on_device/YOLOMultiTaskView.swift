@@ -99,12 +99,12 @@ public class YOLOMultiTaskView: UIView {
   /// Inset from the viewport band edge (buffer X = preview-vertical). Kept large so
   /// a plate clipped near the top/bottom bar boundary (only half visible) is NOT
   /// accepted — the whole plate must sit clearly inside the frame, not just touch it.
-  private static let ocrViewportMargin: CGFloat = 0.08
+  private static let ocrViewportMargin: CGFloat = 0.1
   /// Inset on the PERPENDICULAR axis (preview-horizontal = buffer Y). The viewport
   /// band only gates the buffer X axis, leaving plates flush against the LEFT/RIGHT
   /// edge of the screen readable — which produced badly-framed / half-plate captures.
   /// Require the plate to sit well away from those edges too.
-  private static let ocrEdgeMargin: CGFloat = 0.08
+  private static let ocrEdgeMargin: CGFloat = 0.1
   /// Dedicated queue so OCR inference never blocks the camera/inference queues.
   private let ocrQueue = DispatchQueue(label: "yolo.infer.ocr", qos: .userInitiated)
   /// One-frame-deep back-pressure for OCR. Accessed only on cameraQueue.

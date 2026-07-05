@@ -54,6 +54,11 @@ const _licensePlateClass = 'Biển số xe';
 /// flash qua quá nhanh user không kịp thấy.
 const _holdStillMinDuration = Duration(seconds: 3);
 
+/// OCR đọc được biển số chỉ có hiệu lực rất ngắn. Nếu user lia máy làm biển
+/// lệch/lẹm sau frame OCR đó thì controller phải chờ OCR đọc lại ở frame mới,
+/// không dùng trạng thái cũ để auto-capture.
+const _plateReadFreshDuration = Duration(milliseconds: 700);
+
 /// Giữ message yêu cầu căn biển rõ tối thiểu khoảng này trước khi cho phép
 /// auto-capture lại, để user kịp đọc và điều chỉnh camera.
 const _plateClearPromptMinDuration = Duration(seconds: 3);
@@ -148,6 +153,10 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// OCR (native) đọc được biển số ở frame mới nhất hay chưa. Là tín hiệu canh
   /// khung: đọc được biển ⇒ khung đủ rõ/đủ gần để dùng làm ảnh toàn cảnh.
   bool _latestPlateReadable = false;
+
+  /// Thời điểm frame OCR mới nhất đọc được biển. Dùng để loại tín hiệu OCR cũ
+  /// khi camera đã dịch khỏi vị trí vừa đọc biển.
+  DateTime? _latestPlateReadableAt;
 
   /// Timer 5s: khi đã căn đủ bộ phận nhưng OCR chưa đọc được biển hợp lệ, hết
   /// 5s thì nhắc user di chuyển cho biển rõ nét.
@@ -250,6 +259,34 @@ abstract class _CameraControllerBase extends ChangeNotifier {
             d.normalizedBox.centerX >= _cropTop &&
             d.normalizedBox.centerX <= _cropBottom)
         .toList();
+  }
+
+  bool get _hasFreshPlateRead {
+    final readAt = _latestPlateReadableAt;
+    if (!_latestPlateReadable || readAt == null) return false;
+    if (DateTime.now().difference(readAt) <= _plateReadFreshDuration) {
+      return true;
+    }
+    _clearPlateRead();
+    return false;
+  }
+
+  void _clearPlateRead() {
+    _latestPlateReadable = false;
+    _latestPlateReadableAt = null;
+  }
+
+  void _resetPanoramicFramingState({bool clearCarParts = false}) {
+    _clearPlateRead();
+    _holdStillShownAt = null;
+    _plateReadTimer?.cancel();
+    _plateReadTimer = null;
+    _platePromptShown = false;
+    _platePromptShownAt = null;
+    if (clearCarParts) {
+      _latestCarPartClasses = {};
+      _latestCarPartDetections = [];
+    }
   }
 
   // ── Torch ─────────────────────────────────────────────────────────────────

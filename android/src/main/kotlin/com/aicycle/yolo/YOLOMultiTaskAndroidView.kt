@@ -49,14 +49,14 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
          * NOT accepted — the whole plate must sit clearly inside the frame, not just
          * touch it.
          */
-        private const val OCR_VIEWPORT_MARGIN = 0.08f
+        private const val OCR_VIEWPORT_MARGIN = 0.1f
         /**
          * Inset on the PERPENDICULAR axis (preview-horizontal = buffer Y). The
          * viewport band only gates the buffer X axis, leaving plates flush against the
          * LEFT/RIGHT edge of the screen readable — which produced badly-framed /
          * half-plate captures. Require the plate to sit well away from those edges too.
          */
-        private const val OCR_EDGE_MARGIN = 0.08f
+        private const val OCR_EDGE_MARGIN = 0.1f
         private const val REQUEST_CODE_PERMISSIONS = 1001
         private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
 

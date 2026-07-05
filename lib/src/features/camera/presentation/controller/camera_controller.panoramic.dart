@@ -32,6 +32,7 @@ mixin _PanoramicMixin on _CameraControllerBase {
     final hasPlate = classes.contains(licencePlate);
     final allPresent =
         hasPlate && classes.contains(door) && classes.contains(frontBumper);
+    final plateReadable = _hasFreshPlateRead;
     final now = DateTime.now();
     if (_platePromptShown) _platePromptShownAt ??= now;
     final platePromptVisibleLongEnough = !_platePromptShown ||
@@ -43,7 +44,7 @@ mixin _PanoramicMixin on _CameraControllerBase {
     // thái này (di chuyển làm mất bộ phận) → huỷ timer + reset cờ nhắc. Nếu
     // warning căn biển rõ vừa xuất hiện thì giữ tối thiểu 3s, kể cả khi OCR đã
     // đọc lại được biển.
-    if (!(allPresent && (!_latestPlateReadable || keepPlatePromptVisible))) {
+    if (!(allPresent && (!plateReadable || keepPlatePromptVisible))) {
       _cancelPlateReadTimer();
     }
     // Rời trạng thái căn đủ → reset mốc đếm thời gian giữ yên.
@@ -65,9 +66,7 @@ mixin _PanoramicMixin on _CameraControllerBase {
       // đọc được biển ngay — để user kịp thấy hướng dẫn.
       final heldLongEnough =
           now.difference(_holdStillShownAt!) >= _holdStillMinDuration;
-      if (_latestPlateReadable &&
-          heldLongEnough &&
-          platePromptVisibleLongEnough) {
+      if (plateReadable && heldLongEnough && platePromptVisibleLongEnough) {
         _triggerAutoCapture();
       } else if (_platePromptShown) {
         // Quá 5s vẫn chưa đọc được biển → giữ nhắc di chuyển cho biển rõ nét.
@@ -107,7 +106,7 @@ mixin _PanoramicMixin on _CameraControllerBase {
   Future<void> _triggerAutoCapture() async {
     // Cờ "đọc được biển" chỉ dùng cho 1 lần chụp toàn cảnh; reset để góc sau
     // phải đọc lại biển mới chụp.
-    _latestPlateReadable = false;
+    _clearPlateRead();
     _holdStillShownAt = null;
     _platePromptShownAt = null;
     _cancelPlateReadTimer();

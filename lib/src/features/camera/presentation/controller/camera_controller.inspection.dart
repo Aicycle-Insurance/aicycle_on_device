@@ -197,6 +197,7 @@ mixin _InspectionMixin on _CameraControllerBase {
       _completedSegments.add(justCompleted);
     }
     _classificationLocked = false;
+    _resetPanoramicFramingState(clearCarParts: true);
     // Quay lại chọn góc → tắt carDamage (carCorner/carPart vẫn bật).
     _setInspectionPhase(null);
 
@@ -251,6 +252,7 @@ mixin _InspectionMixin on _CameraControllerBase {
     _setInspectionPhase(null);
     _classificationLocked = false;
     _activeSegmentIndex = segment;
+    _resetPanoramicFramingState(clearCarParts: true);
 
     final skipPanoramic = _panoramicCapturedSegments.contains(segment) ||
         (!_require4Angles && _firstPanoramicCaptured);
