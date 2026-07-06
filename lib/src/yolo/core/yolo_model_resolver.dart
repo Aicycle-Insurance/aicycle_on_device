@@ -173,8 +173,9 @@ class YOLOModelResolver {
           : _copyFlutterAssetToDocuments(source);
     }
 
-    // Absolute path on iOS: handle zip archives stored with .mlpackage.zip,
-    // .mlpackage, or .mlmodel extensions that haven't been extracted yet.
+    // Absolute path on iOS: handle zip archives stored with .mlpackage.zip or
+    // CoreML-looking extensions. A real .mlmodel is a valid CoreML file and
+    // must be passed through, not extracted.
     if (_isIosLikePlatform) {
       return _resolveAbsoluteIosPath(source);
     }
@@ -183,31 +184,65 @@ class YOLOModelResolver {
   }
 
   static Future<String> _resolveAbsoluteIosPath(String source) async {
-    if (source.endsWith('.mlpackage.zip')) {
-      final targetPath = source.replaceFirst('.mlpackage.zip', '.mlpackage');
-      // Already extracted on a previous call
+    if (source.endsWith('.zip')) {
+      final targetPath = source.endsWith('.mlpackage.zip')
+          ? source.replaceFirst('.mlpackage.zip', '.mlpackage')
+          : '${source.replaceFirst(RegExp(r'\.zip$'), '')}.mlpackage';
       if (await _hasValidMlPackage(Directory(targetPath))) return targetPath;
-      if (FileSystemEntity.typeSync(source) == FileSystemEntityType.file) {
+      if (FileSystemEntity.typeSync(source) == FileSystemEntityType.file &&
+          _looksLikeZipArchive(File(source))) {
         return _extractZipToMlPackage(File(source), targetPath);
       }
       return source;
     }
 
-    if (source.endsWith('.mlpackage') || source.endsWith('.mlmodel')) {
+    if (source.endsWith('.mlpackage')) {
+      if (await _hasValidMlPackage(Directory(source))) return source;
+      final entityType = FileSystemEntity.typeSync(source);
+      if (entityType == FileSystemEntityType.file &&
+          _looksLikeZipArchive(File(source))) {
+        return _extractZipToMlPackage(File(source), source);
+      }
+      return source;
+    }
+
+    if (source.endsWith('.mlmodel')) {
       // File on disk may be a zip archive stored with a CoreML extension.
-      // Extract to .mlpackage directory (may change extension for .mlmodel).
-      final targetPath = source.endsWith('.mlpackage')
-          ? source
-          : '${source.replaceFirst(RegExp(r'\.[^/]+$'), '')}.mlpackage';
-      // Already extracted on a previous call (original zip was deleted after extraction).
+      // Only zip archives should be extracted. Plain .mlmodel files are valid
+      // CoreML model files and are compiled by native iOS code.
+      final targetPath =
+          '${source.replaceFirst(RegExp(r'\.[^/]+$'), '')}.mlpackage';
       if (await _hasValidMlPackage(Directory(targetPath))) return targetPath;
       final entityType = FileSystemEntity.typeSync(source);
-      if (entityType == FileSystemEntityType.file) {
+      if (entityType == FileSystemEntityType.file &&
+          _looksLikeZipArchive(File(source))) {
         return _extractZipToMlPackage(File(source), targetPath);
       }
     }
 
     return source;
+  }
+
+  static bool _looksLikeZipArchive(File file) {
+    RandomAccessFile? raf;
+    try {
+      if (!file.existsSync() || file.lengthSync() < 4) return false;
+      raf = file.openSync();
+      final signature = raf.readSync(4);
+      return signature.length == 4 &&
+          signature[0] == 0x50 &&
+          signature[1] == 0x4B &&
+          (signature[2] == 0x03 ||
+              signature[2] == 0x05 ||
+              signature[2] == 0x07) &&
+          (signature[3] == 0x04 ||
+              signature[3] == 0x06 ||
+              signature[3] == 0x08);
+    } catch (_) {
+      return false;
+    } finally {
+      raf?.closeSync();
+    }
   }
 
   static Future<String> _extractZipToMlPackage(

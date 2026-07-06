@@ -47,38 +47,53 @@ mixin _StreamMixin on _CameraControllerBase {
   void _handleClassify(Map<String, dynamic> data) {
     final output = ClassifyOutput.fromJson(data);
     final segment = CarAngle.segmentOf(output.classification.top1);
+    if (segment == null) return;
     // Luôn highlight góc đang nhận diện được, kể cả khi flow đã khoá.
-    final highlightChanged =
-        segment != null && segment != _detectedSegmentIndex;
+    final highlightChanged = segment != _detectedSegmentIndex;
     if (highlightChanged) _detectedSegmentIndex = segment;
+
+    if (_classificationLocked && segment != _activeSegmentIndex) {
+      _autoSwitchToDetectedSegment(segment);
+      if (highlightChanged) notifyListeners();
+      return;
+    }
 
     // Cập nhật luồng (chỉ khi chưa khoá và góc đổi). Các hàm bên trong
     // (startDamageScanning/updateMessage) tự notify khi message đổi.
     if (!_classificationLocked && segment != _activeSegmentIndex) {
-      _activeSegmentIndex = segment;
-      // Vào thẳng scanning (bỏ qua chụp toàn cảnh) khi:
-      //  - góc này đã có ảnh toàn cảnh rồi, HOẶC
-      //  - config 4 góc TẮT và đã chụp xong ảnh toàn cảnh đầu tiên (các góc
-      //    sau chỉ ghi nhận tổn thất, không yêu cầu chụp toàn cảnh).
-      final skipPanoramic = _panoramicCapturedSegments.contains(segment) ||
-          (!_require4Angles && _firstPanoramicCaptured);
-      if (skipPanoramic) {
-        _classificationLocked = true;
-        startDamageScanning();
-      } else {
-        updateMessage();
-      }
+      _activateDetectedSegment(segment);
     }
     if (highlightChanged) notifyListeners();
+  }
+
+  void _activateDetectedSegment(int segment) {
+    _resetPanoramicFramingState(clearCarParts: true);
+    _activeSegmentIndex = segment;
+    // Vào thẳng scanning (bỏ qua chụp toàn cảnh) khi:
+    //  - góc này đã có ảnh toàn cảnh rồi, HOẶC
+    //  - config 4 góc TẮT và đã chụp xong ảnh toàn cảnh đầu tiên (các góc
+    //    sau chỉ ghi nhận tổn thất, không yêu cầu chụp toàn cảnh).
+    final skipPanoramic = _panoramicCapturedSegments.contains(segment) ||
+        (!_require4Angles && _firstPanoramicCaptured);
+    if (skipPanoramic) {
+      _classificationLocked = true;
+      startDamageScanning();
+    } else {
+      updateMessage();
+    }
   }
 
   /// OCR (native) — tín hiệu canh khung. Đọc được biển ⇒ frame đủ tốt để
   /// làm ảnh toàn cảnh; cập nhật cờ rồi re-evaluate để có thể kích hoạt chụp.
   void _handleOcr(Map<String, dynamic> data) {
     final readable = data['readable'] == true;
-    if (readable != _latestPlateReadable) {
+    if (readable) {
       _latestPlateReadable = readable;
-      if (readable) updateMessage(); // tự notify khi message đổi
+      _latestPlateReadableAt = DateTime.now();
+      updateMessage(); // tự notify khi message đổi / tự chụp nếu đủ điều kiện
+    } else if (_latestPlateReadable) {
+      _clearPlateRead();
+      updateMessage();
     }
   }
 
@@ -93,7 +108,7 @@ mixin _StreamMixin on _CameraControllerBase {
     _latestCarPartDetections = visible;
     // Biển không còn trong khung → cờ "đọc được" cũ không còn hiệu lực.
     if (!_latestCarPartClasses.contains(_licensePlateClass)) {
-      _latestPlateReadable = false;
+      _clearPlateRead();
     }
     updateMessage(); // tự notify khi message đổi
     // Bỏ qua redraw nếu không có nhãn bộ phận nào để vẽ (trước & sau đều rỗng).

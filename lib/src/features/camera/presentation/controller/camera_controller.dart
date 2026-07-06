@@ -17,7 +17,9 @@ part 'camera_controller.inspection.dart';
 
 /// Sub-states of the damage inspection flow (active when panoramic photo is taken).
 enum InspectionPhase {
-  /// Initial message: "Đưa camera lại gần tổn thất…" — X → scanning, Chuyển góc → done.
+  /// Initial message: "Đưa camera lại gần tổn thất…". Damage detections can
+  /// move straight to confirmation; detecting a different car angle completes
+  /// the current angle automatically.
   panoramicGuide,
 
   /// Scanning for damage. Detection is event-driven: ngay khi có detection
@@ -25,8 +27,10 @@ enum InspectionPhase {
   scanning,
 
   /// Detections found — showing "Xác nhận / Thiếu tổn thất". Sau 5 s không
-  /// bấm gì sẽ tự động chụp. Dùng cho cả ảnh tổng quan (overview) lẫn ảnh chi
-  /// tiết (detail) — phân biệt bằng [_CameraControllerBase._inDetailStage].
+  /// bấm gì sẽ tự động chụp ngầm lặp lại, nhưng vẫn giữ tooltip cho tới khi
+  /// user bấm "Xác nhận" hoặc "Thiếu tổn thất". Dùng cho cả ảnh tổng quan
+  /// (overview) lẫn ảnh chi tiết (detail) — phân biệt bằng
+  /// [_CameraControllerBase._inDetailStage].
   detectionReady,
 
   /// Đang chụp ảnh tổn thất (tự động hoặc do bấm "Xác nhận").
@@ -34,8 +38,8 @@ enum InspectionPhase {
 
   /// Sau khi chụp ảnh tổng quan: nhắc "Di chuyển camera đến gần vùng có tổn
   /// thất để chụp ảnh chi tiết". Trong 3 s: phát hiện tổn thất → quay lại
-  /// detectionReady (detail); hết 3 s không thấy → tự động chụp 1 ảnh chi tiết,
-  /// chờ tiếp 3 s (thấy → detectionReady; vẫn không → continueOrChange).
+  /// detectionReady (detail); cứ hết 3 s không thấy → tự động chụp ngầm 1 ảnh
+  /// chi tiết rồi tiếp tục chờ ở detailGuide.
   detailGuide,
 
   /// Hiển thị message "Tiếp tục di chuyển camera…" trong 5 s rồi quay lại
@@ -49,6 +53,15 @@ const _licensePlateClass = 'Biển số xe';
 /// Giữ message holdStill tối thiểu khoảng này, tránh OCR đọc nhanh khiến message
 /// flash qua quá nhanh user không kịp thấy.
 const _holdStillMinDuration = Duration(seconds: 3);
+
+/// OCR đọc được biển số chỉ có hiệu lực rất ngắn. Nếu user lia máy làm biển
+/// lệch/lẹm sau frame OCR đó thì controller phải chờ OCR đọc lại ở frame mới,
+/// không dùng trạng thái cũ để auto-capture.
+const _plateReadFreshDuration = Duration(milliseconds: 700);
+
+/// Giữ message yêu cầu căn biển rõ tối thiểu khoảng này trước khi cho phép
+/// auto-capture lại, để user kịp đọc và điều chỉnh camera.
+const _plateClearPromptMinDuration = Duration(seconds: 3);
 
 /// Cấu hình mỗi góc: (tên ba đờ sốc cần thấy, message điều hướng tới góc đó).
 const _segmentConfigs = {
@@ -131,7 +144,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// When true, classify frames are ignored to lock the current angle.
   bool _classificationLocked = false;
 
-  /// Angles fully completed (user pressed "Chuyển góc").
+  /// Angles fully completed (auto-switched to another detected car angle).
   final Set<int> _completedSegments = {};
 
   /// Class names bộ phận từ frame car-part detect (model thứ 2) mới nhất.
@@ -141,6 +154,10 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// khung: đọc được biển ⇒ khung đủ rõ/đủ gần để dùng làm ảnh toàn cảnh.
   bool _latestPlateReadable = false;
 
+  /// Thời điểm frame OCR mới nhất đọc được biển. Dùng để loại tín hiệu OCR cũ
+  /// khi camera đã dịch khỏi vị trí vừa đọc biển.
+  DateTime? _latestPlateReadableAt;
+
   /// Timer 5s: khi đã căn đủ bộ phận nhưng OCR chưa đọc được biển hợp lệ, hết
   /// 5s thì nhắc user di chuyển cho biển rõ nét.
   Timer? _plateReadTimer;
@@ -148,6 +165,10 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// Đã hiển thị nhắc "di chuyển cho biển rõ" hay chưa — để frame carPart kế
   /// tiếp không ghi đè message về holdStill.
   bool _platePromptShown = false;
+
+  /// Mốc bắt đầu hiển thị nhắc "di chuyển cho biển rõ". Dùng để giữ warning tối
+  /// thiểu 3s trước khi auto-capture lại nếu OCR đọc được biển ngay sau đó.
+  DateTime? _platePromptShownAt;
 
   /// Mốc thời điểm bắt đầu hiển thị "giữ yên" (đã căn đủ bộ phận). Dùng để giữ
   /// message holdStill tối thiểu 3s, tránh OCR đọc nhanh khiến message flash qua
@@ -164,14 +185,13 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// Current phase of the damage inspection sub-flow. null = not in inspection.
   InspectionPhase? _inspectionPhase;
 
-  /// 5s timer chạy ở detectionReady: hết 5s mà user không bấm gì thì tự
-  /// động chụp ảnh tổn thất.
+  /// 5s timer chạy ở detectionReady: cứ mỗi 5s tự động chụp ngầm một ảnh tổn
+  /// thất cho tới khi user bấm "Xác nhận" hoặc "Thiếu tổn thất".
   Timer? _autoCaptureTimer;
 
-  /// One-shot timer: if no damage is detected within 10 s of unlocking
-  /// detection (right after the panoramic photo is taken), the current
-  /// angle is auto-completed.
-  Timer? _noDetectionTimer;
+  /// One-shot timer: nếu sau 10 s vẫn chưa phát hiện tổn thất ở pha chờ/quét
+  /// thì hiển thị warning, nhưng không tự rời góc.
+  Timer? _noDetectionWarningTimer;
 
   /// 3s timer của pha [InspectionPhase.detailGuide] (chụp ảnh chi tiết).
   Timer? _detailTimer;
@@ -179,10 +199,6 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// True khi detectionReady đến từ pha detailGuide (đang chờ xác nhận ảnh chi
   /// tiết) — phân biệt với ảnh tổng quan để biết bước kế tiếp sau khi chụp.
   bool _inDetailStage = false;
-
-  /// Đã tự động chụp 1 ảnh chi tiết trong pha detailGuide hiện tại hay chưa
-  /// (để không tự động chụp lặp lại; lần hết giờ thứ 2 sẽ chuyển sang góc khác).
-  bool _detailAutoCaptured = false;
 
   /// Active của model gating đã gửi xuống native (null = chưa gửi lần nào).
   bool? _sentInspectionActive;
@@ -245,6 +261,34 @@ abstract class _CameraControllerBase extends ChangeNotifier {
         .toList();
   }
 
+  bool get _hasFreshPlateRead {
+    final readAt = _latestPlateReadableAt;
+    if (!_latestPlateReadable || readAt == null) return false;
+    if (DateTime.now().difference(readAt) <= _plateReadFreshDuration) {
+      return true;
+    }
+    _clearPlateRead();
+    return false;
+  }
+
+  void _clearPlateRead() {
+    _latestPlateReadable = false;
+    _latestPlateReadableAt = null;
+  }
+
+  void _resetPanoramicFramingState({bool clearCarParts = false}) {
+    _clearPlateRead();
+    _holdStillShownAt = null;
+    _plateReadTimer?.cancel();
+    _plateReadTimer = null;
+    _platePromptShown = false;
+    _platePromptShownAt = null;
+    if (clearCarParts) {
+      _latestCarPartClasses = {};
+      _latestCarPartDetections = [];
+    }
+  }
+
   // ── Torch ─────────────────────────────────────────────────────────────────
 
   Future<void> toggleFlash() async {
@@ -291,7 +335,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   @override
   void dispose() {
     _autoCaptureTimer?.cancel();
-    _noDetectionTimer?.cancel();
+    _noDetectionWarningTimer?.cancel();
     _detailTimer?.cancel();
     _plateReadTimer?.cancel();
     stopCamera(); // no-op nếu đã gọi trước đó
@@ -309,8 +353,12 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// [_InspectionMixin] — phát hiện tổn thất → mở xác nhận.
   void _maybeShowDetectionReady();
 
-  /// [_InspectionMixin] — mở 10 s no-detection timeout.
-  void _startNoDetectionTimer();
+  /// [_InspectionMixin] — mở 10 s no-detection warning timeout.
+  void _startNoDetectionWarningTimer();
+
+  /// [_InspectionMixin] — tự động rời góc hiện tại khi classifier nhận diện
+  /// user đã di chuyển sang góc xe khác.
+  void _autoSwitchToDetectedSegment(int segment);
 
   /// [_CaptureMixin] — chụp 1 ảnh JPEG, lưu in-memory + disk.
   Future<Uint8List?> capturePhoto({

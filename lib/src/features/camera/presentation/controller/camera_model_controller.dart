@@ -8,6 +8,8 @@ import '../../../ai_model_manager/data/model/ai_model.dart';
 import '../../../ai_model_manager/domain/entity/ai_model_type.dart';
 import '../../../ai_model_manager/domain/repository/ai_model_repository.dart';
 import '../../../aicycle_folder/domain/repository/aicycle_folder_repository.dart';
+import '../../../../yolo/core/yolo_model_resolver.dart';
+import '../../../../yolo/models/yolo_task.dart';
 
 class CameraModelController extends ChangeNotifier {
   CameraModelController(
@@ -151,13 +153,14 @@ class CameraModelController extends ChangeNotifier {
     _initialPaths = paths;
     _isPreparing = true;
     _modelError = null;
+    _modelPaths.clear();
     notifyListeners();
 
     try {
       for (final type in AiModelType.values) {
         final provided = paths[type];
         if (provided != null && File(provided).existsSync()) {
-          _modelPaths[type] = provided;
+          _modelPaths[type] = await _validateModelPath(provided, type);
           continue;
         }
         _modelPaths[type] = await _ensureLatestModel(type);
@@ -205,8 +208,13 @@ class CameraModelController extends ChangeNotifier {
     final existing =
         manifest.downloaded.where((e) => e.id == latest.id).firstOrNull;
     if (existing != null) {
-      await _modelRepository.selectModel(latest);
-      return existing.filePath;
+      try {
+        final validPath = await _validateModelPath(existing.filePath, type);
+        await _modelRepository.selectModel(latest);
+        return validPath;
+      } on _PrepareException {
+        await _modelRepository.deleteModel(existing.id);
+      }
     }
 
     _downloadingType = type;
@@ -228,6 +236,13 @@ class CameraModelController extends ChangeNotifier {
     );
 
     _downloadingType = null;
+    late final String validPath;
+    try {
+      validPath = await _validateModelPath(info.filePath, type);
+    } on _PrepareException {
+      await _modelRepository.deleteModel(info.id);
+      rethrow;
+    }
 
     final oldVersions =
         manifest.downloaded.where((e) => e.type == type && e.id != latest.id);
@@ -236,7 +251,41 @@ class CameraModelController extends ChangeNotifier {
     }
 
     await _modelRepository.selectModel(latest);
-    return info.filePath;
+    return validPath;
+  }
+
+  Future<String> _validateModelPath(String path, AiModelType type) async {
+    try {
+      final preparedPath = await YOLOModelResolver.preparePath(path);
+      final metadata = await YOLOModelResolver.inspect(preparedPath);
+      final expectedTask = _expectedYoloTask(type);
+      final actualTask = YOLOTaskParsing.tryParse(metadata['task'] as String?);
+      if (expectedTask != null &&
+          actualTask != null &&
+          actualTask != expectedTask) {
+        throw _PrepareException(
+          '${type.apiValue} model task mismatch: expected '
+          '${expectedTask.name}, metadata says ${actualTask.name}.',
+        );
+      }
+      return preparedPath;
+    } on _PrepareException {
+      rethrow;
+    } catch (e) {
+      throw _PrepareException(
+        '${type.apiValue} model is invalid or corrupted: $e',
+      );
+    }
+  }
+
+  YOLOTask? _expectedYoloTask(AiModelType type) {
+    return switch (type) {
+      AiModelType.carCorner => YOLOTask.classify,
+      AiModelType.carDamage => YOLOTask.detect,
+      AiModelType.carPart => YOLOTask.detect,
+      // LicensePlate is a standalone OCR CoreML model, not a YOLO task.
+      AiModelType.licensePlate => null,
+    };
   }
 
   /// Compares two AI models and returns the newer one.

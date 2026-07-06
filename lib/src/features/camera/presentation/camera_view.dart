@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -52,14 +53,17 @@ class AICycleOnDeviceCamera extends StatefulWidget {
 }
 
 class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
+  static const _resultTransitionHold = Duration(milliseconds: 350);
+
   late final CameraModelController _modelController;
+  Timer? _releaseCameraAfterTransition;
 
-  /// Khi != null: đang ở pha upload (đã bấm "Xem kết quả"). CameraScreen bị gỡ
-  /// khỏi cây widget → camera dispose (idle/giải phóng), bootstrap hiện UploadView.
+  /// Khi != null: đang ở pha upload (đã bấm "Xem kết quả"). Bootstrap render
+  /// UploadView ngay, rồi gỡ CameraScreen sau một nhịp ngắn để tránh cleanup
+  /// native chặn frame chuyển màn.
   Map<int, List<Uint8List>>? _uploadPhotos;
-
-  /// Khi `true`: upload hoàn tất, chuyển sang hiện ResultView.
   bool _showResult = false;
+  bool _keepCameraDuringResultTransition = false;
 
   @override
   void initState() {
@@ -84,8 +88,23 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
 
   @override
   void dispose() {
+    _releaseCameraAfterTransition?.cancel();
     _modelController.dispose();
     super.dispose();
+  }
+
+  void _openUploadView(Map<int, List<Uint8List>> photos) {
+    if (_uploadPhotos != null) return;
+    setState(() {
+      _uploadPhotos = photos;
+      _keepCameraDuringResultTransition = true;
+    });
+
+    _releaseCameraAfterTransition?.cancel();
+    _releaseCameraAfterTransition = Timer(_resultTransitionHold, () {
+      if (!mounted || _uploadPhotos == null) return;
+      setState(() => _keepCameraDuringResultTransition = false);
+    });
   }
 
   Widget _buildCamera() => CameraScreen(
@@ -98,9 +117,9 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
         licensePlateModelPath:
             _modelController.modelPathOf(AiModelType.licensePlate),
         onComplete: widget.onComplete,
-        // Bấm "Xem kết quả" → chuyển sang pha upload: CameraScreen bị gỡ khỏi
-        // cây (camera idle/giải phóng), bootstrap render UploadView.
-        onViewResult: (photos) => setState(() => _uploadPhotos = photos),
+        // Bấm "Xem kết quả" → chuyển sang pha upload: bootstrap render
+        // UploadView ngay, rồi mới gỡ camera sau một nhịp ngắn.
+        onViewResult: _openUploadView,
       );
 
   @override
@@ -120,40 +139,7 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
         }
         if (_modelController.isPreparing) return _buildPreparing();
         if (_modelController.isReady) {
-          if (_uploadPhotos != null) {
-            final isAicycle = widget.aiCycleConfig.generalConfig.organization ==
-                AiCycleOrg.aicycle;
-            // Chỉ org aicycle mới có màn ResultView sau upload.
-            if (_showResult && isAicycle) {
-              return ResultView(
-                sessionId: widget.aiCycleConfig.generalConfig.documentId,
-                capturedPhotos: const {},
-                onComplete: (_) => widget.onComplete?.call(),
-                onAddPhoto: (_) => setState(() {
-                  _uploadPhotos = null;
-                  _showResult = false;
-                }),
-              );
-            }
-            // Đang upload → hiện UploadView (camera đã được gỡ → idle).
-            return UploadView(
-              sessionId: widget.aiCycleConfig.generalConfig.documentId,
-              capturedPhotos: _uploadPhotos!,
-              onComplete: () {
-                if (isAicycle) {
-                  // aicycle: tiếp tục sang ResultView để fetch + hiện kết quả.
-                  setState(() => _showResult = true);
-                } else {
-                  // vbi / others: upload xong là kết thúc SDK.
-                  widget.onComplete?.call();
-                }
-              },
-              onImageUploaded: widget.onImageUploaded,
-              onError: widget.onError,
-            );
-          }
-          // Model tải xong → CameraScreen.
-          return _buildCamera();
+          return _buildReadyContent();
         }
         return _buildError(
           _modelController.modelError ?? StringSheet.requirementHint,
@@ -161,6 +147,57 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
         );
       },
     );
+  }
+
+  Widget _buildReadyContent() {
+    final isAicycle =
+        widget.aiCycleConfig.generalConfig.organization == AiCycleOrg.aicycle;
+    final photos = _uploadPhotos;
+
+    // Chỉ org aicycle mới có màn ResultView sau upload.
+    if (_showResult && isAicycle) {
+      return ResultView(
+        sessionId: widget.aiCycleConfig.generalConfig.documentId,
+        capturedPhotos: const {},
+        onComplete: (_) => widget.onComplete?.call(),
+        onAddPhoto: (_) => setState(() {
+          _uploadPhotos = null;
+          _showResult = false;
+        }),
+      );
+    }
+
+    if (photos != null) {
+      // Render UploadView trước, giữ camera phía sau thêm một nhịp ngắn rồi mới
+      // tháo platform view. Cleanup camera/model native có thể nặng; nếu tháo ngay
+      // trong cùng frame với nút "Xem kết quả" thì user thấy màn camera khựng.
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          if (_keepCameraDuringResultTransition)
+            _buildCamera()
+          else
+            const SizedBox.shrink(),
+          UploadView(
+            sessionId: widget.aiCycleConfig.generalConfig.documentId,
+            capturedPhotos: photos,
+            onComplete: () {
+              if (isAicycle) {
+                // aicycle: tiếp tục sang ResultView để fetch + hiện kết quả.
+                setState(() => _showResult = true);
+              } else {
+                // vbi / others: upload xong là kết thúc SDK.
+                widget.onComplete?.call();
+              }
+            },
+            onImageUploaded: widget.onImageUploaded,
+            onError: widget.onError,
+          ),
+        ],
+      );
+    }
+
+    return _buildCamera();
   }
 
   Widget _buildLoading(String message) {

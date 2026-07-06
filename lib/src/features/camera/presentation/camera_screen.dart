@@ -155,22 +155,24 @@ class _CameraScreenState extends State<CameraScreen> {
   Widget _buildTooltip() {
     final phase = _cameraController.inspectionPhase;
     final msg = _cameraController.message!;
+    final isDetectionReady = phase == InspectionPhase.detectionReady;
     return CameraToolTip(
       preffixIcon: msg.icon,
       message: msg.message,
-      // ── Close button ────────────────────────────────────────────────────
-      // Visible only on panoramicGuide. Pressing it starts damage scanning.
-      showCloseButton: phase == InspectionPhase.panoramicGuide,
-      onCloseButtonPressed: _cameraController.startDamageScanning,
+      // Không còn nút "Chuyển góc"; chuyển góc được xử lý tự động khi model
+      // nhận diện user đã di chuyển sang góc xe khác.
+      showCloseButton: false,
       // ── Secondary button ─────────────────────────────────────────────────
       // detectionReady → "Thiếu tổn thất"
-      showSecondaryButton: phase == InspectionPhase.detectionReady,
+      showSecondaryButton: isDetectionReady,
       secondaryButtonLabel: StringSheet.missingDamage,
       onSecondaryButtonPressed: _cameraController.rejectDamage,
-      // ── Primary button ("Xác nhận") — only during detectionReady ────────
-      showPrimaryButton: phase == InspectionPhase.detectionReady,
+      // detectionReady → "Xác nhận".
+      showPrimaryButton: isDetectionReady,
       primaryButtonLabel: StringSheet.confirm,
-      onPrimaryButtonPressed: _cameraController.confirmDamage,
+      onPrimaryButtonPressed: () {
+        _cameraController.confirmDamage();
+      },
     );
   }
 
@@ -197,10 +199,10 @@ class _CameraScreenState extends State<CameraScreen> {
     );
   }
 
-  /// "Xem kết quả": dừng YOLO trước (tránh đơ trong dispose), snapshot ảnh,
-  /// rồi báo bootstrap chuyển sang pha upload.
+  /// "Xem kết quả": snapshot ảnh rồi báo bootstrap chuyển sang pha upload.
+  /// Bootstrap sẽ giữ camera phía sau thêm một nhịp ngắn để UploadView render
+  /// trước, sau đó mới tháo platform view và cleanup camera/model native.
   void _goToResult() {
-    _cameraController.stopCamera();
     final photos = {
       for (final e in _cameraController.capturedPhotos.entries)
         e.key: List<Uint8List>.from(e.value),

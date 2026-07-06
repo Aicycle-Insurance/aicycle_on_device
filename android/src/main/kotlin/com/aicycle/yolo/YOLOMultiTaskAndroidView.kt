@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
+import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -48,14 +49,14 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
          * NOT accepted — the whole plate must sit clearly inside the frame, not just
          * touch it.
          */
-        private const val OCR_VIEWPORT_MARGIN = 0.08f
+        private const val OCR_VIEWPORT_MARGIN = 0.1f
         /**
          * Inset on the PERPENDICULAR axis (preview-horizontal = buffer Y). The
          * viewport band only gates the buffer X axis, leaving plates flush against the
          * LEFT/RIGHT edge of the screen readable — which produced badly-framed /
          * half-plate captures. Require the plate to sit well away from those edges too.
          */
-        private const val OCR_EDGE_MARGIN = 0.08f
+        private const val OCR_EDGE_MARGIN = 0.1f
         private const val REQUEST_CODE_PERMISSIONS = 1001
         private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
 
@@ -557,15 +558,21 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         if (!ocrEnabled) return // gated off during inspection
         if (!ocrBusy.compareAndSet(false, true)) return
 
-        // Only the highest-confidence plate box that sits FULLY inside the visible
-        // viewport (so the saved viewport-cropped photo will contain the whole plate).
-        val lo = ocrViewportTop + OCR_VIEWPORT_MARGIN
-        val hi = ocrViewportBottom - OCR_VIEWPORT_MARGIN
+        // Only the highest-confidence plate box that sits FULLY inside the exact
+        // aspect-fill crop rect used by capturePhoto. Comparing directly with
+        // ocrViewportTop/bottom is not enough because capturePhoto applies
+        // aspect-fill offsets before cropping.
+        val cropRect = ocrCropRectInFrame(result)
+        val loX = cropRect.left + OCR_VIEWPORT_MARGIN
+        val hiX = cropRect.right - OCR_VIEWPORT_MARGIN
+        val loY = cropRect.top + OCR_EDGE_MARGIN
+        val hiY = cropRect.bottom - OCR_EDGE_MARGIN
+        if (loX >= hiX || loY >= hiY) { ocrBusy.set(false); return }
         val box = result.boxes
             .filter {
                 it.cls == LICENSE_PLATE_CLASS &&
-                    it.xywhn.left >= lo && it.xywhn.right <= hi &&
-                    it.xywhn.top >= OCR_EDGE_MARGIN && it.xywhn.bottom <= 1f - OCR_EDGE_MARGIN
+                    it.xywhn.left >= loX && it.xywhn.right <= hiX &&
+                    it.xywhn.top >= loY && it.xywhn.bottom <= hiY
             }
             .maxByOrNull { it.conf }
         if (box == null) { ocrBusy.set(false); return }
@@ -605,6 +612,50 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
                 ocrBusy.set(false)
             }
         }
+    }
+
+    private fun ocrCropRectInFrame(result: YOLOResult): RectF {
+        val wp = result.origShape.width.toFloat()
+        val hp = result.origShape.height.toFloat()
+        val wv = previewView.width.toFloat()
+        val hv = previewView.height.toFloat()
+        if (wp <= 0f || hp <= 0f || wv <= 0f || hv <= 0f) {
+            return RectF(0f, 0f, 1f, 1f)
+        }
+
+        val left: Float
+        val top: Float
+        val right: Float
+        val bottom: Float
+        if ((wp >= hp) != (wv >= hv)) {
+            // Same mapping as cropToViewport(): preview vertical band maps to
+            // frame/photo horizontal coordinates after the 90° transpose.
+            val s = maxOf(wv / hp, hv / wp)
+            val offU = (hp * s - wv) / 2f
+            val offV = (wp * s - hv) / 2f
+            val u0 = offU / s
+            val u1 = (wv + offU) / s
+            val v0 = (ocrViewportTop * hv + offV) / s
+            val v1 = (ocrViewportBottom * hv + offV) / s
+            left = v0
+            right = v1
+            top = hp - u1
+            bottom = hp - u0
+        } else {
+            val s = maxOf(wv / wp, hv / hp)
+            val offX = (wp * s - wv) / 2f
+            val offY = (hp * s - hv) / 2f
+            left = offX / s
+            right = (wv + offX) / s
+            top = (ocrViewportTop * hv + offY) / s
+            bottom = (ocrViewportBottom * hv + offY) / s
+        }
+
+        val l = (left / wp).coerceIn(0f, 1f)
+        val r = (right / wp).coerceIn(0f, 1f)
+        val t = (top / hp).coerceIn(0f, 1f)
+        val b = (bottom / hp).coerceIn(0f, 1f)
+        return RectF(minOf(l, r), minOf(t, b), maxOf(l, r), maxOf(t, b))
     }
 
     /** Updates the visible viewport used to gate OCR (preview-space vertical band). */
