@@ -63,6 +63,10 @@ const _plateReadFreshDuration = Duration(milliseconds: 700);
 /// auto-capture lại, để user kịp đọc và điều chỉnh camera.
 const _plateClearPromptMinDuration = Duration(seconds: 3);
 
+/// Giữ thông báo chụp thành công đủ lâu để user kịp đọc trước khi chuyển sang
+/// hướng dẫn tiếp theo.
+const _captureSuccessVisibleDuration = Duration(seconds: 3);
+
 /// Cấu hình mỗi góc: (tên ba đờ sốc cần thấy, message điều hướng tới góc đó).
 const _segmentConfigs = {
   0: ('Ba đờ sốc trước', StringSheet.frontRightGuide),

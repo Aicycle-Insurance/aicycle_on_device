@@ -101,7 +101,10 @@ mixin _InspectionMixin on _CameraControllerBase {
     _autoCaptureTimer?.cancel();
     _autoCaptureTimer = null;
     _cancelNoDetectionWarningTimer();
-    _showMessageThenScan(StringSheet.moveCameraToMissing);
+    _showMessageThenScan(
+      StringSheet.moveCameraToMissing,
+      duration: const Duration(seconds: 10),
+    );
   }
 
   /// User pressed "Xác nhận" (hoặc auto sau 5 s) — chụp ảnh tổn thất.
@@ -114,7 +117,15 @@ mixin _InspectionMixin on _CameraControllerBase {
     final wasDetail = _inDetailStage;
     _setInspectionPhase(InspectionPhase.capturingDamage);
 
-    await capturePhoto(immediate: true, flashTick: flashTick);
+    final captured = await capturePhoto(immediate: true, flashTick: flashTick);
+    if (captured != null) {
+      _setMessage(CameraMessage(
+        message: StringSheet.captureSuccess,
+        type: MessageType.success,
+      ));
+      await Future.delayed(_captureSuccessVisibleDuration);
+      if (_stopped) return;
+    }
 
     if (wasDetail) {
       await _showMessageThenScan(StringSheet.continueToNextDamage);
@@ -165,14 +176,17 @@ mixin _InspectionMixin on _CameraControllerBase {
   /// đang hiển thị có detection mới, [_maybeShowDetectionReady] sẽ chuyển sang
   /// xác nhận ngay.
   /// Dùng cho cả "Tiếp tục di chuyển camera…" và "Thiếu tổn thất".
-  Future<void> _showMessageThenScan(String message) async {
+  Future<void> _showMessageThenScan(
+    String message, {
+    Duration duration = const Duration(seconds: 5),
+  }) async {
     _cancelNoDetectionWarningTimer();
     _detailTimer?.cancel();
     _detailTimer = null;
     _setInspectionPhase(InspectionPhase.continueOrChange);
     _setMessage(CameraMessage(message: message, type: MessageType.info));
 
-    await Future.delayed(const Duration(seconds: 5));
+    await Future.delayed(duration);
     // Guard: flow có thể đã tự chuyển góc trong lúc chờ.
     if (_inspectionPhase != InspectionPhase.continueOrChange) return;
     _enterScanning();

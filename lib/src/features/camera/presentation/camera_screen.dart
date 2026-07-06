@@ -54,14 +54,16 @@ class CameraScreen extends StatefulWidget {
   State<CameraScreen> createState() => _CameraScreenState();
 }
 
-class _CameraScreenState extends State<CameraScreen> {
+class _CameraScreenState extends State<CameraScreen>
+    with WidgetsBindingObserver {
   late final CameraController _cameraController;
   bool _guideShown = false;
 
   @override
   void initState() {
     super.initState();
-    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    WidgetsBinding.instance.addObserver(this);
+    _lockPortraitUp();
     // Giữ màn hình sáng trong suốt lúc camera đang stream.
     WakelockPlus.enable();
 
@@ -77,10 +79,29 @@ class _CameraScreenState extends State<CameraScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     // Cho phép màn hình tự tắt trở lại khi rời camera.
     WakelockPlus.disable();
     _cameraController.dispose();
     super.dispose();
+  }
+
+  void _lockPortraitUp() {
+    SystemChrome.setPreferredOrientations(const [DeviceOrientation.portraitUp]);
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    _lockPortraitUp();
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _lockPortraitUp();
+    }
   }
 
   void _maybeShowGuide() {
@@ -211,7 +232,7 @@ class _CameraScreenState extends State<CameraScreen> {
 
   @override
   Widget build(BuildContext context) {
-    ScreenUtil.init(context);
+    ScreenUtil.init(context, forcePortrait: true);
     final model = widget.aiCycleConfig.modelConfig;
     return PopScope(
       canPop: false,
@@ -300,6 +321,7 @@ class _CameraScreenState extends State<CameraScreen> {
                         /// Tooltip — buttons depend on inspection phase
                         if (_cameraController.message != null)
                           Positioned(
+                            left: 36.w,
                             right: 36.w,
                             top: 105.h,
                             bottom: 140.h,
