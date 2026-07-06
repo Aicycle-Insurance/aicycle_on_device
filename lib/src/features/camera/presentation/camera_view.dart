@@ -10,10 +10,10 @@ import '../../../core/di/injection.dart';
 import '../../../core/themes/app_colors.dart';
 import '../../../core/themes/app_textstyle.dart';
 import '../../../core/utils/screen_utils.dart';
-import '../../folder_result/presentation/result_view.dart';
 import 'camera_screen.dart';
 import 'controller/camera_model_controller.dart';
 import 'upload_view.dart';
+import '../../folder_result/presentation/result_view.dart';
 
 /// Callback bắn ra mỗi khi MỘT ảnh upload thành công.
 ///
@@ -62,8 +62,10 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
   /// UploadView ngay, rồi gỡ CameraScreen sau một nhịp ngắn để tránh cleanup
   /// native chặn frame chuyển màn.
   Map<int, List<Uint8List>>? _uploadPhotos;
-  bool _showResult = false;
   bool _keepCameraDuringResultTransition = false;
+
+  /// Chỉ dùng với org aicycle: sau khi upload xong thì chuyển sang ResultView.
+  bool _showResult = false;
 
   @override
   void initState() {
@@ -150,12 +152,12 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
   }
 
   Widget _buildReadyContent() {
+    final photos = _uploadPhotos;
     final isAicycle =
         widget.aiCycleConfig.generalConfig.organization == AiCycleOrg.aicycle;
-    final photos = _uploadPhotos;
 
     // Chỉ org aicycle mới có màn ResultView sau upload.
-    if (_showResult && isAicycle) {
+    if (photos != null && _showResult && isAicycle) {
       return ResultView(
         sessionId: widget.aiCycleConfig.generalConfig.documentId,
         capturedPhotos: const {},
@@ -167,17 +169,17 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
       );
     }
 
-    if (photos != null) {
-      // Render UploadView trước, giữ camera phía sau thêm một nhịp ngắn rồi mới
-      // tháo platform view. Cleanup camera/model native có thể nặng; nếu tháo ngay
-      // trong cùng frame với nút "Xem kết quả" thì user thấy màn camera khựng.
-      return Stack(
-        fit: StackFit.expand,
-        children: [
-          if (_keepCameraDuringResultTransition)
-            _buildCamera()
-          else
-            const SizedBox.shrink(),
+    // Render UploadView trước, giữ camera phía sau thêm một nhịp ngắn rồi mới
+    // tháo platform view. Cleanup camera/model native có thể nặng; nếu tháo ngay
+    // trong cùng frame với nút "Xem kết quả" thì user thấy màn camera khựng.
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (photos == null || _keepCameraDuringResultTransition)
+          _buildCamera()
+        else
+          const SizedBox.shrink(),
+        if (photos != null)
           UploadView(
             sessionId: widget.aiCycleConfig.generalConfig.documentId,
             capturedPhotos: photos,
@@ -193,11 +195,8 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
             onImageUploaded: widget.onImageUploaded,
             onError: widget.onError,
           ),
-        ],
-      );
-    }
-
-    return _buildCamera();
+      ],
+    );
   }
 
   Widget _buildLoading(String message) {
