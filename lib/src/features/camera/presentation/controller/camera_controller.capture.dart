@@ -12,6 +12,8 @@ mixin _CaptureMixin on _CameraControllerBase {
     _capturedPhotos = cached;
     // Angles with cached photos are shown as completed in the progress ring.
     _completedSegments.addAll(cached.keys);
+    _panoramicCapturedSegments.addAll(cached.keys);
+    _firstPanoramicCaptured = cached.isNotEmpty;
     notifyListeners();
   }
 
@@ -48,7 +50,7 @@ mixin _CaptureMixin on _CameraControllerBase {
       final seg = segment ?? _activeSegmentIndex;
       if (seg != null) {
         _capturedPhotos.putIfAbsent(seg, () => []).add(bytes);
-        PhotoSessionCache.instance.savePhoto(_sessionId, seg, bytes);
+        await PhotoSessionCache.instance.savePhoto(_sessionId, seg, bytes);
         // Config 4 góc TẮT: góc nào đã có ảnh là hiện màu xanh trên vòng tròn.
         if (!_require4Angles) _completedSegments.add(seg);
       }

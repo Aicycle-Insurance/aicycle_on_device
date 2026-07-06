@@ -72,9 +72,9 @@ class _CameraScreenState extends State<CameraScreen>
       sessionId: sessionId,
       require4Angles:
           widget.aiCycleConfig.validateConfig.require4AnglePanoramicPhotos,
-    )..loadCachedPhotos();
+    );
 
-    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowGuide());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _restoreAndStart());
   }
 
   @override
@@ -88,6 +88,17 @@ class _CameraScreenState extends State<CameraScreen>
 
   void _lockPortraitUp() {
     SystemChrome.setPreferredOrientations(const [DeviceOrientation.portraitUp]);
+  }
+
+  Future<void> _restoreAndStart() async {
+    await _cameraController.loadCachedPhotos();
+    if (!mounted) return;
+    if (_cameraController.capturedPhotos.isNotEmpty) {
+      _guideShown = true;
+      _cameraController.startCapture();
+      return;
+    }
+    _maybeShowGuide();
   }
 
   @override
@@ -128,7 +139,13 @@ class _CameraScreenState extends State<CameraScreen>
   }
 
   Future<bool> _onWillPop() async {
-    if (_cameraController.capturedPhotos.isEmpty) return true;
+    final sessionId = widget.aiCycleConfig.generalConfig.documentId;
+    final hasCachedSession =
+        await PhotoSessionCache.instance.hasSessionData(sessionId);
+    if (!mounted) return false;
+    if (_cameraController.capturedPhotos.isEmpty && !hasCachedSession) {
+      return true;
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => RotatedBox(
@@ -166,8 +183,7 @@ class _CameraScreenState extends State<CameraScreen>
     if (confirmed == true) {
       // Dừng camera trước khi pop để native cleanup không chặn UI trong dispose().
       _cameraController.stopCamera();
-      await PhotoSessionCache.instance
-          .clearSession(widget.aiCycleConfig.generalConfig.documentId);
+      await PhotoSessionCache.instance.clearSession(sessionId);
     }
     return confirmed ?? false;
   }
