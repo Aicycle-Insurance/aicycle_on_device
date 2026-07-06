@@ -28,6 +28,7 @@ class AppColors {
   static const Color inkA100 = Color(0xFFF2F3F4);
 
   ///support colors
+  static const Color damageMarker = Color(0xFFD27A00);
   static const Color backgroundLight = Color(0xFFF8F9FC);
   static const Color bottombarBackground = Color(0xFFEAECF0);
   static const Color backgroundNeutral = Color(0xFFE8EAF3);

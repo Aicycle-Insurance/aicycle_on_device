@@ -12,6 +12,7 @@ import '../../camera/data/model/car_angle.dart';
 import '../../folder_result/domain/entity/inspection_result.dart';
 import 'add_damage_view.dart';
 import 'controller/result_controller.dart';
+import 'models/add_damage_view_result.dart';
 import 'models/damage_annotation_draft.dart';
 import 'models/mask_tap_result.dart';
 import 'widgets/result_bottom_bar.dart';
@@ -107,9 +108,9 @@ class _ResultViewState extends State<ResultView> {
     final tap = _activeTap;
     if (tap == null) return;
 
-    final draft = await Navigator.of(context).push<DamageAnnotationDraft>(
+    final result = await Navigator.of(context).push<AddDamageViewResult>(
       MaterialPageRoute(
-        builder: (_) => AddDamageView(
+        builder: (_) => AddDamageView.add(
           tapResult: tap,
           imageUrl: image.imageUrl,
         ),
@@ -117,12 +118,44 @@ class _ResultViewState extends State<ResultView> {
     );
 
     if (!mounted) return;
-    if (draft != null) {
+    if (result is AddDamageViewSaved) {
       setState(() {
-        _pendingDamageAnnotations.add(draft);
+        _pendingDamageAnnotations.add(result.draft);
         _activeTap = null;
       });
     }
+  }
+
+  /// Mở màn sửa tổn thất khi tap marker đã lưu.
+  Future<void> _openEditDamageScreen(
+    BuildContext context,
+    DamageAnnotationDraft draft,
+    ResultImage image,
+  ) async {
+    final result = await Navigator.of(context).push<AddDamageViewResult>(
+      MaterialPageRoute(
+        builder: (_) => AddDamageView.edit(
+          initialDraft: draft,
+          imageUrl: image.imageUrl,
+        ),
+      ),
+    );
+
+    if (!mounted || result == null) return;
+    setState(() {
+      if (result is AddDamageViewSaved) {
+        final index = _pendingDamageAnnotations.indexWhere(
+          (d) => d.localId == result.draft.localId,
+        );
+        if (index >= 0) {
+          _pendingDamageAnnotations[index] = result.draft;
+        }
+      } else if (result is AddDamageViewDeleted) {
+        _pendingDamageAnnotations.removeWhere(
+          (d) => d.localId == result.localId,
+        );
+      }
+    });
   }
 
   void _onBack(BuildContext context) {
@@ -324,8 +357,13 @@ class _ResultViewState extends State<ResultView> {
             ScaledResultImage(
               image: image,
               activeTap: _activeTap,
+              savedAnnotations: _pendingDamageAnnotations
+                  .where((d) => d.imageId == image.imageId)
+                  .toList(),
               onMaskTap: _handleMaskTap,
               onAddDamage: () => _openAddDamageScreen(outerCtx, image),
+              onSavedAnnotationTap: (draft) =>
+                  _openEditDamageScreen(outerCtx, draft, image),
             ),
             Positioned(
               top: inset.top + 8.h,

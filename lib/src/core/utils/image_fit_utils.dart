@@ -69,6 +69,17 @@ List<double> displayPositionToNormalized(
   ];
 }
 
+/// Map normalized `[x, y]` sang vị trí pixel display.
+Offset normalizedToDisplayPosition(
+  List<double> normalized,
+  double displayWidth,
+  double displayHeight,
+) =>
+    Offset(
+      normalized[0] * displayWidth,
+      normalized[1] * displayHeight,
+    );
+
 /// Map normalized `[x, y]` sang pixel gốc theo `resolution` BE `[width, height]`.
 List<int>? normalizedToLogicalPixel(
   List<double> normalized,

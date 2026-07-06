@@ -7,9 +7,11 @@ import '../../../../core/utils/image_fit_utils.dart';
 import '../../../../core/utils/screen_utils.dart';
 import '../../domain/entity/inspection_result.dart';
 import '../../domain/utils/damage_box_merger.dart';
+import '../models/damage_annotation_draft.dart';
 import '../models/mask_tap_result.dart';
 import 'add_damage_tap_button.dart';
 import 'mask_hit_tester.dart';
+import 'saved_damage_marker.dart';
 
 /// Opacity cố định cho mask overlay bộ phận xe.
 const double _partMaskOpacity = 0.3;
@@ -21,8 +23,10 @@ class ScaledResultImage extends StatefulWidget {
     required this.image,
     this.maxScale = 3.5,
     this.activeTap,
+    this.savedAnnotations = const [],
     this.onMaskTap,
     this.onAddDamage,
+    this.onSavedAnnotationTap,
   });
 
   final ResultImage image;
@@ -30,9 +34,13 @@ class ScaledResultImage extends StatefulWidget {
 
   final MaskTapResult? activeTap;
 
+  final List<DamageAnnotationDraft> savedAnnotations;
+
   final void Function(MaskTapResult?)? onMaskTap;
 
   final VoidCallback? onAddDamage;
+
+  final void Function(DamageAnnotationDraft)? onSavedAnnotationTap;
 
   @override
   State<ScaledResultImage> createState() => _ScaledResultImageState();
@@ -132,6 +140,10 @@ class _ScaledResultImageState extends State<ScaledResultImage> {
     final offsetY = (_containerSize.height - _displaySize.height) / 2;
     final imagePos = scenePos - Offset(offsetX, offsetY);
 
+    if (_isTapOnSavedMarker(imagePos) || _isTapOnActiveButton(imagePos)) {
+      return;
+    }
+
     final partMasks =
         widget.image.partsMasks.where((m) => m.isPart == true).toList();
 
@@ -143,9 +155,7 @@ class _ScaledResultImageState extends State<ScaledResultImage> {
     );
 
     if (hit == null) {
-      if (!_isTapOnActiveButton(imagePos)) {
-        widget.onMaskTap?.call(null);
-      }
+      widget.onMaskTap?.call(null);
       return;
     }
 
@@ -259,6 +269,12 @@ class _ScaledResultImageState extends State<ScaledResultImage> {
                               : const _ImagePlaceholder(loading: true),
                         ),
                         if (mainReady) ...masks,
+                        if (mainReady)
+                          ..._buildSavedAnnotationOverlays(
+                            widget.savedAnnotations,
+                            imWidth,
+                            imHeight,
+                          ),
                         if (mainReady && showTapButton)
                           _buildTapButtonOverlay(activeTap),
                       ],
@@ -276,6 +292,62 @@ class _ScaledResultImageState extends State<ScaledResultImage> {
         ),
       ),
     );
+  }
+
+  List<Widget> _buildSavedAnnotationOverlays(
+    List<DamageAnnotationDraft> annotations,
+    double imWidth,
+    double imHeight,
+  ) {
+    final iconSize = 22.r;
+    return [
+      for (final draft in annotations)
+        _buildSavedMarkerOverlay(draft, imWidth, imHeight, iconSize),
+    ];
+  }
+
+  Widget _buildSavedMarkerOverlay(
+    DamageAnnotationDraft draft,
+    double imWidth,
+    double imHeight,
+    double iconSize,
+  ) {
+    final displayPos = normalizedToDisplayPosition(
+      draft.normalizedPosition,
+      imWidth,
+      imHeight,
+    );
+
+    return Positioned(
+      left: displayPos.dx - iconSize / 2,
+      top: displayPos.dy - iconSize / 2,
+      child: SavedDamageMarker(
+        damageTypeName: draft.damageTypeName,
+        onTap: () => widget.onSavedAnnotationTap?.call(draft),
+      ),
+    );
+  }
+
+  bool _isTapOnSavedMarker(Offset imagePos) {
+    final iconSize = 22.r;
+    for (final draft in widget.savedAnnotations) {
+      final displayPos = normalizedToDisplayPosition(
+        draft.normalizedPosition,
+        _displaySize.width,
+        _displaySize.height,
+      );
+      final origin = displayPos - Offset(iconSize / 2, iconSize / 2);
+      final markerRect = Rect.fromLTWH(
+        origin.dx,
+        origin.dy - 2.h,
+        148.w,
+        40.h,
+      );
+      if (markerRect.contains(imagePos)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Nút "Thêm tổn thất" — icon tròn căn tại [tap.displayPosition], chữ nằm bên phải.

@@ -5,19 +5,32 @@ import '../../../core/constants/string_sheet.dart';
 import '../../../core/themes/app_colors.dart';
 import '../../../core/themes/app_textstyle.dart';
 import '../../../core/utils/screen_utils.dart';
+import 'models/add_damage_view_result.dart';
 import 'models/damage_annotation_draft.dart';
 import 'models/damage_type_option.dart';
 import 'models/mask_tap_result.dart';
 import 'widgets/damage_type_grid.dart';
 
+enum AddDamageViewMode { add, edit }
+
 class AddDamageView extends StatefulWidget {
-  const AddDamageView({
+  const AddDamageView.add({
     super.key,
     required this.tapResult,
     this.imageUrl,
-  });
+  })  : mode = AddDamageViewMode.add,
+        initialDraft = null;
 
-  final MaskTapResult tapResult;
+  const AddDamageView.edit({
+    super.key,
+    required this.initialDraft,
+    this.imageUrl,
+  })  : mode = AddDamageViewMode.edit,
+        tapResult = null;
+
+  final AddDamageViewMode mode;
+  final MaskTapResult? tapResult;
+  final DamageAnnotationDraft? initialDraft;
   final String? imageUrl;
 
   @override
@@ -25,10 +38,48 @@ class AddDamageView extends StatefulWidget {
 }
 
 class _AddDamageViewState extends State<AddDamageView> {
-  String? _selectedDamageSlug;
+  late String? _selectedDamageSlug;
 
-  String get _partName =>
-      widget.tapResult.mask.vehiclePartName ?? StringSheet.unknown;
+  bool get _isEdit => widget.mode == AddDamageViewMode.edit;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedDamageSlug = _isEdit ? widget.initialDraft!.damageTypeSlug : null;
+  }
+
+  String get _partName {
+    if (_isEdit) {
+      return widget.initialDraft!.vehiclePartName;
+    }
+    return widget.tapResult!.mask.vehiclePartName ?? StringSheet.unknown;
+  }
+
+  DamageAnnotationDraft _buildDraftFromForm(DamageTypeOption option) {
+    if (_isEdit) {
+      final draft = widget.initialDraft!;
+      return DamageAnnotationDraft(
+        localId: draft.localId,
+        imageId: draft.imageId,
+        normalizedPosition: draft.normalizedPosition,
+        logicalPixelPosition: draft.logicalPixelPosition,
+        vehiclePartName: draft.vehiclePartName,
+        damageTypeSlug: option.slug,
+        damageTypeName: option.label,
+      );
+    }
+
+    final tap = widget.tapResult!;
+    return DamageAnnotationDraft(
+      localId: DamageAnnotationDraft.newLocalId(),
+      imageId: tap.imageId,
+      normalizedPosition: tap.normalizedPosition,
+      logicalPixelPosition: tap.logicalPixelPosition,
+      vehiclePartName: _partName,
+      damageTypeSlug: option.slug,
+      damageTypeName: option.label,
+    );
+  }
 
   void _save() {
     final slug = _selectedDamageSlug;
@@ -37,16 +88,14 @@ class _AddDamageViewState extends State<AddDamageView> {
     final option = DamageTypeOptions.bySlug(slug);
     if (option == null) return;
 
-    final tap = widget.tapResult;
     Navigator.of(context).pop(
-      DamageAnnotationDraft(
-        imageId: tap.imageId,
-        normalizedPosition: tap.normalizedPosition,
-        logicalPixelPosition: tap.logicalPixelPosition,
-        vehiclePartName: _partName,
-        damageTypeSlug: option.slug,
-        damageTypeName: option.label,
-      ),
+      AddDamageViewSaved(_buildDraftFromForm(option)),
+    );
+  }
+
+  void _delete() {
+    Navigator.of(context).pop(
+      AddDamageViewDeleted(widget.initialDraft!.localId),
     );
   }
 
@@ -79,7 +128,6 @@ class _AddDamageViewState extends State<AddDamageView> {
       value: SystemUiOverlayStyle.dark,
       child: SafeArea(
         child: Scaffold(
-          // Body dùng màu bottombarBackground; header tự đặt trắng.
           backgroundColor: AppColors.bottombarBackground,
           body: MediaQuery(
             data: landscapeMq.copyWith(
@@ -112,6 +160,9 @@ class _AddDamageViewState extends State<AddDamageView> {
   }
 
   Widget _buildHeader(BuildContext context) {
+    final title =
+        _isEdit ? StringSheet.editDamage : StringSheet.addDamage;
+
     return DecoratedBox(
       decoration: BoxDecoration(
         color: AppColors.white,
@@ -129,7 +180,7 @@ class _AddDamageViewState extends State<AddDamageView> {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Text(
-              StringSheet.addDamage,
+              title,
               style: AppTextStyles.base.s18.w700().copyWith(
                     color: AppColors.inkA500,
                   ),
@@ -227,26 +278,79 @@ class _AddDamageViewState extends State<AddDamageView> {
 
   Widget _buildFooter(BuildContext context) {
     final canSave = _selectedDamageSlug != null;
+
+    if (!_isEdit) {
+      return Padding(
+        padding: EdgeInsets.fromLTRB(14.w, 0, 14.w, 12.h),
+        child: SizedBox(
+          width: double.infinity,
+          height: 44.h,
+          child: FilledButton(
+            onPressed: canSave ? _save : null,
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.primaryA600,
+              disabledBackgroundColor: AppColors.primaryA300,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8.r),
+              ),
+            ),
+            child: Text(
+              StringSheet.saveChanges,
+              style: AppTextStyles.base.s14.w600().copyWith(
+                    color: AppColors.white,
+                  ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Padding(
       padding: EdgeInsets.fromLTRB(14.w, 0, 14.w, 12.h),
       child: SizedBox(
-        width: double.infinity,
         height: 44.h,
-        child: FilledButton(
-          onPressed: canSave ? _save : null,
-          style: FilledButton.styleFrom(
-            backgroundColor: AppColors.primaryA600,
-            disabledBackgroundColor: AppColors.primaryA300,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8.r),
-            ),
-          ),
-          child: Text(
-            StringSheet.saveChanges,
-            style: AppTextStyles.base.s14.w600().copyWith(
-                  color: AppColors.white,
+        child: Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _delete,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.redA500,
+                  side: const BorderSide(color: AppColors.redA300),
+                  backgroundColor: AppColors.redA200,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8.r),
+                  ),
                 ),
-          ),
+                icon: Icon(Icons.delete_outline_rounded, size: 18.r),
+                label: Text(
+                  StringSheet.deleteDamage,
+                  style: AppTextStyles.base.s14.w600().copyWith(
+                        color: AppColors.redA500,
+                      ),
+                ),
+              ),
+            ),
+            12.horizontalSpace,
+            Expanded(
+              child: FilledButton(
+                onPressed: canSave ? _save : null,
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.primaryA600,
+                  disabledBackgroundColor: AppColors.primaryA300,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8.r),
+                  ),
+                ),
+                child: Text(
+                  StringSheet.saveChanges,
+                  style: AppTextStyles.base.s14.w600().copyWith(
+                        color: AppColors.white,
+                      ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

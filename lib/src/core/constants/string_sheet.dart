@@ -96,6 +96,9 @@ class StringSheet {
   static const noDamageFound = 'Không phát hiện vết hỏng';
   static const addDamagePhoto = 'Thêm ảnh tổn thất';
   static const addDamage = 'Thêm tổn thất';
+  static const addNew = 'THÊM MỚI';
+  static const editDamage = 'Chỉnh sửa tổn thất';
+  static const deleteDamage = 'Xóa tổn thất';
   static const saveChanges = 'Lưu thay đổi';
   static const damageTypeSection = 'Loại tổn thất';
   static const damageTypeScratch = 'Trầy, xước';
