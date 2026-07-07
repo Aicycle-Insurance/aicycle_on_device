@@ -29,11 +29,9 @@ mixin _InspectionMixin on _CameraControllerBase {
     if (_latestDetections.isEmpty) return;
 
     // Vừa chụp toàn cảnh xong (đang ở màn hướng dẫn) mà đã phát hiện tổn thất
-    // → vào scanning luôn. Khi đang hiện
-    // "Thiếu tổn thất" / "Tiếp tục di chuyển", detection mới cũng được nhận
-    // ngay theo sơ đồ.
-    if (_inspectionPhase == InspectionPhase.panoramicGuide ||
-        _inspectionPhase == InspectionPhase.continueOrChange) {
+    // → vào scanning luôn. Riêng continueOrChange phải giữ đủ thời gian để user
+    // đọc được "Tiếp tục di chuyển..." / "Hãy đưa camera lại gần..." rồi mới quét.
+    if (_inspectionPhase == InspectionPhase.panoramicGuide) {
       _enterScanning();
     }
 
@@ -172,9 +170,8 @@ mixin _InspectionMixin on _CameraControllerBase {
     _startDetailTimer();
   }
 
-  /// Hiển thị [message] trong 5 s rồi quay lại scanning. Nếu trong lúc message
-  /// đang hiển thị có detection mới, [_maybeShowDetectionReady] sẽ chuyển sang
-  /// xác nhận ngay.
+  /// Hiển thị [message] đủ thời gian rồi quay lại scanning. Detection mới trong
+  /// lúc message đang hiển thị không ghi đè ngay, tránh user không kịp đọc.
   /// Dùng cho cả "Tiếp tục di chuyển camera…" và "Thiếu tổn thất".
   Future<void> _showMessageThenScan(
     String message, {
@@ -190,6 +187,7 @@ mixin _InspectionMixin on _CameraControllerBase {
     // Guard: flow có thể đã tự chuyển góc trong lúc chờ.
     if (_inspectionPhase != InspectionPhase.continueOrChange) return;
     _enterScanning();
+    if (_latestDetections.isNotEmpty) _enterDetectionReady();
   }
 
   /// Rời góc hiện tại — thoát inspection, mở khoá classification.

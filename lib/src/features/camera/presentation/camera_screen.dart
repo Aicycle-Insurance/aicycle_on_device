@@ -140,6 +140,12 @@ class _CameraScreenState extends State<CameraScreen>
 
   Future<bool> _onWillPop() async {
     final sessionId = widget.aiCycleConfig.generalConfig.documentId;
+    if (widget.aiCycleConfig.generalConfig.alwaysCache) {
+      // Ảnh đã được ghi xuống PhotoSessionCache ngay sau mỗi lần chụp; khi bật
+      // alwaysCache thì rời camera không hỏi xoá cache nữa.
+      _cameraController.stopCamera();
+      return true;
+    }
     final hasCachedSession =
         await PhotoSessionCache.instance.hasSessionData(sessionId);
     if (!mounted) return false;
@@ -334,14 +340,18 @@ class _CameraScreenState extends State<CameraScreen>
                             ),
                           ),
 
-                        /// Tooltip — buttons depend on inspection phase
+                        /// Tooltip — buttons depend on inspection phase.
+                        /// The app is portrait-locked, while users hold the phone
+                        /// landscape-left. Keep the tooltip rotated for readability,
+                        /// but anchor it near the portrait right edge so it appears
+                        /// at the top of the landscape view instead of the center.
                         if (_cameraController.message != null)
                           Positioned(
-                            left: 36.w,
-                            right: 36.w,
                             top: 105.h,
                             bottom: 140.h,
+                            right: 24.w,
                             child: Center(
+                              widthFactor: 1,
                               child: RotatedBox(
                                 quarterTurns: 1,
                                 child: _buildTooltip(),

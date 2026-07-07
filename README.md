@@ -216,6 +216,7 @@ final config = AICycleConfig(
 | `documentName` | `String?` | ❌ | `null` | Tên hồ sơ. |
 | `loggingEnabled` | `bool` | ❌ | `false` | Bật/tắt log của SDK. |
 | `savePhotoAfterShot` | `bool` | ❌ | `true` | Có lưu ảnh đã chụp vào gallery của máy không. |
+| `alwaysCache` | `bool` | ❌ | `false` | Khi thoát màn camera, giữ cache ảnh đã chụp và không hiện dialog xác nhận xoá cache. |
 | `aicBaseUrl` | `String?` | ❌ | `null` | Base URL API AICycle theo domain đối tác (on-premise). |
 
 ```dart
@@ -227,6 +228,7 @@ GeneralConfig(
   documentName: 'Hồ sơ kiểm định xe',
   loggingEnabled: false,
   savePhotoAfterShot: true,
+  alwaysCache: false,
   // Ví dụ override domain API cho môi trường đối tác.
   // aicBaseUrl: 'https://partner-api.example.com',
 );
