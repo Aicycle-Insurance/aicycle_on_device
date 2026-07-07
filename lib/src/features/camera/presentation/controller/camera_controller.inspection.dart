@@ -22,7 +22,7 @@ mixin _InspectionMixin on _CameraControllerBase {
   }
 
   /// Khi đang quét (scanning) mà phát hiện tổn thất → hiển thị xác nhận ngay.
-  /// Pha detailGuide KHÔNG short-circuit ở đây: nó chờ đủ 3 s (cho user lại gần)
+  /// Pha detailGuide KHÔNG short-circuit ở đây: nó chờ đủ 10 s (cho user lại gần)
   /// rồi mới tự đánh giá trong [_onDetailTimeout]. An toàn khi gọi nhiều lần.
   @override
   void _maybeShowDetectionReady() {
@@ -39,7 +39,7 @@ mixin _InspectionMixin on _CameraControllerBase {
     _enterDetectionReady();
   }
 
-  /// Chuyển sang detectionReady: hiện xác nhận tổn thất + mở timer 5 s chụp ngầm.
+  /// Chuyển sang detectionReady: hiện xác nhận tổn thất + mở timer 10 s chụp ngầm.
   /// Dùng cho cả ảnh tổng quan (từ scanning) và ảnh chi tiết (từ detailGuide).
   /// [_inDetailStage] do bên gọi quyết định.
   void _enterDetectionReady() {
@@ -51,10 +51,10 @@ mixin _InspectionMixin on _CameraControllerBase {
       message: StringSheet.damageDetectedGuide,
       type: MessageType.info,
     ));
-    // Cứ mỗi 5 s không bấm gì → tự động chụp ngầm, nhưng vẫn giữ tooltip xác
+    // Cứ mỗi 10 s không bấm gì → tự động chụp ngầm, nhưng vẫn giữ tooltip xác
     // nhận cho tới khi user bấm "Xác nhận" hoặc "Thiếu tổn thất".
     _autoCaptureTimer?.cancel();
-    _autoCaptureTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+    _autoCaptureTimer = Timer.periodic(_damageAutoCaptureInterval, (timer) {
       if (_inspectionPhase != InspectionPhase.detectionReady) {
         timer.cancel();
         return;
@@ -105,7 +105,7 @@ mixin _InspectionMixin on _CameraControllerBase {
     );
   }
 
-  /// User pressed "Xác nhận" (hoặc auto sau 5 s) — chụp ảnh tổn thất.
+  /// User pressed "Xác nhận" (hoặc auto sau 10 s) — chụp ảnh tổn thất.
   ///   - Nếu vừa chụp ảnh TỔNG QUAN → sang pha [detailGuide] để chụp ảnh chi tiết.
   ///   - Nếu vừa chụp ảnh CHI TIẾT → nhắc "Tiếp tục di chuyển camera…" rồi quét tiếp.
   Future<void> confirmDamage({bool flashTick = true}) async {
@@ -134,8 +134,9 @@ mixin _InspectionMixin on _CameraControllerBase {
 
   // ── Detail-photo stage ─────────────────────────────────────────────────────
 
-  /// Sau khi chụp ảnh tổng quan: nhắc user lại gần để chụp ảnh chi tiết. Mở 3 s
-  /// timer; trong lúc đó nếu phát hiện tổn thất → quay lại detectionReady (detail).
+  /// Sau khi chụp ảnh tổng quan: nhắc user lại gần để chụp ảnh chi tiết. Sau
+  /// 10 s chưa nhận diện thì tự chụp một ảnh; sau thêm 5 s vẫn chưa nhận diện
+  /// thì chuyển sang hướng dẫn tiếp tục di chuyển.
   void _enterDetailGuide() {
     _cancelNoDetectionWarningTimer();
     _inDetailStage = true;
@@ -149,13 +150,14 @@ mixin _InspectionMixin on _CameraControllerBase {
 
   void _startDetailTimer() {
     _detailTimer?.cancel();
-    _detailTimer = Timer(const Duration(seconds: 3), _onDetailTimeout);
+    _detailTimer = Timer(_detailAutoCaptureDelay, _onDetailTimeout);
   }
 
-  /// Hết 3 s ở pha detailGuide:
+  /// Hết 10 s ở pha detailGuide:
   ///   - Nếu đang có tổn thất trong khung → mở xác nhận ảnh chi tiết.
-  ///   - Nếu chưa thấy tổn thất → chụp ngầm 1 ảnh chi tiết rồi tiếp tục chờ.
+  ///   - Nếu chưa thấy tổn thất → chụp ngầm 1 ảnh chi tiết rồi chờ thêm 5 s.
   Future<void> _onDetailTimeout() async {
+    _detailTimer = null;
     if (_inspectionPhase != InspectionPhase.detailGuide) return;
 
     if (_latestDetections.isNotEmpty) {
@@ -167,7 +169,27 @@ mixin _InspectionMixin on _CameraControllerBase {
     await capturePhoto(immediate: true, flashTick: false);
     // Trong lúc chụp, frame mới có thể đã đổi pha (vd phát hiện tổn thất).
     if (_inspectionPhase != InspectionPhase.detailGuide) return;
-    _startDetailTimer();
+    _startDetailPostCaptureTimer();
+  }
+
+  void _startDetailPostCaptureTimer() {
+    _detailTimer?.cancel();
+    _detailTimer = Timer(
+      _detailPostCaptureNoDetectionDelay,
+      _onDetailPostCaptureTimeout,
+    );
+  }
+
+  Future<void> _onDetailPostCaptureTimeout() async {
+    _detailTimer = null;
+    if (_inspectionPhase != InspectionPhase.detailGuide) return;
+
+    if (_latestDetections.isNotEmpty) {
+      _enterDetectionReady();
+      return;
+    }
+
+    await _showMessageThenScan(StringSheet.continueToNextDamage);
   }
 
   /// Hiển thị [message] đủ thời gian rồi quay lại scanning. Detection mới trong
@@ -198,9 +220,10 @@ mixin _InspectionMixin on _CameraControllerBase {
   /// Giữ angle trong [_panoramicCapturedSegments] để khi quay lại sẽ vào
   /// thẳng scanning (không chụp toàn cảnh lại).
   ///
-  /// Sau khi hoàn thành, hiển thị message điều hướng tới góc chưa hoàn thành
-  /// tiếp theo theo thứ tự 0 → 1 → 2 → 3 (bỏ qua góc đã completed). Nếu cả 4
-  /// góc đã completed thì không hiển thị message điều hướng.
+  /// Sau khi hoàn thành ở flow 4-góc, hiển thị message điều hướng tới góc chưa
+  /// hoàn thành tiếp theo theo thứ tự 0 → 1 → 2 → 3. Khi 4-góc tắt,
+  /// `_completedSegments` chỉ phản ánh góc đã có ảnh, không phải góc classifier
+  /// từng đi qua.
   void completeCurrentAngle() {
     _autoCaptureTimer?.cancel();
     _autoCaptureTimer = null;
@@ -209,7 +232,7 @@ mixin _InspectionMixin on _CameraControllerBase {
     _detailTimer = null;
     _inDetailStage = false;
     final justCompleted = _activeSegmentIndex;
-    if (justCompleted != null) {
+    if (justCompleted != null && _require4Angles) {
       _completedSegments.add(justCompleted);
     }
     _classificationLocked = false;
@@ -261,7 +284,7 @@ mixin _InspectionMixin on _CameraControllerBase {
     _inDetailStage = false;
 
     final previousSegment = _activeSegmentIndex;
-    if (previousSegment != null) {
+    if (previousSegment != null && _require4Angles) {
       _completedSegments.add(previousSegment);
     }
 

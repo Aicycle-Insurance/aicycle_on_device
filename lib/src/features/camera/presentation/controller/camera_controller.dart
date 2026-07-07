@@ -26,7 +26,7 @@ enum InspectionPhase {
   /// → detectionReady. Sau 10 s không có detection → warning.
   scanning,
 
-  /// Detections found — showing "Xác nhận / Thiếu tổn thất". Sau 5 s không
+  /// Detections found — showing "Xác nhận / Thiếu tổn thất". Sau 10 s không
   /// bấm gì sẽ tự động chụp ngầm lặp lại, nhưng vẫn giữ tooltip cho tới khi
   /// user bấm "Xác nhận" hoặc "Thiếu tổn thất". Dùng cho cả ảnh tổng quan
   /// (overview) lẫn ảnh chi tiết (detail) — phân biệt bằng
@@ -37,9 +37,9 @@ enum InspectionPhase {
   capturingDamage,
 
   /// Sau khi chụp ảnh tổng quan: nhắc "Di chuyển camera đến gần vùng có tổn
-  /// thất để chụp ảnh chi tiết". Trong 3 s: phát hiện tổn thất → quay lại
-  /// detectionReady (detail); cứ hết 3 s không thấy → tự động chụp ngầm 1 ảnh
-  /// chi tiết rồi tiếp tục chờ ở detailGuide.
+  /// thất để chụp ảnh chi tiết". Nếu sau 10 s vẫn chưa nhận diện tổn thất thì
+  /// tự chụp một ảnh; sau thêm 5 s vẫn chưa nhận diện thì chuyển sang nhắc di
+  /// chuyển tới vùng tổn thất khác.
   detailGuide,
 
   /// Hiển thị message "Tiếp tục di chuyển camera…" trong 5 s rồi quay lại
@@ -70,6 +70,15 @@ const _captureSuccessVisibleDuration = Duration(seconds: 3);
 /// Mỗi tooltip khi đã xuất hiện phải được giữ tối thiểu khoảng này trước khi
 /// một message/phase khác thay thế, để tránh user chưa kịp đọc.
 const _tooltipMinVisibleDuration = Duration(seconds: 3);
+
+/// Nhịp chụp tự động khi đang ở màn xác nhận tổn thất.
+const _damageAutoCaptureInterval = Duration(seconds: 10);
+
+/// Ở pha chụp ảnh chi tiết, chờ user đưa camera lại gần trước khi auto-capture.
+const _detailAutoCaptureDelay = Duration(seconds: 10);
+
+/// Sau ảnh chi tiết tự động, nếu vẫn không nhận diện thì chuyển hướng user.
+const _detailPostCaptureNoDetectionDelay = Duration(seconds: 5);
 
 /// Cấu hình mỗi góc: (tên ba đờ sốc cần thấy, message điều hướng tới góc đó).
 const _segmentConfigs = {
@@ -198,7 +207,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// Current phase of the damage inspection sub-flow. null = not in inspection.
   InspectionPhase? _inspectionPhase;
 
-  /// 5s timer chạy ở detectionReady: cứ mỗi 5s tự động chụp ngầm một ảnh tổn
+  /// Timer chạy ở detectionReady: cứ mỗi 10s tự động chụp ngầm một ảnh tổn
   /// thất cho tới khi user bấm "Xác nhận" hoặc "Thiếu tổn thất".
   Timer? _autoCaptureTimer;
 
@@ -206,7 +215,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// thì hiển thị warning, nhưng không tự rời góc.
   Timer? _noDetectionWarningTimer;
 
-  /// 3s timer của pha [InspectionPhase.detailGuide] (chụp ảnh chi tiết).
+  /// Timer của pha [InspectionPhase.detailGuide] (chụp ảnh chi tiết).
   Timer? _detailTimer;
 
   /// True khi detectionReady đến từ pha detailGuide (đang chờ xác nhận ảnh chi
