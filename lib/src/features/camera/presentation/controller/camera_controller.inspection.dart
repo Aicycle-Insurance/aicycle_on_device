@@ -190,6 +190,10 @@ mixin _InspectionMixin on _CameraControllerBase {
     if (_latestDetections.isNotEmpty) _enterDetectionReady();
   }
 
+  @override
+  Future<void> _showManualCaptureContinueGuide() =>
+      _showMessageThenScan(StringSheet.continueToNextDamage);
+
   /// Rời góc hiện tại — thoát inspection, mở khoá classification.
   /// Giữ angle trong [_panoramicCapturedSegments] để khi quay lại sẽ vào
   /// thẳng scanning (không chụp toàn cảnh lại).

@@ -67,6 +67,10 @@ const _plateClearPromptMinDuration = Duration(seconds: 3);
 /// hướng dẫn tiếp theo.
 const _captureSuccessVisibleDuration = Duration(seconds: 3);
 
+/// Mỗi tooltip khi đã xuất hiện phải được giữ tối thiểu khoảng này trước khi
+/// một message/phase khác thay thế, để tránh user chưa kịp đọc.
+const _tooltipMinVisibleDuration = Duration(seconds: 3);
+
 /// Cấu hình mỗi góc: (tên ba đờ sốc cần thấy, message điều hướng tới góc đó).
 const _segmentConfigs = {
   0: ('Ba đờ sốc trước', StringSheet.frontRightGuide),
@@ -128,6 +132,11 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// this to trigger a screen-blink (flash) effect.
   int _captureFlashTick = 0;
   CameraMessage? _message;
+  InspectionPhase? _messagePhase;
+  DateTime? _messageShownAt;
+  CameraMessage? _pendingMessage;
+  InspectionPhase? _pendingMessagePhase;
+  Timer? _pendingMessageTimer;
 
   /// Segment index (0–3) đang được detect, null nếu chưa nhận kết quả.
   /// Đây là góc cho LUỒNG xử lý (bị khoá khi [_classificationLocked]).
@@ -222,6 +231,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// đó. (Flow 4 góc giữ nguyên: highlight vàng đè lên xanh.)
   bool get completedTakesPriority => !_require4Angles;
   CameraMessage? get message => _message;
+  InspectionPhase? get messagePhase => _messagePhase;
   int get captureFlashTick => _captureFlashTick;
   List<DetectionResult> get latestDetections => _latestDetections;
   List<DetectionResult> get latestCarPartDetections => _latestCarPartDetections;
@@ -306,8 +316,66 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   void clearMessage() => _setMessage(null);
 
   void _setMessage(CameraMessage? msg) {
-    if (_message == msg) return;
+    final phase = _inspectionPhase;
+    if (_isSameMessageState(_message, _messagePhase, msg, phase)) {
+      _cancelPendingMessage();
+      return;
+    }
+    if (_isSameMessageState(
+        _pendingMessage, _pendingMessagePhase, msg, phase)) {
+      return;
+    }
+
+    final remaining = _tooltipRemainingVisibleDuration;
+    if (remaining > Duration.zero) {
+      _cancelPendingMessage();
+      _pendingMessage = msg;
+      _pendingMessagePhase = phase;
+      _pendingMessageTimer = Timer(remaining, () {
+        final pendingMessage = _pendingMessage;
+        final pendingPhase = _pendingMessagePhase;
+        _pendingMessage = null;
+        _pendingMessagePhase = null;
+        _pendingMessageTimer = null;
+        _applyMessage(pendingMessage, pendingPhase);
+      });
+      return;
+    }
+
+    _applyMessage(msg, phase);
+  }
+
+  bool _isSameMessageState(
+    CameraMessage? a,
+    InspectionPhase? aPhase,
+    CameraMessage? b,
+    InspectionPhase? bPhase,
+  ) {
+    if (a == null || b == null) return a == null && b == null;
+    return a.message == b.message && a.type == b.type && aPhase == bPhase;
+  }
+
+  Duration get _tooltipRemainingVisibleDuration {
+    final shownAt = _messageShownAt;
+    if (_message == null || shownAt == null) return Duration.zero;
+    final visibleDuration = DateTime.now().difference(shownAt);
+    if (visibleDuration >= _tooltipMinVisibleDuration) return Duration.zero;
+    return _tooltipMinVisibleDuration - visibleDuration;
+  }
+
+  void _cancelPendingMessage() {
+    _pendingMessageTimer?.cancel();
+    _pendingMessageTimer = null;
+    _pendingMessage = null;
+    _pendingMessagePhase = null;
+  }
+
+  void _applyMessage(CameraMessage? msg, InspectionPhase? phase) {
+    _cancelPendingMessage();
+    if (_isSameMessageState(_message, _messagePhase, msg, phase)) return;
     _message = msg;
+    _messagePhase = msg == null ? null : phase;
+    _messageShownAt = msg == null ? null : DateTime.now();
     notifyListeners();
   }
 
@@ -342,6 +410,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
     _noDetectionWarningTimer?.cancel();
     _detailTimer?.cancel();
     _plateReadTimer?.cancel();
+    _cancelPendingMessage();
     stopCamera(); // no-op nếu đã gọi trước đó
     super.dispose();
   }
@@ -359,6 +428,10 @@ abstract class _CameraControllerBase extends ChangeNotifier {
 
   /// [_InspectionMixin] — mở 10 s no-detection warning timeout.
   void _startNoDetectionWarningTimer();
+
+  /// [_InspectionMixin] — sau khi user chụp manual từ warning không nhận diện
+  /// tổn thất, hiển thị hướng dẫn di chuyển tiếp rồi quay lại scanning.
+  Future<void> _showManualCaptureContinueGuide();
 
   /// [_InspectionMixin] — tự động rời góc hiện tại khi classifier nhận diện
   /// user đã di chuyển sang góc xe khác.

@@ -18,6 +18,7 @@ import 'widgets/camera_corner_bracket.dart';
 import 'widgets/camera_guide_sheet.dart';
 import 'widgets/camera_top_bar.dart';
 import 'widgets/car_progress_dialog.dart';
+import 'widgets/manual_capture_hint_hand.dart';
 import 'widgets/tool_tip.dart';
 import 'widgets/view_result_button.dart';
 
@@ -195,7 +196,7 @@ class _CameraScreenState extends State<CameraScreen>
   }
 
   Widget _buildTooltip() {
-    final phase = _cameraController.inspectionPhase;
+    final phase = _cameraController.messagePhase;
     final msg = _cameraController.message!;
     final isDetectionReady = phase == InspectionPhase.detectionReady;
     return CameraToolTip(
@@ -217,6 +218,9 @@ class _CameraScreenState extends State<CameraScreen>
       },
     );
   }
+
+  bool get _showManualCaptureHint =>
+      _cameraController.message?.message == StringSheet.noDamageDetectedGuide;
 
   bool _canGoNext() {
     final completed = _cameraController.completedSegments;
@@ -381,6 +385,18 @@ class _CameraScreenState extends State<CameraScreen>
                           onShowProgress: _showCarProgressDialog,
                           onCapture: _cameraController.manualCapture,
                         ),
+                        if (_showManualCaptureHint)
+                          Positioned(
+                            left: 0,
+                            right: 0.w,
+                            bottom: 112.h,
+                            child: Center(
+                              child: ManualCaptureHintHand(
+                                width: 73.r,
+                                height: 63.r,
+                              ),
+                            ),
+                          ),
 
                         /// Nút "Xem kết quả" (2 bước chống chạm nhầm) — góc dưới phải.
                         if (_canGoNext())

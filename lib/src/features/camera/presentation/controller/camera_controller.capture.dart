@@ -66,8 +66,16 @@ mixin _CaptureMixin on _CameraControllerBase {
 
   /// Chụp thủ công bằng nút shutter: chụp ngay, lưu vào góc đang active (mặc
   /// định góc 0 nếu chưa phân loại được góc).
-  Future<void> manualCapture() =>
-      capturePhoto(immediate: true, segment: _activeSegmentIndex ?? 0);
+  Future<void> manualCapture() async {
+    final shouldContinueAfterCapture =
+        _message?.message == StringSheet.noDamageDetectedGuide;
+    final captured = await capturePhoto(
+      immediate: true,
+      segment: _activeSegmentIndex ?? 0,
+    );
+    if (captured == null || !shouldContinueAfterCapture || _stopped) return;
+    await _showManualCaptureContinueGuide();
+  }
 
   /// Called by ResultController after an angle's photos are successfully uploaded.
   /// Strips photos from memory and marks the angle completed so the progress

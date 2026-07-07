@@ -10,4 +10,5 @@ class AppAssets {
   static const car = '$_images/car.png';
   static const arrows = '$_images/arrows.png';
   static const spinner = '$_images/spinner.png';
+  static const hand = '$_images/hand.png';
 }
