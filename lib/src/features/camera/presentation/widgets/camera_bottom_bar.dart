@@ -1,10 +1,8 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:native_device_orientation/native_device_orientation.dart';
 
 import '../../../../core/themes/app_colors.dart';
-import '../../../../core/utils/orientation_utils.dart';
 import '../../../../core/utils/screen_utils.dart';
 import 'car_progress_ring.dart';
 
@@ -84,29 +82,20 @@ class CameraBottomBar extends StatelessWidget {
   Widget _buildThumbnail() {
     final lastPhoto = capturedPhotos.values.expand((l) => l).lastOrNull;
     if (lastPhoto != null) {
-      return NativeDeviceOrientationReader(
-        useSensor: true,
-        builder: (context) {
-          final orientation =
-              NativeDeviceOrientationReader.orientation(context);
-          final turns = OrientationUtils.getTurns(orientation);
-          return AnimatedRotation(
-            turns: turns,
-            duration: const Duration(milliseconds: 300),
-            child: Container(
-              width: 48.w,
-              height: 48.w,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8.r),
-                border: Border.all(color: AppColors.white, width: 2),
-                image: DecorationImage(
-                  image: MemoryImage(lastPhoto),
-                  fit: BoxFit.cover,
-                ),
-              ),
+      return RotatedBox(
+        quarterTurns: 1,
+        child: Container(
+          width: 48.w,
+          height: 48.w,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8.r),
+            border: Border.all(color: AppColors.white, width: 2),
+            image: DecorationImage(
+              image: MemoryImage(lastPhoto),
+              fit: BoxFit.cover,
             ),
-          );
-        },
+          ),
+        ),
       );
     }
     return Container(

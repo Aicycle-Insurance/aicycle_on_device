@@ -7,7 +7,9 @@ bao gồm cả message hiển thị (`_setMessage`) theo từng bước.
 Mọi message hiển thị qua `_setMessage(CameraMessage(message, type))`. `type`
 quyết định màu/icon tooltip: `guide / info / warning / loading / success`.
 Tooltip đã hiển thị sẽ được giữ tối thiểu **3s** trước khi message/phase khác
-được phép thay thế.
+được phép thay thế. Ngoại lệ: message phản hồi một sự kiện vừa xảy ra có thể
+dùng `_setMessage(..., immediate: true)` để hiển thị ngay, ví dụ chụp thành
+công và điều hướng sau thao tác của người dùng.
 
 ---
 
@@ -96,7 +98,7 @@ stateDiagram-v2
     warning: warning\nmsg noDamageDetectedGuide\nhiện hand hint tới nút chụp\nkhông tự rời góc
     detectionReady: detectionReady\nmsg damageDetectedGuide\nnút [Xác nhận] [Thiếu tổn thất]\nmỗi 10s chụp ngầm
     capturingDamage: capturingDamage\ncapturePhoto khi Xác nhận
-    detailGuide: detailGuide\nmsg detailPhotoGuide\n10s auto-chụp 1 ảnh nếu chưa detect
+    detailGuide: detailGuide\nmsg detailPhotoGuide\ncó detection → xác nhận ngay\n10s chưa detect → auto-chụp 1 ảnh
     detailWait: detailWait\nsau auto-chụp detail\nchờ thêm 5s
     continueOrChange: continueOrChange\nmsg continueToNextDamage / moveCameraToMissing\nsau 5s quay lại scanning
     rgoc: _autoSwitchToDetectedSegment()\n4-góc ON: hoàn tất góc cũ\n4-góc OFF: chỉ đổi góc nếu chưa có ảnh
@@ -120,7 +122,7 @@ stateDiagram-v2
     capturingDamage --> detailGuide: vừa chụp ảnh tổng quan
     capturingDamage --> continueOrChange: vừa chụp ảnh chi tiết
 
-    detailGuide --> detectionReady: tại mốc 10s có detection
+    detailGuide --> detectionReady: có detection
     detailGuide --> detailWait: 10s chưa detect\nchụp ngầm 1 ảnh
     detailWait --> detectionReady: trong 5s sau ảnh ngầm có detection
     detailWait --> continueOrChange: hết 5s vẫn chưa detect
@@ -152,7 +154,7 @@ flowchart TD
     D -->|"Xác nhận"| E["capturePhoto(immediate:true)<br/>msg captureSuccess 3s"]
 
     E --> H["msg: detailPhotoGuide<br/>'Di chuyển camera đến gần vùng có tổn thất để chụp ảnh chi tiết'"]
-    H -->|"sau 10s có detection"| J["msg: damageDetectedGuide<br/>Buttons: Xác nhận / Thiếu tổn thất"]
+    H -->|"có detection"| J["msg: damageDetectedGuide<br/>Buttons: Xác nhận / Thiếu tổn thất"]
     H -->|"sau 10s chưa detect"| I["auto capture detail ngầm 1 ảnh<br/>flashTick:false"]
     I -->|"trong 5s có detection"| J
     I -->|"sau 5s vẫn chưa detect"| N
@@ -192,12 +194,11 @@ sequenceDiagram
 
     C->>UI: msg detailPhotoGuide
     Note over C: Start _detailTimer = 10s
-    AI-->>C: detection frame?
-    Note over C: Không short-circuit ngay trong detailGuide<br/>đánh giá ở mốc timeout
-    C->>C: sau 10s _onDetailTimeout()
-    alt có detection
+    AI-->>C: detection frame
+    alt có detection trước timeout
         C->>UI: msg damageDetectedGuide
-    else chưa có detection
+    else chưa có detection sau 10s
+        C->>C: _onDetailTimeout()
         C->>C: capturePhoto(immediate:true, flashTick:false)
         Note over C: Start post-capture timer = 5s
         C->>C: sau 5s _onDetailPostCaptureTimeout()
@@ -235,7 +236,7 @@ flowchart TD
 | `inspectDamageGuide` | info | Vào `panoramicGuide` |
 | `damageDetectedGuide` | info | `detectionReady`, có nút `Xác nhận` / `Thiếu tổn thất` |
 | `moveCameraToMissing` | info | User bấm `Thiếu tổn thất`; giữ 10s rồi quét lại |
-| `detailPhotoGuide` | info | Sau khi xác nhận ảnh tổng quan; chờ 10s để chụp/đánh giá ảnh chi tiết |
+| `detailPhotoGuide` | info | Sau khi xác nhận ảnh tổng quan; có detection thì mở xác nhận ngay, không detect sau 10s thì auto-chụp ảnh chi tiết |
 | `continueToNextDamage` | info | Sau khi xác nhận ảnh chi tiết, sau manual capture từ warning, hoặc detailGuide 10s + 5s vẫn không detect |
 | `noDamageDetectedGuide` | warning | 10s không thấy tổn thất ở `panoramicGuide` / `scanning`; hiện hand hint |
 | `null` | — | `scanning`, hoặc rời góc (4-góc OFF / đã đủ góc) |

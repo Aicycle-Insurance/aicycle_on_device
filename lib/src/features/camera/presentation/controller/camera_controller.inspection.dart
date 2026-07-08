@@ -21,9 +21,9 @@ mixin _InspectionMixin on _CameraControllerBase {
     _startNoDetectionWarningTimer();
   }
 
-  /// Khi đang quét (scanning) mà phát hiện tổn thất → hiển thị xác nhận ngay.
-  /// Pha detailGuide KHÔNG short-circuit ở đây: nó chờ đủ 10 s (cho user lại gần)
-  /// rồi mới tự đánh giá trong [_onDetailTimeout]. An toàn khi gọi nhiều lần.
+  /// Khi đang quét hoặc đang chờ ảnh chi tiết mà phát hiện tổn thất → hiển thị
+  /// xác nhận ngay. Nếu đang ở detailGuide, timer auto-capture sẽ được huỷ trong
+  /// [_enterDetectionReady]. An toàn khi gọi nhiều lần.
   @override
   void _maybeShowDetectionReady() {
     if (_latestDetections.isEmpty) return;
@@ -35,7 +35,10 @@ mixin _InspectionMixin on _CameraControllerBase {
       _enterScanning();
     }
 
-    if (_inspectionPhase != InspectionPhase.scanning) return;
+    if (_inspectionPhase != InspectionPhase.scanning &&
+        _inspectionPhase != InspectionPhase.detailGuide) {
+      return;
+    }
     _enterDetectionReady();
   }
 
@@ -47,10 +50,12 @@ mixin _InspectionMixin on _CameraControllerBase {
     _detailTimer?.cancel();
     _detailTimer = null;
     _setInspectionPhase(InspectionPhase.detectionReady);
-    _setMessage(CameraMessage(
-      message: StringSheet.damageDetectedGuide,
-      type: MessageType.info,
-    ));
+    _setMessage(
+      CameraMessage(
+        message: StringSheet.damageDetectedGuide,
+        type: MessageType.info,
+      ),
+    );
     // Cứ mỗi 10 s không bấm gì → tự động chụp ngầm, nhưng vẫn giữ tooltip xác
     // nhận cho tới khi user bấm "Xác nhận" hoặc "Thiếu tổn thất".
     _autoCaptureTimer?.cancel();
@@ -117,10 +122,13 @@ mixin _InspectionMixin on _CameraControllerBase {
 
     final captured = await capturePhoto(immediate: true, flashTick: flashTick);
     if (captured != null) {
-      _setMessage(CameraMessage(
-        message: StringSheet.captureSuccess,
-        type: MessageType.success,
-      ));
+      _setMessage(
+        CameraMessage(
+          message: StringSheet.captureSuccess,
+          type: MessageType.success,
+        ),
+        immediate: true,
+      );
       await Future.delayed(_captureSuccessVisibleDuration);
       if (_stopped) return;
     }
@@ -203,7 +211,10 @@ mixin _InspectionMixin on _CameraControllerBase {
     _detailTimer?.cancel();
     _detailTimer = null;
     _setInspectionPhase(InspectionPhase.continueOrChange);
-    _setMessage(CameraMessage(message: message, type: MessageType.info));
+    _setMessage(
+      CameraMessage(message: message, type: MessageType.info),
+      immediate: true,
+    );
 
     await Future.delayed(duration);
     // Guard: flow có thể đã tự chuyển góc trong lúc chờ.

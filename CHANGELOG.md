@@ -1,4 +1,10 @@
-## 0.1.2
+## 0.1.4
+
+* Improve camera inspection tooltip timing and priority handling
+* Update damage inspection auto-capture flow and detail-photo guidance
+* Fix progress ring completion state when 4-angle panoramic capture is disabled
+
+## 0.1.3
 
 * Fix bugs and update auto capture flow
 

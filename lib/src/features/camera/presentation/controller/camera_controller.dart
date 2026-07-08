@@ -324,8 +324,13 @@ abstract class _CameraControllerBase extends ChangeNotifier {
 
   void clearMessage() => _setMessage(null);
 
-  void _setMessage(CameraMessage? msg) {
+  void _setMessage(CameraMessage? msg, {bool immediate = false}) {
     final phase = _inspectionPhase;
+    if (immediate) {
+      _applyMessage(msg, phase);
+      return;
+    }
+
     if (_isSameMessageState(_message, _messagePhase, msg, phase)) {
       _cancelPendingMessage();
       return;
