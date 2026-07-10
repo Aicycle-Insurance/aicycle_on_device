@@ -39,6 +39,16 @@ mixin _InspectionMixin on _CameraControllerBase {
         _inspectionPhase != InspectionPhase.detailGuide) {
       return;
     }
+    // Hướng dẫn "Di chuyển camera đến gần tổn thất…" phải hiển thị tối thiểu
+    // 5s trước khi detection mở lại màn xác nhận — AI nhận diện liên tiếp sẽ
+    // không làm user bị bounce ngay sang tooltip xác nhận khi chưa kịp đọc.
+    if (_inspectionPhase == InspectionPhase.detailGuide) {
+      final shownAt = _detailGuideShownAt;
+      if (shownAt != null &&
+          DateTime.now().difference(shownAt) < _detailGuideMinVisibleDuration) {
+        return;
+      }
+    }
     _enterDetectionReady();
   }
 
@@ -56,15 +66,14 @@ mixin _InspectionMixin on _CameraControllerBase {
         type: MessageType.info,
       ),
     );
-    // Cứ mỗi 10 s không bấm gì → tự động chụp ngầm, nhưng vẫn giữ tooltip xác
-    // nhận cho tới khi user bấm "Xác nhận" hoặc "Thiếu tổn thất".
+    // Sau 10 s không bấm gì → tự động xác nhận: đi đúng flow như bấm
+    // "Xác nhận" (chụp + thông báo thành công + hướng dẫn di chuyển, các
+    // thông báo đều được giữ đủ lâu để user kịp đọc) nhưng không blink.
     _autoCaptureTimer?.cancel();
-    _autoCaptureTimer = Timer.periodic(_damageAutoCaptureInterval, (timer) {
-      if (_inspectionPhase != InspectionPhase.detectionReady) {
-        timer.cancel();
-        return;
-      }
-      capturePhoto(immediate: true, flashTick: false);
+    _autoCaptureTimer = Timer(_damageAutoCaptureInterval, () {
+      _autoCaptureTimer = null;
+      if (_inspectionPhase != InspectionPhase.detectionReady) return;
+      confirmDamage(flashTick: false);
     });
   }
 
@@ -152,6 +161,7 @@ mixin _InspectionMixin on _CameraControllerBase {
     _cancelNoDetectionWarningTimer();
     _inDetailStage = true;
     _setInspectionPhase(InspectionPhase.detailGuide);
+    _detailGuideShownAt = DateTime.now();
     _setMessage(CameraMessage(
       message: StringSheet.detailPhotoGuide,
       type: MessageType.info,

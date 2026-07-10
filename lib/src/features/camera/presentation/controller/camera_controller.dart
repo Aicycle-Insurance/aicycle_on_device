@@ -27,10 +27,9 @@ enum InspectionPhase {
   scanning,
 
   /// Detections found — showing "Xác nhận / Thiếu tổn thất". Sau 10 s không
-  /// bấm gì sẽ tự động chụp ngầm lặp lại, nhưng vẫn giữ tooltip cho tới khi
-  /// user bấm "Xác nhận" hoặc "Thiếu tổn thất". Dùng cho cả ảnh tổng quan
-  /// (overview) lẫn ảnh chi tiết (detail) — phân biệt bằng
-  /// [_CameraControllerBase._inDetailStage].
+  /// bấm gì sẽ tự động xác nhận: chụp + hiển thị thông báo như bấm "Xác nhận"
+  /// (không blink). Dùng cho cả ảnh tổng quan (overview) lẫn ảnh chi tiết
+  /// (detail) — phân biệt bằng [_CameraControllerBase._inDetailStage].
   detectionReady,
 
   /// Đang chụp ảnh tổn thất (tự động hoặc do bấm "Xác nhận").
@@ -75,11 +74,17 @@ const _tooltipMinVisibleDuration = Duration(seconds: 3);
 /// chụp ảnh — tương đương thời gian blink màn hình.
 const _cornerSuccessFlashDuration = Duration(milliseconds: 500);
 
-/// Nhịp chụp tự động khi đang ở màn xác nhận tổn thất.
+/// Ở màn xác nhận tổn thất: sau khoảng này không bấm gì → tự động xác nhận
+/// (chụp + hiển thị thông báo như bấm "Xác nhận", không blink).
 const _damageAutoCaptureInterval = Duration(seconds: 10);
 
 /// Ở pha chụp ảnh chi tiết, chờ user đưa camera lại gần trước khi auto-capture.
 const _detailAutoCaptureDelay = Duration(seconds: 10);
+
+/// Giữ hướng dẫn "Di chuyển camera đến gần tổn thất…" (detailGuide) tối thiểu
+/// khoảng này trước khi cho phép detection mở lại màn xác nhận — để user kịp
+/// đọc, tránh bị bounce liên tiếp giữa 2 tooltip khi AI nhận diện liên tục.
+const _detailGuideMinVisibleDuration = Duration(seconds: 5);
 
 /// Sau ảnh chi tiết tự động, nếu vẫn không nhận diện thì chuyển hướng user.
 const _detailPostCaptureNoDetectionDelay = Duration(seconds: 5);
@@ -226,6 +231,11 @@ abstract class _CameraControllerBase extends ChangeNotifier {
 
   /// Timer của pha [InspectionPhase.detailGuide] (chụp ảnh chi tiết).
   Timer? _detailTimer;
+
+  /// Mốc bắt đầu hiển thị hướng dẫn detailGuide ("Di chuyển camera đến gần
+  /// tổn thất…"). Detection chỉ được mở lại màn xác nhận sau khi hướng dẫn đã
+  /// hiển thị tối thiểu [_detailGuideMinVisibleDuration].
+  DateTime? _detailGuideShownAt;
 
   /// True khi detectionReady đến từ pha detailGuide (đang chờ xác nhận ảnh chi
   /// tiết) — phân biệt với ảnh tổng quan để biết bước kế tiếp sau khi chụp.
