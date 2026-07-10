@@ -35,13 +35,13 @@ mixin _CaptureMixin on _CameraControllerBase {
       /// Chụp tự động quá nhanh, người dùng chưa kịp đọc message -> delay 3s.
       /// Chụp thủ công ([immediate]) thì chụp ngay.
       if (!immediate) await Future.delayed(const Duration(seconds: 3));
-      if (flashTick) {
-        _captureFlashTick++;
-        // Paint the white shutter-blink NGAY trước khi gọi native capture (có thể
-        // chiếm thời gian) để blink hiện đồng bộ với khoảnh khắc chụp, thay vì chỉ
-        // hiện sau khi capture xong.
-        notifyListeners();
-      }
+      // Paint the white shutter-blink NGAY trước khi gọi native capture (có thể
+      // chiếm thời gian) để blink hiện đồng bộ với khoảnh khắc chụp, thay vì chỉ
+      // hiện sau khi capture xong.
+      if (flashTick) _captureFlashTick++;
+      // Khung góc nháy success ở MỌI lần chụp — kể cả chụp ngầm không blink —
+      // cùng thời điểm với blink (tự notify).
+      _flashCornerSuccess();
 
       final bytes = await yoloController.capturePhoto(
         cropTop: _cropTop,

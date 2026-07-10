@@ -330,19 +330,22 @@ class _CameraScreenState extends State<CameraScreen>
                           ),
                         ),
 
-                        /// Overlay UI — yellow frame corners only while taking the
-                        /// panoramic photo, not during damage detail inspection.
-                        if (!_cameraController.isInspectionMode)
-                          Positioned(
-                            top: 83.h,
-                            left: 0.w,
-                            right: 0.w,
-                            bottom: 115.h,
-                            child: CameraFrameCorners(
-                              isSuccess: _cameraController.message?.type ==
-                                  MessageType.loading,
-                            ),
+                        /// Overlay UI — khung góc vàng hiển thị xuyên suốt quá
+                        /// trình chụp. Viền success hiện khi: đang "giữ yên"
+                        /// chờ OCR (loading), hoặc nháy theo mỗi lần chụp ảnh
+                        /// (đồng bộ với blink; bấm "Xác nhận" giữ theo thời
+                        /// gian message chụp thành công).
+                        Positioned(
+                          top: 83.h,
+                          left: 0.w,
+                          right: 0.w,
+                          bottom: 115.h,
+                          child: CameraFrameCorners(
+                            isSuccess: _cameraController.cornerSuccessActive ||
+                                _cameraController.message?.type ==
+                                    MessageType.loading,
                           ),
+                        ),
 
                         /// Tooltip — buttons depend on inspection phase.
                         /// The app is portrait-locked, while users hold the phone

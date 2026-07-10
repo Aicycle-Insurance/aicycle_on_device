@@ -129,6 +129,9 @@ mixin _InspectionMixin on _CameraControllerBase {
         ),
         immediate: true,
       );
+      // Giữ viền success đúng bằng thời gian hiển thị message "chụp thành công"
+      // (nối tiếp nháy 0.5s đã bật trong capturePhoto tại khoảnh khắc blink).
+      _flashCornerSuccess(_captureSuccessVisibleDuration);
       await Future.delayed(_captureSuccessVisibleDuration);
       if (_stopped) return;
     }

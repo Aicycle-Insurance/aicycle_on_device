@@ -71,6 +71,10 @@ const _captureSuccessVisibleDuration = Duration(seconds: 3);
 /// một message/phase khác thay thế, để tránh user chưa kịp đọc.
 const _tooltipMinVisibleDuration = Duration(seconds: 3);
 
+/// Khung góc (CameraFrameCorners) nháy trạng thái success khoảng này mỗi lần
+/// chụp ảnh — tương đương thời gian blink màn hình.
+const _cornerSuccessFlashDuration = Duration(milliseconds: 500);
+
 /// Nhịp chụp tự động khi đang ở màn xác nhận tổn thất.
 const _damageAutoCaptureInterval = Duration(seconds: 10);
 
@@ -140,6 +144,11 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// Bumped every time a photo is actually captured — the view listens to
   /// this to trigger a screen-blink (flash) effect.
   int _captureFlashTick = 0;
+
+  /// True trong ~0.5s sau MỖI lần chụp (kể cả chụp ngầm không blink) —
+  /// CameraFrameCorners hiển thị trạng thái success trong khoảng này.
+  bool _cornerSuccessActive = false;
+  Timer? _cornerSuccessTimer;
   CameraMessage? _message;
   InspectionPhase? _messagePhase;
   DateTime? _messageShownAt;
@@ -242,6 +251,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   CameraMessage? get message => _message;
   InspectionPhase? get messagePhase => _messagePhase;
   int get captureFlashTick => _captureFlashTick;
+  bool get cornerSuccessActive => _cornerSuccessActive;
   List<DetectionResult> get latestDetections => _latestDetections;
   List<DetectionResult> get latestCarPartDetections => _latestCarPartDetections;
   InspectionPhase? get inspectionPhase => _inspectionPhase;
@@ -310,6 +320,22 @@ abstract class _CameraControllerBase extends ChangeNotifier {
       _latestCarPartClasses = {};
       _latestCarPartDetections = [];
     }
+  }
+
+  // ── Corner success flash ──────────────────────────────────────────────────
+
+  /// Nháy trạng thái success trên CameraFrameCorners. Gọi ở đúng khoảnh khắc
+  /// chụp để đồng bộ với blink (nếu có). Mặc định ~0.5s; truyền [duration] dài
+  /// hơn để giữ viền theo thời gian hiển thị message (vd bấm "Xác nhận").
+  void _flashCornerSuccess([Duration duration = _cornerSuccessFlashDuration]) {
+    _cornerSuccessActive = true;
+    _cornerSuccessTimer?.cancel();
+    _cornerSuccessTimer = Timer(duration, () {
+      _cornerSuccessTimer = null;
+      _cornerSuccessActive = false;
+      notifyListeners();
+    });
+    notifyListeners();
   }
 
   // ── Torch ─────────────────────────────────────────────────────────────────
@@ -424,6 +450,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
     _noDetectionWarningTimer?.cancel();
     _detailTimer?.cancel();
     _plateReadTimer?.cancel();
+    _cornerSuccessTimer?.cancel();
     _cancelPendingMessage();
     stopCamera(); // no-op nếu đã gọi trước đó
     super.dispose();
