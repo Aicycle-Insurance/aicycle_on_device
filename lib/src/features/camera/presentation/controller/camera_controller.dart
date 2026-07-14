@@ -452,17 +452,32 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   void stopCamera() {
     if (_stopped) return;
     _stopped = true;
-    yoloController.stop();
+    _captureStarted = false;
+    _cancelFlowTimers();
+    _latestDetections = [];
+    _latestCarPartDetections = [];
+    _latestCarPartClasses = {};
+    _torchEnabled = false;
+    unawaited(yoloController.stop().catchError((_) {}));
+  }
+
+  void _cancelFlowTimers() {
+    _autoCaptureTimer?.cancel();
+    _autoCaptureTimer = null;
+    _noDetectionWarningTimer?.cancel();
+    _noDetectionWarningTimer = null;
+    _detailTimer?.cancel();
+    _detailTimer = null;
+    _plateReadTimer?.cancel();
+    _plateReadTimer = null;
+    _cornerSuccessTimer?.cancel();
+    _cornerSuccessTimer = null;
+    _cancelPendingMessage();
   }
 
   @override
   void dispose() {
-    _autoCaptureTimer?.cancel();
-    _noDetectionWarningTimer?.cancel();
-    _detailTimer?.cancel();
-    _plateReadTimer?.cancel();
-    _cornerSuccessTimer?.cancel();
-    _cancelPendingMessage();
+    _cancelFlowTimers();
     stopCamera(); // no-op nếu đã gọi trước đó
     super.dispose();
   }

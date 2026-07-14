@@ -16,7 +16,7 @@ mixin _StreamMixin on _CameraControllerBase {
   // tránh rebuild thừa khi stream bắn nhiều frame/giây.
   void onStreamingData(Map<String, dynamic> data) {
     // User chưa bấm "Bắt đầu chụp ảnh xe" → bỏ qua toàn bộ frame streaming.
-    if (!_captureStarted) return;
+    if (!_captureStarted || _stopped) return;
 
     final type = data['type'];
     // Hai model detect đều trả type=='detect'; phân biệt bằng modelId:

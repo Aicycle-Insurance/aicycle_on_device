@@ -84,7 +84,7 @@ class ResultController extends ChangeNotifier {
 
     try {
       if (!fetchResultAfterUpload) {
-        unawaited(_enqueueSnapshot(snapshot));
+        await _enqueueSnapshot(snapshot);
         _uploadedCount = _totalCount;
         _status = ResultStatus.success;
         _notify();
@@ -96,6 +96,7 @@ class ResultController extends ChangeNotifier {
         snapshot,
       );
       await PhotoUploadQueue.instance.resumePendingUploads();
+      await PhotoUploadQueue.instance.drainUploadedResponses(onImageUploaded);
 
       final allPaths = snapshot.values.expand((paths) => paths).toList();
       while (!_disposed) {
@@ -106,8 +107,10 @@ class ResultController extends ChangeNotifier {
         if (pending == 0) break;
         await Future<void>.delayed(const Duration(seconds: 1));
         await PhotoUploadQueue.instance.resumePendingUploads();
+        await PhotoUploadQueue.instance.drainUploadedResponses(onImageUploaded);
       }
       if (_disposed) return;
+      await PhotoUploadQueue.instance.drainUploadedResponses(onImageUploaded);
 
       for (final angleId in snapshot.keys) {
         onAngleUploaded?.call(angleId);
@@ -136,6 +139,7 @@ class ResultController extends ChangeNotifier {
         snapshot,
       );
       await PhotoUploadQueue.instance.resumePendingUploads();
+      await PhotoUploadQueue.instance.drainUploadedResponses(onImageUploaded);
     } catch (e) {
       onError?.call(e.toString());
     }

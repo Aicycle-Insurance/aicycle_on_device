@@ -1,12 +1,17 @@
 import Foundation
 import UIKit
 
-final class AICycleBackgroundUploader: NSObject, URLSessionDelegate, URLSessionTaskDelegate, @unchecked Sendable {
+final class AICycleBackgroundUploader: NSObject, URLSessionDelegate, URLSessionTaskDelegate,
+  URLSessionDataDelegate, @unchecked Sendable
+{
   static let shared = AICycleBackgroundUploader()
 
   private let identifier = "com.aicycle.yolo.background-upload"
   private let ioQueue = DispatchQueue(label: "com.aicycle.yolo.background-upload.io", qos: .utility)
+  private let queueFileLock = NSLock()
+  private let responseDataLock = NSLock()
   private var backgroundCompletionHandler: (() -> Void)?
+  private var responseDataByTaskId: [Int: Data] = [:]
 
   private lazy var session: URLSession = {
     let configuration = URLSessionConfiguration.background(withIdentifier: identifier)
@@ -33,6 +38,7 @@ final class AICycleBackgroundUploader: NSObject, URLSessionDelegate, URLSessionT
         do {
           let task = try self.makeUploadTask(for: item)
           task.resume()
+          NSLog("AICycleBackgroundUploader: scheduled upload id=%@", id)
           completion?(nil)
         } catch {
           completion?(error)
@@ -60,6 +66,7 @@ final class AICycleBackgroundUploader: NSObject, URLSessionDelegate, URLSessionT
 
     let imageURL = URL(fileURLWithPath: filePath)
     guard FileManager.default.fileExists(atPath: imageURL.path) else {
+      NSLog("AICycleBackgroundUploader: file missing id=%@", item["id"] as? String ?? "")
       throw UploadError.fileMissing
     }
 
@@ -161,6 +168,115 @@ final class AICycleBackgroundUploader: NSObject, URLSessionDelegate, URLSessionT
     value.replacingOccurrences(of: "\"", with: "\\\"")
   }
 
+  private func nowMillis() -> Int {
+    Int(Date().timeIntervalSince1970 * 1000)
+  }
+
+  private func takeResponseBody(for task: URLSessionTask) -> String {
+    responseDataLock.lock()
+    let data = responseDataByTaskId.removeValue(forKey: task.taskIdentifier) ?? Data()
+    responseDataLock.unlock()
+    return String(data: data, encoding: .utf8) ?? ""
+  }
+
+  private func markSucceeded(
+    queueFilePath: String?,
+    id: String?,
+    statusCode: Int,
+    responseBody: String
+  ) {
+    guard let queueFilePath, let id else { return }
+    updateQueueItem(queueFilePath: queueFilePath, id: id) { item in
+      item["status"] = "succeeded"
+      item["updatedAtMillis"] = nowMillis()
+      item["responseStatusCode"] = statusCode
+      if responseBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        item.removeValue(forKey: "responseBody")
+      } else {
+        item["responseBody"] = responseBody
+      }
+      item.removeValue(forKey: "lastError")
+    }
+  }
+
+  private func markSkipped(queueFilePath: String?, id: String?, reason: String) {
+    guard let queueFilePath, let id else { return }
+    updateQueueItem(queueFilePath: queueFilePath, id: id) { item in
+      item["status"] = "skipped"
+      item["updatedAtMillis"] = nowMillis()
+      item["lastError"] = reason
+    }
+  }
+
+  private func hasEngineErrorCode(_ responseBody: String) -> Bool {
+    guard let data = responseBody.data(using: .utf8),
+      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else {
+      return false
+    }
+    guard let value = json["errorCodeFromEngine"] else { return false }
+    return !(value is NSNull)
+  }
+
+  private func markFailed(queueFilePath: String?, id: String?, error: String, attempt: Int) {
+    guard let queueFilePath, let id else { return }
+    updateQueueItem(queueFilePath: queueFilePath, id: id) { item in
+      item["status"] = "failed"
+      item["attempt"] = attempt
+      item["nextAttemptAtMillis"] = nowMillis() + Int(retryDelay(for: attempt) * 1000)
+      item["updatedAtMillis"] = nowMillis()
+      item["lastError"] = error
+    }
+  }
+
+  private func updateQueueItem(
+    queueFilePath: String,
+    id: String,
+    update: (inout [String: Any]) -> Void
+  ) {
+    queueFileLock.lock()
+    defer { queueFileLock.unlock() }
+
+    do {
+      let queueURL = URL(fileURLWithPath: queueFilePath)
+      let data = try Data(contentsOf: queueURL)
+      var queue =
+        (try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        ?? ["version": 1, "items": []]
+      var items = queue["items"] as? [[String: Any]] ?? []
+      guard let index = items.firstIndex(where: { ($0["id"] as? String) == id }) else {
+        return
+      }
+
+      var item = items[index]
+      update(&item)
+      items[index] = item
+      queue["items"] = items
+
+      let out = try JSONSerialization.data(withJSONObject: queue)
+      let tmpURL = URL(fileURLWithPath: "\(queueFilePath).tmp")
+      try out.write(to: tmpURL, options: .atomic)
+      if FileManager.default.fileExists(atPath: queueURL.path) {
+        try FileManager.default.removeItem(at: queueURL)
+      }
+      try FileManager.default.moveItem(at: tmpURL, to: queueURL)
+    } catch {
+      NSLog("AICycleBackgroundUploader: failed to update queue: %@", error.localizedDescription)
+    }
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    dataTask: URLSessionDataTask,
+    didReceive data: Data
+  ) {
+    responseDataLock.lock()
+    var current = responseDataByTaskId[dataTask.taskIdentifier] ?? Data()
+    current.append(data)
+    responseDataByTaskId[dataTask.taskIdentifier] = current
+    responseDataLock.unlock()
+  }
+
   func urlSession(
     _ session: URLSession,
     task: URLSessionTask,
@@ -168,10 +284,25 @@ final class AICycleBackgroundUploader: NSObject, URLSessionDelegate, URLSessionT
   ) {
     guard let item = decodeDescription(task) else { return }
     let statusCode = (task.response as? HTTPURLResponse)?.statusCode ?? 0
+    let id = item["id"] as? String
+    let queueFilePath = item["queueFilePath"] as? String
     let filePath = item["filePath"] as? String
     let bodyPath = item["bodyPath"] as? String
+    let responseBody = takeResponseBody(for: task)
 
     if error == nil && (200..<300).contains(statusCode) {
+      markSucceeded(
+        queueFilePath: queueFilePath,
+        id: id,
+        statusCode: statusCode,
+        responseBody: responseBody
+      )
+      NSLog(
+        "AICycleBackgroundUploader: upload succeeded id=%@ HTTP %d bodyBytes=%d",
+        id ?? "",
+        statusCode,
+        responseBody.count
+      )
       if let filePath { try? FileManager.default.removeItem(atPath: filePath) }
       if let bodyPath { try? FileManager.default.removeItem(atPath: bodyPath) }
       return
@@ -181,6 +312,34 @@ final class AICycleBackgroundUploader: NSObject, URLSessionDelegate, URLSessionT
     if error == nil {
       // Server responded with a non-2xx status. Skip this image instead of
       // retrying; network-level failures are the only retryable case.
+      let bodySnippet = String(responseBody.prefix(500))
+      if hasEngineErrorCode(responseBody) {
+        markSucceeded(
+          queueFilePath: queueFilePath,
+          id: id,
+          statusCode: statusCode,
+          responseBody: responseBody
+        )
+        NSLog(
+          "AICycleBackgroundUploader: upload business error delivered id=%@ HTTP %d body=%@",
+          id ?? "",
+          statusCode,
+          bodySnippet
+        )
+        if let filePath { try? FileManager.default.removeItem(atPath: filePath) }
+        return
+      }
+      markSkipped(
+        queueFilePath: queueFilePath,
+        id: id,
+        reason: "HTTP \(statusCode): \(bodySnippet)"
+      )
+      NSLog(
+        "AICycleBackgroundUploader: upload skipped id=%@ HTTP %d body=%@",
+        id ?? "",
+        statusCode,
+        bodySnippet
+      )
       if let filePath { try? FileManager.default.removeItem(atPath: filePath) }
       return
     }
@@ -188,6 +347,18 @@ final class AICycleBackgroundUploader: NSObject, URLSessionDelegate, URLSessionT
     guard let filePath, FileManager.default.fileExists(atPath: filePath) else { return }
     var retryItem = item
     let attempt = (item["attempt"] as? Int ?? 0) + 1
+    markFailed(
+      queueFilePath: queueFilePath,
+      id: id,
+      error: error?.localizedDescription ?? "Network upload failed",
+      attempt: attempt
+    )
+    NSLog(
+      "AICycleBackgroundUploader: upload retry id=%@ attempt=%d error=%@",
+      id ?? "",
+      attempt,
+      error?.localizedDescription ?? "Network upload failed"
+    )
     retryItem["attempt"] = attempt
     retryItem.removeValue(forKey: "bodyPath")
     scheduleUpload(retryItem)

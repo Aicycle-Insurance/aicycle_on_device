@@ -57,6 +57,7 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
 
   late final CameraModelController _modelController;
   Timer? _releaseCameraAfterTransition;
+  Object? _uploadResponseListenerToken;
 
   /// Khi != null: đang ở pha upload (đã bấm "Xem kết quả"). Bootstrap render
   /// UploadView ngay, rồi gỡ CameraScreen sau một nhịp ngắn để tránh cleanup
@@ -68,6 +69,12 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
   void initState() {
     super.initState();
     AICycleConfigHolder.init(widget.aiCycleConfig);
+    _uploadResponseListenerToken =
+        PhotoUploadQueue.instance.addUploadedResponseListener(
+      widget.onImageUploaded,
+      sessionId: widget.aiCycleConfig.generalConfig.documentId,
+      keepAliveAfterRemove: true,
+    );
     unawaited(PhotoUploadQueue.instance.resumeSession(
       widget.aiCycleConfig.generalConfig.documentId,
     ));
@@ -91,8 +98,24 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
   }
 
   @override
+  void didUpdateWidget(covariant AICycleOnDeviceCamera oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.onImageUploaded == widget.onImageUploaded) return;
+    PhotoUploadQueue.instance
+        .removeUploadedResponseListener(_uploadResponseListenerToken);
+    _uploadResponseListenerToken =
+        PhotoUploadQueue.instance.addUploadedResponseListener(
+      widget.onImageUploaded,
+      sessionId: widget.aiCycleConfig.generalConfig.documentId,
+      keepAliveAfterRemove: true,
+    );
+  }
+
+  @override
   void dispose() {
     _releaseCameraAfterTransition?.cancel();
+    PhotoUploadQueue.instance
+        .removeUploadedResponseListener(_uploadResponseListenerToken);
     _modelController.dispose();
     super.dispose();
   }

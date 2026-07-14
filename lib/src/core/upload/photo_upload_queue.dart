@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../../config/aicycle_config.dart';
@@ -17,6 +18,160 @@ class PhotoUploadQueue {
   static const _channel = MethodChannel('yolo_single_image_channel');
   static const maxCacheBytes = 500 * 1024 * 1024;
   static const maxCachePhotos = 300;
+
+  final Map<Object, _UploadResponseListener> _responseListeners = {};
+  Timer? _responseDeliveryTimer;
+  bool _isDrainingResponses = false;
+
+  Object? addUploadedResponseListener(
+    void Function(Map<String, dynamic> data)? listener, {
+    String? sessionId,
+    bool keepAliveAfterRemove = false,
+  }) {
+    if (listener == null) return null;
+    final token = Object();
+    _responseListeners[token] = _UploadResponseListener(
+      sessionId: sessionId,
+      onData: listener,
+      keepAliveAfterRemove: keepAliveAfterRemove,
+    );
+    _ensureResponseDeliveryTimer();
+    unawaited(_drainResponsesToActiveListener());
+    return token;
+  }
+
+  void removeUploadedResponseListener(Object? token) {
+    if (token == null) return;
+    final listener = _responseListeners[token];
+    if (listener == null) return;
+    if (listener.keepAliveAfterRemove) {
+      listener.detachedAt ??= DateTime.now();
+      _ensureResponseDeliveryTimer();
+      unawaited(_drainResponsesToActiveListener());
+      return;
+    }
+    _responseListeners.remove(token);
+    if (_responseListeners.isEmpty) {
+      _responseDeliveryTimer?.cancel();
+      _responseDeliveryTimer = null;
+    }
+  }
+
+  void _ensureResponseDeliveryTimer() {
+    if (_responseDeliveryTimer != null) return;
+    _responseDeliveryTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => unawaited(_drainResponsesToActiveListener()),
+    );
+  }
+
+  Future<void> _drainResponsesToActiveListener() async {
+    if (_responseListeners.isEmpty) return;
+    if (_isDrainingResponses) return;
+    _isDrainingResponses = true;
+    try {
+      final items = await _readItems();
+      _removeExpiredDetachedListeners();
+
+      final deliveredIds = <String>{};
+      for (final item in items) {
+        if (!item.hasPendingResponse) continue;
+        final listener = _lastMatchingListener(item.sessionId);
+        if (listener == null) continue;
+
+        final data = _decodeResponseMap(item);
+        debugPrint(
+          'AICycle upload completed: session=${item.sessionId} '
+          'angle=${item.angleId} photo=${item.photoIndex} '
+          'status=${item.responseStatusCode}',
+        );
+        try {
+          listener.onData(data);
+        } catch (_) {
+          // Host callback errors must not block queue cleanup or replay.
+        }
+        deliveredIds.add(item.id);
+      }
+
+      final nextItems = deliveredIds.isEmpty
+          ? items
+          : [
+              for (final item in items)
+                if (!deliveredIds.contains(item.id)) item,
+            ];
+      if (deliveredIds.isNotEmpty) await _writeItems(nextItems);
+      _removeIdleDetachedListeners(nextItems);
+      _stopResponseTimerIfIdle();
+    } finally {
+      _isDrainingResponses = false;
+    }
+  }
+
+  Future<void> drainUploadedResponses(
+    void Function(Map<String, dynamic> data)? onImageUploaded,
+  ) async {
+    if (onImageUploaded == null || _isDrainingResponses) return;
+    _isDrainingResponses = true;
+    try {
+      final items = await _readItems();
+      final deliveredIds = <String>{};
+
+      for (final item in items) {
+        if (!item.hasPendingResponse) continue;
+        final data = _decodeResponseMap(item);
+        debugPrint(
+          'AICycle upload completed: session=${item.sessionId} '
+          'angle=${item.angleId} photo=${item.photoIndex} '
+          'status=${item.responseStatusCode}',
+        );
+        try {
+          onImageUploaded(data);
+        } catch (_) {
+          // Host callback errors must not block queue cleanup or replay.
+        }
+        deliveredIds.add(item.id);
+      }
+
+      if (deliveredIds.isEmpty) return;
+      await _writeItems([
+        for (final item in items)
+          if (!deliveredIds.contains(item.id)) item,
+      ]);
+    } finally {
+      _isDrainingResponses = false;
+    }
+  }
+
+  _UploadResponseListener? _lastMatchingListener(String sessionId) {
+    _UploadResponseListener? found;
+    for (final listener in _responseListeners.values) {
+      if (listener.matches(sessionId)) found = listener;
+    }
+    return found;
+  }
+
+  void _removeExpiredDetachedListeners() {
+    final now = DateTime.now();
+    _responseListeners.removeWhere((_, listener) {
+      final detachedAt = listener.detachedAt;
+      return detachedAt != null &&
+          now.difference(detachedAt) >=
+              _UploadResponseListener.detachedKeepAlive;
+    });
+  }
+
+  void _removeIdleDetachedListeners(List<PhotoUploadItem> items) {
+    _responseListeners.removeWhere((_, listener) {
+      if (listener.detachedAt == null) return false;
+      return !items.any(listener.hasWorkFor);
+    });
+  }
+
+  void _stopResponseTimerIfIdle() {
+    if (_responseListeners.isNotEmpty) return;
+    _responseDeliveryTimer?.cancel();
+    _responseDeliveryTimer = null;
+  }
 
   Future<void> enqueuePhoto({
     required String sessionId,
@@ -47,6 +202,10 @@ class PhotoUploadQueue {
       item,
     ];
     await _writeItems(next);
+    debugPrint(
+      'AICycle upload queued: session=$sessionId angle=$angleId '
+      'photo=$photoIndex file=${item.fileName}',
+    );
     await enforceCacheLimit();
     unawaited(schedulePendingUploads());
   }
@@ -179,7 +338,9 @@ class PhotoUploadQueue {
     final items = await _readItems();
     final kept = [
       for (final item in items)
-        if (!item.status.isTerminal && File(item.filePath).existsSync()) item,
+        if (item.hasPendingResponse ||
+            (!item.status.isTerminal && File(item.filePath).existsSync()))
+          item,
     ];
     if (kept.length != items.length) await _writeItems(kept);
   }
@@ -192,6 +353,7 @@ class PhotoUploadQueue {
       await _channel.invokeMethod<void>('schedulePhotoUploadQueue', {
         'queueFilePath': file.path,
       });
+      debugPrint('AICycle upload scheduled on Android WorkManager');
       return;
     }
 
@@ -205,7 +367,11 @@ class PhotoUploadQueue {
     for (final item in items) {
       await _channel.invokeMethod<void>(
         'schedulePhotoUpload',
-        item.toPlatformMap(),
+        item.toPlatformMap(queueFilePath: file.path),
+      );
+      debugPrint(
+        'AICycle upload scheduled on iOS URLSession: '
+        'angle=${item.angleId} photo=${item.photoIndex}',
       );
     }
   }
@@ -263,6 +429,34 @@ class PhotoUploadQueue {
     }
     return hash.toRadixString(16);
   }
+
+  Map<String, dynamic> _decodeResponseMap(PhotoUploadItem item) {
+    final body = item.responseBody?.trim() ?? '';
+    if (body.isEmpty) return _fallbackUploadResponse(item);
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+    } catch (_) {
+      // Non-JSON success bodies still mean the upload reached the server.
+    }
+    return _fallbackUploadResponse(item, rawBody: body);
+  }
+
+  Map<String, dynamic> _fallbackUploadResponse(
+    PhotoUploadItem item, {
+    String? rawBody,
+  }) {
+    return {
+      'uploaded': true,
+      'statusCode': item.responseStatusCode,
+      'sessionId': item.sessionId,
+      'angleId': item.angleId,
+      'photoIndex': item.photoIndex,
+      'fileName': item.fileName,
+      if (rawBody != null && rawBody.isNotEmpty) 'rawBody': rawBody,
+    };
+  }
 }
 
 class PhotoUploadItem {
@@ -283,6 +477,8 @@ class PhotoUploadItem {
     this.attempt = 0,
     this.nextAttemptAtMillis = 0,
     this.lastError,
+    this.responseBody,
+    this.responseStatusCode,
   });
 
   final String id;
@@ -301,6 +497,13 @@ class PhotoUploadItem {
   final int createdAtMillis;
   final int updatedAtMillis;
   final String? lastError;
+  final String? responseBody;
+  final int? responseStatusCode;
+
+  bool get hasPendingResponse =>
+      status == PhotoUploadStatus.succeeded &&
+      responseStatusCode != null &&
+      responseStatusCode! > 0;
 
   factory PhotoUploadItem.fromJson(Map<String, dynamic> json) {
     return PhotoUploadItem(
@@ -323,6 +526,8 @@ class PhotoUploadItem {
       createdAtMillis: json['createdAtMillis'] as int? ?? 0,
       updatedAtMillis: json['updatedAtMillis'] as int? ?? 0,
       lastError: json['lastError'] as String?,
+      responseBody: json['responseBody'] as String?,
+      responseStatusCode: json['responseStatusCode'] as int?,
     );
   }
 
@@ -343,9 +548,12 @@ class PhotoUploadItem {
         'createdAtMillis': createdAtMillis,
         'updatedAtMillis': updatedAtMillis,
         if (lastError != null) 'lastError': lastError,
+        if (responseBody != null) 'responseBody': responseBody,
+        if (responseStatusCode != null)
+          'responseStatusCode': responseStatusCode,
       };
 
-  Map<String, dynamic> toPlatformMap() => {
+  Map<String, dynamic> toPlatformMap({String? queueFilePath}) => {
         'id': id,
         'filePath': filePath,
         'fileName': fileName,
@@ -354,6 +562,7 @@ class PhotoUploadItem {
         'headers': headers,
         'fields': fields,
         'attempt': attempt,
+        if (queueFilePath != null) 'queueFilePath': queueFilePath,
       };
 
   static Map<String, String> _stringMap(Object? value) {
@@ -385,6 +594,29 @@ class UploadQueueProgress {
   final int total;
   final int uploaded;
   final int pending;
+}
+
+class _UploadResponseListener {
+  _UploadResponseListener({
+    required this.sessionId,
+    required this.onData,
+    required this.keepAliveAfterRemove,
+  });
+
+  static const detachedKeepAlive = Duration(minutes: 30);
+
+  final String? sessionId;
+  final void Function(Map<String, dynamic> data) onData;
+  final bool keepAliveAfterRemove;
+  DateTime? detachedAt;
+
+  bool matches(String itemSessionId) =>
+      sessionId == null || sessionId == itemSessionId;
+
+  bool hasWorkFor(PhotoUploadItem item) {
+    if (!matches(item.sessionId)) return false;
+    return item.hasPendingResponse || !item.status.isTerminal;
+  }
 }
 
 class _UploadRequest {

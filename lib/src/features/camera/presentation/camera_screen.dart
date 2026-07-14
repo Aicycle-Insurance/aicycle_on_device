@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import '../../../yolo/multi_task_yolo_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -60,6 +62,7 @@ class _CameraScreenState extends State<CameraScreen>
     with WidgetsBindingObserver {
   late final CameraController _cameraController;
   bool _guideShown = false;
+  bool _resultRequested = false;
 
   @override
   void initState() {
@@ -251,6 +254,10 @@ class _CameraScreenState extends State<CameraScreen>
   /// Bootstrap sẽ giữ camera phía sau thêm một nhịp ngắn để UploadView render
   /// trước, sau đó mới tháo platform view và cleanup camera/model native.
   void _goToResult() {
+    if (_resultRequested) return;
+    _resultRequested = true;
+    _cameraController.stopCamera();
+    unawaited(WakelockPlus.disable());
     final photos = {
       for (final e in _cameraController.capturedPhotos.entries)
         e.key: List<String>.from(e.value),

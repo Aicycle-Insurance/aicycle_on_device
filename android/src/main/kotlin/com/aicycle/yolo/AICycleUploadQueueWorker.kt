@@ -28,6 +28,7 @@ import kotlin.math.pow
 
 object AICycleUploadScheduler {
     private const val UNIQUE_WORK_NAME = "aicycle_photo_upload_queue"
+    private const val TAG = "AICycleUploadWorker"
 
     fun schedule(context: Context, queueFilePath: String) {
         val constraints = Constraints.Builder()
@@ -48,6 +49,7 @@ object AICycleUploadScheduler {
             ExistingWorkPolicy.KEEP,
             request
         )
+        Log.i(TAG, "Upload queue scheduled: $queueFilePath")
     }
 }
 
@@ -77,21 +79,61 @@ class AICycleUploadQueueWorker(
                 val item = nextDueItem(queueFile) ?: break
                 val file = File(item.optString("filePath"))
                 if (!file.exists()) {
-                    markSucceeded(queueFile, item.optString("id"))
+                    Log.i(TAG, "Upload item file missing, marking complete: ${item.optString("id")}")
+                    markSucceeded(queueFile, item.optString("id"), 0, "")
                     continue
                 }
 
                 markUploading(queueFile, item.optString("id"))
+                Log.i(
+                    TAG,
+                    "Uploading photo: id=${item.optString("id")} " +
+                        "angle=${item.optInt("angleId")} photo=${item.optInt("photoIndex")} " +
+                        "bytes=${file.length()}"
+                )
                 try {
                     when (val outcome = upload(item, file)) {
-                        UploadOutcome.Success -> {
+                        is UploadOutcome.Success -> {
                             runCatching { file.delete() }
-                            markSucceeded(queueFile, item.optString("id"))
+                            markSucceeded(
+                                queueFile,
+                                item.optString("id"),
+                                outcome.statusCode,
+                                outcome.responseBody
+                            )
+                            Log.i(
+                                TAG,
+                                "Upload succeeded: id=${item.optString("id")} " +
+                                    "HTTP ${outcome.statusCode} bodyBytes=${outcome.responseBody.length}"
+                            )
                         }
                         is UploadOutcome.ServerError -> {
                             runCatching { file.delete() }
-                            markSkipped(queueFile, item.optString("id"), "HTTP ${outcome.statusCode}")
-                            Log.w(TAG, "Upload skipped after server error: HTTP ${outcome.statusCode}")
+                            val bodySnippet = outcome.responseBody.take(500)
+                            if (hasEngineErrorCode(outcome.responseBody)) {
+                                markSucceeded(
+                                    queueFile,
+                                    item.optString("id"),
+                                    outcome.statusCode,
+                                    outcome.responseBody
+                                )
+                                Log.w(
+                                    TAG,
+                                    "Upload business error delivered: " +
+                                        "HTTP ${outcome.statusCode} body=$bodySnippet"
+                                )
+                            } else {
+                                markSkipped(
+                                    queueFile,
+                                    item.optString("id"),
+                                    "HTTP ${outcome.statusCode}: $bodySnippet"
+                                )
+                                Log.w(
+                                    TAG,
+                                    "Upload skipped after server error: " +
+                                        "HTTP ${outcome.statusCode} body=$bodySnippet"
+                                )
+                            }
                         }
                     }
                 } catch (e: IOException) {
@@ -134,11 +176,19 @@ class AICycleUploadQueueWorker(
         }
 
         client.newCall(requestBuilder.build()).execute().use { response ->
+            val responseBody = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
-                return UploadOutcome.ServerError(response.code)
+                return UploadOutcome.ServerError(response.code, responseBody)
             }
+            return UploadOutcome.Success(response.code, responseBody)
         }
-        return UploadOutcome.Success
+    }
+
+    private fun hasEngineErrorCode(responseBody: String): Boolean {
+        return runCatching {
+            val json = JSONObject(responseBody)
+            json.has("errorCodeFromEngine") && !json.isNull("errorCodeFromEngine")
+        }.getOrDefault(false)
     }
 
     private fun nextDueItem(queueFile: File): JSONObject? = synchronized(queueLock) {
@@ -160,9 +210,20 @@ class AICycleUploadQueueWorker(
         item.put("updatedAtMillis", System.currentTimeMillis())
     }
 
-    private fun markSucceeded(queueFile: File, id: String) = updateItem(queueFile, id) { item ->
+    private fun markSucceeded(
+        queueFile: File,
+        id: String,
+        statusCode: Int,
+        responseBody: String
+    ) = updateItem(queueFile, id) { item ->
         item.put("status", "succeeded")
         item.put("updatedAtMillis", System.currentTimeMillis())
+        item.put("responseStatusCode", statusCode)
+        if (responseBody.isNotBlank()) {
+            item.put("responseBody", responseBody)
+        } else {
+            item.remove("responseBody")
+        }
         item.remove("lastError")
     }
 
@@ -213,6 +274,6 @@ class AICycleUploadQueueWorker(
 }
 
 private sealed class UploadOutcome {
-    data object Success : UploadOutcome()
-    data class ServerError(val statusCode: Int) : UploadOutcome()
+    data class Success(val statusCode: Int, val responseBody: String) : UploadOutcome()
+    data class ServerError(val statusCode: Int, val responseBody: String) : UploadOutcome()
 }
