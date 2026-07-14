@@ -41,7 +41,7 @@ enum InspectionPhase {
   /// chuyển tới vùng tổn thất khác.
   detailGuide,
 
-  /// Hiển thị message "Tiếp tục di chuyển camera…" trong 5 s rồi quay lại
+  /// Hiển thị message "Tiếp tục di chuyển camera…" trong 10 s rồi quay lại
   /// scanning.
   continueOrChange,
 }

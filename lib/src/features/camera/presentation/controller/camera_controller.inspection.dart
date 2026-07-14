@@ -218,7 +218,7 @@ mixin _InspectionMixin on _CameraControllerBase {
   /// Dùng cho cả "Tiếp tục di chuyển camera…" và "Thiếu tổn thất".
   Future<void> _showMessageThenScan(
     String message, {
-    Duration duration = const Duration(seconds: 5),
+    Duration duration = const Duration(seconds: 10),
   }) async {
     _cancelNoDetectionWarningTimer();
     _detailTimer?.cancel();

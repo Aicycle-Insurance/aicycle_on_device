@@ -1,3 +1,8 @@
+## 0.1.5
+
+* Enhance CameraFrameCorners success indication and timing for photo captures
+* Update timing for continueOrChange message and related scanning delays
+
 ## 0.1.4
 
 * Improve camera inspection tooltip timing and priority handling

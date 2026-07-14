@@ -100,7 +100,7 @@ stateDiagram-v2
     capturingDamage: capturingDamage\ncapturePhoto khi Xác nhận
     detailGuide: detailGuide\nmsg detailPhotoGuide\ncó detection → xác nhận ngay\n10s chưa detect → auto-chụp 1 ảnh
     detailWait: detailWait\nsau auto-chụp detail\nchờ thêm 5s
-    continueOrChange: continueOrChange\nmsg continueToNextDamage / moveCameraToMissing\nsau 5s quay lại scanning
+    continueOrChange: continueOrChange\nmsg continueToNextDamage / moveCameraToMissing\nsau 10s quay lại scanning
     rgoc: _autoSwitchToDetectedSegment()\n4-góc ON: hoàn tất góc cũ\n4-góc OFF: chỉ đổi góc nếu chưa có ảnh
 
     panoramicGuide --> scanning: có detection
@@ -128,7 +128,7 @@ stateDiagram-v2
     detailWait --> continueOrChange: hết 5s vẫn chưa detect
 
     continueOrChange --> detectionReady: có detection mới
-    continueOrChange --> scanning: sau 5s
+    continueOrChange --> scanning: sau 10s
     continueOrChange --> rgoc: classifier detect góc khác
 
     rgoc --> [*]
@@ -165,7 +165,7 @@ flowchart TD
     J -->|"Xác nhận"| K["capturePhoto(immediate:true)<br/>msg captureSuccess 3s"]
     K --> N
 
-    N -->|"sau 5s"| S["scanning"]
+    N -->|"sau 10s"| S["scanning"]
     G -->|"sau 10s"| S
     S --> C
 ```
@@ -181,7 +181,7 @@ flowchart TD
     WAIT -->|"có detection"| DR["detectionReady"]
     Q -->|"bấm chụp manual"| CAP["manualCapture()<br/>capturePhoto(immediate:true)"]
     CAP --> NEXT["msg: continueToNextDamage<br/>hand tự ẩn vì message đổi"]
-    NEXT -->|"sau 5s"| SCAN["scanning"]
+    NEXT -->|"sau 10s"| SCAN["scanning"]
 ```
 
 ### Detail guide theo feedback khách
@@ -206,7 +206,7 @@ sequenceDiagram
             C->>UI: msg damageDetectedGuide
         else vẫn chưa có detection
             C->>UI: msg continueToNextDamage
-            C->>C: sau 5s startDamageScanning()
+            C->>C: sau 10s startDamageScanning()
         end
     end
 ```
