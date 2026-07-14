@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -8,6 +10,7 @@ import 'core/constants/string_sheet.dart';
 import 'core/di/injection.dart';
 import 'core/themes/app_colors.dart';
 import 'core/themes/app_textstyle.dart';
+import 'core/upload/photo_upload_queue.dart';
 import 'core/utils/screen_utils.dart';
 import 'features/ai_model_manager/presentation/model_manager_screen.dart';
 
@@ -38,6 +41,9 @@ class _AICycleOnDeviceState extends State<AICycleOnDevice> {
   void initState() {
     super.initState();
     AICycleConfigHolder.init(widget.aiCycleConfig);
+    unawaited(PhotoUploadQueue.instance.resumeSession(
+      widget.aiCycleConfig.generalConfig.documentId,
+    ));
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     _controller = AICycleOnDeviceController(
       sl.aicycleFolderRepository,

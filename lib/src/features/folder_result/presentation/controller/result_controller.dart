@@ -1,9 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
-import '../../../../core/cache/photo_session_cache.dart';
-import '../../../../core/utils/gallery_helper.dart';
+import '../../../../core/upload/photo_upload_queue.dart';
 import '../../domain/entity/inspection_result.dart';
 import '../../domain/repository/result_repository.dart';
 
@@ -23,7 +23,7 @@ class ResultController extends ChangeNotifier {
   final String sessionId;
 
   /// Live reference from CameraController — we snapshot it at [start] time.
-  final Map<int, List<Uint8List>> capturedPhotos;
+  final Map<int, List<String>> capturedPhotos;
   final ResultRepository _repository;
 
   /// Khi `false` chỉ upload ảnh rồi dừng (không gọi API lấy kết quả) — dùng cho
@@ -60,7 +60,7 @@ class ResultController extends ChangeNotifier {
     // Snapshot at call time — camera may add photos while we upload.
     final snapshot = {
       for (final e in capturedPhotos.entries)
-        e.key: List<Uint8List>.unmodifiable(e.value),
+        e.key: List<String>.unmodifiable(e.value),
     };
 
     _totalCount = snapshot.values.fold(0, (sum, list) => sum + list.length);
@@ -82,39 +82,37 @@ class ResultController extends ChangeNotifier {
     _errorMessage = null;
     _notify();
 
-    // Xin quyền thư viện ảnh sớm để khi lưu ảnh upload thành công không bị
-    // block bởi dialog xin quyền (no-op nếu savePhotoAfterShot = false).
-    await GalleryHelper.requestPermission();
-
     try {
-      for (final entry in snapshot.entries) {
-        final angleId = entry.key;
-        final photos = entry.value;
+      if (!fetchResultAfterUpload) {
+        unawaited(_enqueueSnapshot(snapshot));
+        _uploadedCount = _totalCount;
+        _status = ResultStatus.success;
+        _notify();
+        return;
+      }
 
-        for (int i = 0; i < photos.length; i++) {
-          try {
-            final data = await _repository.uploadAnglePhoto(
-              angleId: angleId,
-              photoBytes: photos[i],
-              photoIndex: i,
-            );
-            // Upload thành công → trả data về host (nếu server có phản hồi JSON).
-            if (data != null) onImageUploaded?.call(data);
-            // Upload thành công → lưu ảnh vào thư viện ảnh của thiết bị.
-            unawaited(GalleryHelper.saveBytes(photos[i]));
-          } catch (e) {
-            // Ảnh này upload fail → call back error, không chặn flow.
-            onError?.call(e.toString());
-          }
-          // Đếm cả ảnh fail để tiến độ chạy tới 100% và flow tiếp tục.
-          _uploadedCount++;
-          _notify();
-        }
+      await PhotoUploadQueue.instance.enqueueExistingPhotos(
+        sessionId,
+        snapshot,
+      );
+      await PhotoUploadQueue.instance.resumePendingUploads();
 
-        // Clear disk cache then notify camera to drop in-memory copy.
-        await PhotoSessionCache.instance.clearAngle(sessionId, angleId);
+      final allPaths = snapshot.values.expand((paths) => paths).toList();
+      while (!_disposed) {
+        final pending =
+            allPaths.where((path) => File(path).existsSync()).length;
+        _uploadedCount = _totalCount - pending;
+        _notify();
+        if (pending == 0) break;
+        await Future<void>.delayed(const Duration(seconds: 1));
+        await PhotoUploadQueue.instance.resumePendingUploads();
+      }
+      if (_disposed) return;
+
+      for (final angleId in snapshot.keys) {
         onAngleUploaded?.call(angleId);
       }
+      await PhotoUploadQueue.instance.clearSession(sessionId);
 
       // Bỏ màn kết quả khỏi flow → chỉ upload xong là dừng.
       if (fetchResultAfterUpload) {
@@ -128,6 +126,18 @@ class ResultController extends ChangeNotifier {
       _errorMessage = e.toString();
       _status = ResultStatus.error;
       _notify();
+    }
+  }
+
+  Future<void> _enqueueSnapshot(Map<int, List<String>> snapshot) async {
+    try {
+      await PhotoUploadQueue.instance.enqueueExistingPhotos(
+        sessionId,
+        snapshot,
+      );
+      await PhotoUploadQueue.instance.resumePendingUploads();
+    } catch (e) {
+      onError?.call(e.toString());
     }
   }
 

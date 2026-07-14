@@ -31,8 +31,11 @@ class ExampleHomePage extends StatefulWidget {
 
 class _ExampleHomePageState extends State<ExampleHomePage> {
   // General Config
-  final _apiTokenController = TextEditingController(text: '');
-  final _documentIdController = TextEditingController(text: '');
+  final _apiTokenController = TextEditingController(
+    text:
+        '2cef5:44c332de62534cdea6f3c27b7afdba0aa254f90b562c47aa9087db66764be4be',
+  );
+  final _documentIdController = TextEditingController(text: '120113');
   final _documentNameController = TextEditingController(text: 'Test Claim');
   final _customDomainController = TextEditingController(
     text: 'https://stage.api.aicycle.ai',

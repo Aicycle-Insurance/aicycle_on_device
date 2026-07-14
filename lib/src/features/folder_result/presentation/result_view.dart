@@ -22,8 +22,8 @@ class ResultView extends StatefulWidget {
 
   final String sessionId;
 
-  /// Reference to CameraController's capturedPhotos map.
-  final Map<int, List<Uint8List>> capturedPhotos;
+  /// Reference to CameraController's captured photo path map.
+  final Map<int, List<String>> capturedPhotos;
 
   /// Called after each angle is fully uploaded — camera strips those photos
   /// so a repeated "next" press won't re-upload them.

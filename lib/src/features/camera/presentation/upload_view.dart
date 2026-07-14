@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 
 import '../../../core/cache/photo_session_cache.dart';
@@ -24,7 +22,7 @@ class UploadView extends StatefulWidget {
   });
 
   final String sessionId;
-  final Map<int, List<Uint8List>> capturedPhotos;
+  final Map<int, List<String>> capturedPhotos;
   final Function()? onComplete;
   final Function(String)? onError;
 

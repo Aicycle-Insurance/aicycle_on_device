@@ -1,7 +1,8 @@
-import 'dart:typed_data';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../../../../core/cache/photo_session_cache.dart';
 import '../../../../core/themes/app_colors.dart';
 import '../../../../core/utils/screen_utils.dart';
 import 'car_progress_ring.dart';
@@ -17,7 +18,7 @@ class CameraBottomBar extends StatelessWidget {
     this.completedTakesPriority = false,
   });
 
-  final Map<int, List<Uint8List>> capturedPhotos;
+  final Map<int, List<String>> capturedPhotos;
   final int? activeSegmentIndex;
   final Set<int> completedSegments;
   final VoidCallback onShowProgress;
@@ -80,8 +81,9 @@ class CameraBottomBar extends StatelessWidget {
   }
 
   Widget _buildThumbnail() {
-    final lastPhoto = capturedPhotos.values.expand((l) => l).lastOrNull;
-    if (lastPhoto != null) {
+    final lastPhotoPath = capturedPhotos.values.expand((l) => l).lastOrNull;
+    final previewPath = _previewPath(lastPhotoPath);
+    if (previewPath != null) {
       return RotatedBox(
         quarterTurns: 1,
         child: Container(
@@ -91,7 +93,7 @@ class CameraBottomBar extends StatelessWidget {
             borderRadius: BorderRadius.circular(8.r),
             border: Border.all(color: AppColors.white, width: 2),
             image: DecorationImage(
-              image: MemoryImage(lastPhoto),
+              image: FileImage(File(previewPath)),
               fit: BoxFit.cover,
             ),
           ),
@@ -108,5 +110,13 @@ class CameraBottomBar extends StatelessWidget {
       child: Icon(Icons.photo_library_outlined,
           size: 24.r, color: AppColors.white),
     );
+  }
+
+  String? _previewPath(String? photoPath) {
+    if (photoPath == null) return null;
+    final thumbPath = PhotoSessionCache.thumbnailPathForPhotoPath(photoPath);
+    if (File(thumbPath).existsSync()) return thumbPath;
+    if (File(photoPath).existsSync()) return photoPath;
+    return null;
   }
 }

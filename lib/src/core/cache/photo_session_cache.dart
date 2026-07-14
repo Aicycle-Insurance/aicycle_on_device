@@ -21,13 +21,26 @@ class PhotoSessionCache {
 
   static const _rootDirName = 'aicycle_photo_cache';
   static const _uploadPendingFileName = '.upload_pending';
+  static const _thumbnailDirName = '.thumbs';
+
+  static String thumbnailPathForPhotoPath(String photoPath) {
+    final file = File(photoPath);
+    return '${file.parent.path}/$_thumbnailDirName/${file.uri.pathSegments.last}';
+  }
+
+  Future<Directory> rootDir({bool create = false}) async {
+    final base = await getApplicationSupportDirectory();
+    final dir = Directory('${base.path}/$_rootDirName');
+    if (create && !dir.existsSync()) dir.createSync(recursive: true);
+    return dir;
+  }
 
   Future<Directory> _sessionDir(
     String sessionId, {
     bool create = false,
   }) async {
-    final base = await getApplicationSupportDirectory();
-    final dir = Directory('${base.path}/$_rootDirName/$sessionId');
+    final root = await rootDir(create: create);
+    final dir = Directory('${root.path}/$sessionId');
     if (create && !dir.existsSync()) dir.createSync(recursive: true);
     return dir;
   }
@@ -39,20 +52,28 @@ class PhotoSessionCache {
     return dir;
   }
 
-  /// Saves [bytes] for the given [sessionId] and [angleId].
-  Future<void> savePhoto(String sessionId, int angleId, Uint8List bytes) async {
+  /// Creates a unique JPEG path for a captured photo.
+  Future<String> createPhotoPath(String sessionId, int angleId) async {
     final dir = await _angleDir(sessionId, angleId);
-    final path = '${dir.path}/${DateTime.now().millisecondsSinceEpoch}.jpg';
-    await File(path).writeAsBytes(bytes);
+    final micros = DateTime.now().microsecondsSinceEpoch;
+    return '${dir.path}/$micros.jpg';
   }
 
-  /// Loads all previously saved photos for [sessionId].
-  /// Returns a map of angleId → ordered list of JPEG bytes.
-  Future<Map<int, List<Uint8List>>> loadSession(String sessionId) async {
+  /// Saves [bytes] for the given [sessionId] and [angleId].
+  Future<String> savePhoto(
+      String sessionId, int angleId, Uint8List bytes) async {
+    final path = await createPhotoPath(sessionId, angleId);
+    await File(path).writeAsBytes(bytes);
+    return path;
+  }
+
+  /// Loads all previously saved photo paths for [sessionId].
+  /// Returns a map of angleId -> ordered list of JPEG file paths.
+  Future<Map<int, List<String>>> loadSessionPhotoPaths(String sessionId) async {
     final sessionDir = await _sessionDir(sessionId);
     if (!sessionDir.existsSync()) return {};
 
-    final result = <int, List<Uint8List>>{};
+    final result = <int, List<String>>{};
     for (final entity in sessionDir.listSync()) {
       if (entity is! Directory) continue;
       final angleId = int.tryParse(entity.path.split('/').last);
@@ -60,11 +81,21 @@ class PhotoSessionCache {
       final files = entity.listSync().whereType<File>().toList()
         ..sort((a, b) => a.path.compareTo(b.path)); // order by timestamp
       if (files.isEmpty) continue;
-      result[angleId] = [
-        for (final f in files) await f.readAsBytes(),
-      ];
+      result[angleId] = [for (final f in files) f.path];
     }
     return result;
+  }
+
+  /// Loads all previously saved photos for [sessionId].
+  /// Returns a map of angleId -> ordered list of JPEG bytes.
+  Future<Map<int, List<Uint8List>>> loadSession(String sessionId) async {
+    final paths = await loadSessionPhotoPaths(sessionId);
+    return {
+      for (final entry in paths.entries)
+        entry.key: [
+          for (final path in entry.value) await File(path).readAsBytes(),
+        ],
+    };
   }
 
   /// Deletes all cached photos for a single [angleId] within [sessionId].
@@ -114,8 +145,7 @@ class PhotoSessionCache {
 
   /// Deletes the entire photo cache directory.
   Future<void> clearAll() async {
-    final base = await getApplicationSupportDirectory();
-    final dir = Directory('${base.path}/$_rootDirName');
+    final dir = await rootDir();
     if (dir.existsSync()) await dir.delete(recursive: true);
   }
 }

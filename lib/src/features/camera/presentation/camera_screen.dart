@@ -8,6 +8,7 @@ import '../../../core/cache/photo_session_cache.dart';
 import '../../../core/constants/string_sheet.dart';
 import '../../../core/themes/app_colors.dart';
 import '../../../core/themes/app_textstyle.dart';
+import '../../../core/upload/photo_upload_queue.dart';
 import '../../../core/utils/screen_utils.dart';
 import '../data/model/camera_message.dart';
 import 'controller/camera_controller.dart';
@@ -49,7 +50,7 @@ class CameraScreen extends StatefulWidget {
 
   /// Bấm "Xem kết quả": trả ảnh đã chụp lên bootstrap để chuyển sang pha upload
   /// (bootstrap sẽ gỡ camera này khỏi cây → giải phóng tài nguyên).
-  final void Function(Map<int, List<Uint8List>> photos)? onViewResult;
+  final void Function(Map<int, List<String>> photos)? onViewResult;
 
   @override
   State<CameraScreen> createState() => _CameraScreenState();
@@ -190,6 +191,7 @@ class _CameraScreenState extends State<CameraScreen>
     if (confirmed == true) {
       // Dừng camera trước khi pop để native cleanup không chặn UI trong dispose().
       _cameraController.stopCamera();
+      await PhotoUploadQueue.instance.clearSession(sessionId);
       await PhotoSessionCache.instance.clearSession(sessionId);
     }
     return confirmed ?? false;
@@ -251,7 +253,7 @@ class _CameraScreenState extends State<CameraScreen>
   void _goToResult() {
     final photos = {
       for (final e in _cameraController.capturedPhotos.entries)
-        e.key: List<Uint8List>.from(e.value),
+        e.key: List<String>.from(e.value),
     };
     widget.onViewResult?.call(photos);
   }

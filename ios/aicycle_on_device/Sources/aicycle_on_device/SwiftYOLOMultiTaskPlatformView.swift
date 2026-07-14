@@ -129,6 +129,43 @@ public final class SwiftYOLOMultiTaskPlatformView: NSObject,
             }
           }
         }
+      case "capturePhotoToFile":
+        guard let view = self.multiTaskView else {
+          result(FlutterError(code: "unavailable", message: "Camera not ready", details: nil))
+          return
+        }
+        guard let args = call.arguments as? [String: Any],
+          let path = args["path"] as? String
+        else {
+          result(FlutterError(code: "bad_args", message: "path (String) is required", details: nil))
+          return
+        }
+        let quality = CGFloat((args["quality"] as? Double ?? 80.0) / 100.0)
+        let thumbnailPath = args["thumbnailPath"] as? String
+        let thumbnailMaxSize = CGFloat(args["thumbnailMaxSize"] as? Double ?? 160.0)
+        var crop: CGRect? = nil
+        if let l = args["cropLeft"] as? Double,
+          let t = args["cropTop"] as? Double,
+          let r = args["cropRight"] as? Double,
+          let b = args["cropBottom"] as? Double
+        {
+          crop = CGRect(x: l, y: t, width: r - l, height: b - t)
+        }
+        view.capturePhotoToFile(
+          path: path,
+          crop: crop,
+          quality: quality,
+          thumbnailPath: thumbnailPath,
+          thumbnailMaxSize: thumbnailMaxSize
+        ) { savedPath in
+          DispatchQueue.main.async {
+            if let savedPath {
+              result(savedPath)
+            } else {
+              result(FlutterError(code: "capture_failed", message: "Failed to capture photo", details: nil))
+            }
+          }
+        }
       case "setTorch":
         guard let args = call.arguments as? [String: Any],
           let enable = args["enable"] as? Bool
