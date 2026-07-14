@@ -41,6 +41,7 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
   AiCycleOrg _organization = AiCycleOrg.aicycle;
   bool _loggingEnabled = true;
   bool _savePhoto = true;
+  bool _alwaysCache = false;
 
   // Car Information
   final _companyNameController = TextEditingController(text: 'toyota');
@@ -122,6 +123,11 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
               'Save Photo',
               _savePhoto,
               (val) => setState(() => _savePhoto = val),
+            ),
+            _switchTile(
+              'Always Cache',
+              _alwaysCache,
+              (val) => setState(() => _alwaysCache = val),
             ),
 
             if (_organization == AiCycleOrg.vbi) ...[
@@ -383,6 +389,7 @@ class _ExampleHomePageState extends State<ExampleHomePage> {
         organization: _organization,
         loggingEnabled: _loggingEnabled,
         savePhotoAfterShot: _savePhoto,
+        alwaysCache: _alwaysCache,
         aicBaseUrl: _customDomainController.text.isEmpty
             ? null
             : _customDomainController.text,

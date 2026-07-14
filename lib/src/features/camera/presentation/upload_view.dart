@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../../../core/cache/photo_session_cache.dart';
 import '../../../core/constants/string_sheet.dart';
 import '../../../core/di/injection.dart';
 import '../../../core/themes/app_colors.dart';
@@ -59,6 +60,7 @@ class _UploadViewState extends State<UploadView> {
       setState(() {});
       return;
     }
+    await PhotoSessionCache.instance.clearUploadPending(widget.sessionId);
     // Upload xong → báo host, để host tự quyết định action tiếp theo
     widget.onComplete?.call();
   }

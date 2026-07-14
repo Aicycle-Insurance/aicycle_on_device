@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../aicycle_on_device.dart';
 import '../../../config/config_holder.dart';
+import '../../../core/cache/photo_session_cache.dart';
 import '../../../core/constants/string_sheet.dart';
 import '../../../core/di/injection.dart';
 import '../../../core/themes/app_colors.dart';
@@ -86,6 +87,8 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
         AiModelType.licensePlate: widget.licensePlateModelPath,
       },
     );
+
+    unawaited(_restorePendingUpload());
   }
 
   @override
@@ -97,6 +100,8 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
 
   void _openUploadView(Map<int, List<Uint8List>> photos) {
     if (_uploadPhotos != null) return;
+    unawaited(PhotoSessionCache.instance
+        .markUploadPending(widget.aiCycleConfig.generalConfig.documentId));
     setState(() {
       _uploadPhotos = photos;
       _keepCameraDuringResultTransition = true;
@@ -106,6 +111,21 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
     _releaseCameraAfterTransition = Timer(_resultTransitionHold, () {
       if (!mounted || _uploadPhotos == null) return;
       setState(() => _keepCameraDuringResultTransition = false);
+    });
+  }
+
+  Future<void> _restorePendingUpload() async {
+    final sessionId = widget.aiCycleConfig.generalConfig.documentId;
+    if (!await PhotoSessionCache.instance.isUploadPending(sessionId)) return;
+    final cached = await PhotoSessionCache.instance.loadSession(sessionId);
+    if (!mounted) return;
+    if (cached.isEmpty) {
+      await PhotoSessionCache.instance.clearUploadPending(sessionId);
+      return;
+    }
+    setState(() {
+      _uploadPhotos = cached;
+      _keepCameraDuringResultTransition = false;
     });
   }
 
@@ -130,6 +150,9 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
     return AnimatedBuilder(
       animation: _modelController,
       builder: (context, _) {
+        if (_uploadPhotos != null && !_keepCameraDuringResultTransition) {
+          return _buildReadyContent();
+        }
         if (_modelController.folderError != null) {
           return _buildError(
             _modelController.folderError!,

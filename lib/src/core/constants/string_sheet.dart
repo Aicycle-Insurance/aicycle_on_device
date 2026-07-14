@@ -67,8 +67,7 @@ class StringSheet {
   static const moveCameraToMissing =
       'Hãy đưa camera lại gần vị trí tổn thất còn thiếu';
   static const noDamageDetectedGuide =
-      'Tổn thất chưa được nhận diện. Vui lòng chụp vị trí khác, '
-      'ảnh còn thiếu sẽ được bổ sung trước khi kết thúc';
+      'Tổn thất chưa được nhận diện.\nVui lòng bấm chụp ảnh để AI tiếp tục đánh giá';
 
   // ----- Car progress ring dialog -----
   static const cornerNeedsPhoto = 'Góc cần bổ sung ảnh';

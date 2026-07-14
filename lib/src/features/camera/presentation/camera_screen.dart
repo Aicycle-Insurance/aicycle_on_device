@@ -19,6 +19,7 @@ import 'widgets/camera_guide_sheet.dart';
 import 'widgets/camera_top_bar.dart';
 import 'widgets/car_progress_dialog.dart';
 import 'widgets/dev_gallery_pick_button.dart'; // DEV ONLY
+import 'widgets/manual_capture_hint_hand.dart';
 import 'widgets/tool_tip.dart';
 import 'widgets/view_result_button.dart';
 
@@ -55,14 +56,16 @@ class CameraScreen extends StatefulWidget {
   State<CameraScreen> createState() => _CameraScreenState();
 }
 
-class _CameraScreenState extends State<CameraScreen> {
+class _CameraScreenState extends State<CameraScreen>
+    with WidgetsBindingObserver {
   late final CameraController _cameraController;
   bool _guideShown = false;
 
   @override
   void initState() {
     super.initState();
-    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    WidgetsBinding.instance.addObserver(this);
+    _lockPortraitUp();
     // Giữ màn hình sáng trong suốt lúc camera đang stream.
     WakelockPlus.enable();
 
@@ -71,17 +74,47 @@ class _CameraScreenState extends State<CameraScreen> {
       sessionId: sessionId,
       require4Angles:
           widget.aiCycleConfig.validateConfig.require4AnglePanoramicPhotos,
-    )..loadCachedPhotos();
+    );
 
-    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowGuide());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _restoreAndStart());
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     // Cho phép màn hình tự tắt trở lại khi rời camera.
     WakelockPlus.disable();
     _cameraController.dispose();
     super.dispose();
+  }
+
+  void _lockPortraitUp() {
+    SystemChrome.setPreferredOrientations(const [DeviceOrientation.portraitUp]);
+  }
+
+  Future<void> _restoreAndStart() async {
+    await _cameraController.loadCachedPhotos();
+    if (!mounted) return;
+    if (_cameraController.capturedPhotos.isNotEmpty) {
+      _guideShown = true;
+      _cameraController.startCapture();
+      return;
+    }
+    _maybeShowGuide();
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    _lockPortraitUp();
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _lockPortraitUp();
+    }
   }
 
   void _maybeShowGuide() {
@@ -108,7 +141,19 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Future<bool> _onWillPop() async {
-    if (_cameraController.capturedPhotos.isEmpty) return true;
+    final sessionId = widget.aiCycleConfig.generalConfig.documentId;
+    if (widget.aiCycleConfig.generalConfig.alwaysCache) {
+      // Ảnh đã được ghi xuống PhotoSessionCache ngay sau mỗi lần chụp; khi bật
+      // alwaysCache thì rời camera không hỏi xoá cache nữa.
+      _cameraController.stopCamera();
+      return true;
+    }
+    final hasCachedSession =
+        await PhotoSessionCache.instance.hasSessionData(sessionId);
+    if (!mounted) return false;
+    if (_cameraController.capturedPhotos.isEmpty && !hasCachedSession) {
+      return true;
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => RotatedBox(
@@ -146,14 +191,13 @@ class _CameraScreenState extends State<CameraScreen> {
     if (confirmed == true) {
       // Dừng camera trước khi pop để native cleanup không chặn UI trong dispose().
       _cameraController.stopCamera();
-      await PhotoSessionCache.instance
-          .clearSession(widget.aiCycleConfig.generalConfig.documentId);
+      await PhotoSessionCache.instance.clearSession(sessionId);
     }
     return confirmed ?? false;
   }
 
   Widget _buildTooltip() {
-    final phase = _cameraController.inspectionPhase;
+    final phase = _cameraController.messagePhase;
     final msg = _cameraController.message!;
     final isDetectionReady = phase == InspectionPhase.detectionReady;
     return CameraToolTip(
@@ -175,6 +219,9 @@ class _CameraScreenState extends State<CameraScreen> {
       },
     );
   }
+
+  bool get _showManualCaptureHint =>
+      _cameraController.message?.message == StringSheet.noDamageDetectedGuide;
 
   bool _canGoNext() {
     final completed = _cameraController.completedSegments;
@@ -212,7 +259,7 @@ class _CameraScreenState extends State<CameraScreen> {
 
   @override
   Widget build(BuildContext context) {
-    ScreenUtil.init(context);
+    ScreenUtil.init(context, forcePortrait: true);
     final model = widget.aiCycleConfig.modelConfig;
     return PopScope(
       canPop: false,
@@ -284,27 +331,35 @@ class _CameraScreenState extends State<CameraScreen> {
                           ),
                         ),
 
-                        /// Overlay UI — yellow frame corners only while taking the
-                        /// panoramic photo, not during damage detail inspection.
-                        if (!_cameraController.isInspectionMode)
-                          Positioned(
-                            top: 83.h,
-                            left: 0.w,
-                            right: 0.w,
-                            bottom: 115.h,
-                            child: CameraFrameCorners(
-                              isSuccess: _cameraController.message?.type ==
-                                  MessageType.loading,
-                            ),
+                        /// Overlay UI — khung góc vàng hiển thị xuyên suốt quá
+                        /// trình chụp. Viền success hiện khi: đang "giữ yên"
+                        /// chờ OCR (loading), hoặc nháy theo mỗi lần chụp ảnh
+                        /// (đồng bộ với blink; bấm "Xác nhận" giữ theo thời
+                        /// gian message chụp thành công).
+                        Positioned(
+                          top: 83.h,
+                          left: 0.w,
+                          right: 0.w,
+                          bottom: 115.h,
+                          child: CameraFrameCorners(
+                            isSuccess: _cameraController.cornerSuccessActive ||
+                                _cameraController.message?.type ==
+                                    MessageType.loading,
                           ),
+                        ),
 
-                        /// Tooltip — buttons depend on inspection phase
+                        /// Tooltip — buttons depend on inspection phase.
+                        /// The app is portrait-locked, while users hold the phone
+                        /// landscape-left. Keep the tooltip rotated for readability,
+                        /// but anchor it near the portrait right edge so it appears
+                        /// at the top of the landscape view instead of the center.
                         if (_cameraController.message != null)
                           Positioned(
-                            right: 36.w,
                             top: 105.h,
                             bottom: 140.h,
+                            right: 24.w,
                             child: Center(
+                              widthFactor: 1,
                               child: RotatedBox(
                                 quarterTurns: 1,
                                 child: _buildTooltip(),
@@ -337,6 +392,18 @@ class _CameraScreenState extends State<CameraScreen> {
                           onShowProgress: _showCarProgressDialog,
                           onCapture: _cameraController.manualCapture,
                         ),
+                        if (_showManualCaptureHint)
+                          Positioned(
+                            left: 0,
+                            right: 0.w,
+                            bottom: 112.h,
+                            child: Center(
+                              child: ManualCaptureHintHand(
+                                width: 73.r,
+                                height: 63.r,
+                              ),
+                            ),
+                          ),
 
                         /// Nút "Xem kết quả" (2 bước chống chạm nhầm) — góc dưới phải.
                         if (_canGoNext())

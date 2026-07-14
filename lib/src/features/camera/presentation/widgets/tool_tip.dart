@@ -40,7 +40,10 @@ class CameraToolTip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return IntrinsicWidth(
+    final maxWidth =
+        (MediaQuery.sizeOf(context).longestSide * 0.62).clamp(280.0, 620.0);
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth),
       child: Container(
         padding: EdgeInsets.symmetric(horizontal: 16.r, vertical: 8.r),
         decoration: BoxDecoration(
@@ -54,7 +57,7 @@ class CameraToolTip extends StatelessWidget {
               preffixIcon!,
               8.horizontalSpace,
             ],
-            Expanded(
+            Flexible(
               child: Text(
                 message,
                 style: TextStyle(fontSize: 14.sp, color: AppColors.black),

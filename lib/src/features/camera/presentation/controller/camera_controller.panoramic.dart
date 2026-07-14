@@ -125,10 +125,13 @@ mixin _PanoramicMixin on _CameraControllerBase {
     // Biển hợp lệ + đã chụp → báo thành công 3s rồi mới sang pha inspection.
     // (Segment đã nằm trong _panoramicCapturedSegments nên updateMessage bị chặn
     // → message thành công không bị frame carPart kế tiếp ghi đè.)
-    _setMessage(CameraMessage(
-      message: StringSheet.plateValidCaptured,
-      type: MessageType.success,
-    ));
+    _setMessage(
+      CameraMessage(
+        message: StringSheet.plateValidCaptured,
+        type: MessageType.success,
+      ),
+      immediate: true,
+    );
     await Future.delayed(const Duration(seconds: 3));
     if (_stopped) return;
     _setInspectionPhase(InspectionPhase.panoramicGuide);

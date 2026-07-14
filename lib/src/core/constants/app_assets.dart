@@ -12,4 +12,5 @@ class AppAssets {
   static const spinner = '$_images/spinner.png';
 
   static const List<String> carAngleSamples = [sample2, sample3, sample4, sample1];
+  static const hand = '$_images/hand.png';
 }

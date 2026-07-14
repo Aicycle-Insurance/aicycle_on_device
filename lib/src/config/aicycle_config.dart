@@ -100,6 +100,10 @@ class GeneralConfig {
   /// Có lưu lại ảnh đã chụp vào gallery không
   final bool savePhotoAfterShot;
 
+  /// Khi thoát màn camera bằng nút back/close, giữ cache ảnh đã chụp và không
+  /// hiện dialog xác nhận xoá cache.
+  final bool alwaysCache;
+
   /// API Endpoint của AICycle trong môi trường On-Premise của đối tác (nếu có)
   /// Ví dụ: https://example.com
   final String? aicBaseUrl;
@@ -112,6 +116,7 @@ class GeneralConfig {
     this.documentName,
     this.loggingEnabled = false,
     this.savePhotoAfterShot = true,
+    this.alwaysCache = false,
     this.aicBaseUrl,
   })  : assert(
           aicBaseUrl == null || aicBaseUrl.isNotEmpty,

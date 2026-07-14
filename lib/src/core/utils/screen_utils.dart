@@ -21,11 +21,15 @@ class ScreenUtil {
     BuildContext context, {
     Size designSize = defaultSize,
     bool minTextAdapt = false,
+    bool forcePortrait = false,
   }) {
     final mediaQuery = MediaQuery.of(context);
+    final size = mediaQuery.size;
     _instance._designSize = designSize;
-    _instance._screenWidth = mediaQuery.size.width;
-    _instance._screenHeight = mediaQuery.size.height;
+    _instance._screenWidth =
+        forcePortrait ? min(size.width, size.height) : size.width;
+    _instance._screenHeight =
+        forcePortrait ? max(size.width, size.height) : size.height;
     _instance._minTextAdapt = minTextAdapt;
   }
 

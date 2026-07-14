@@ -26,23 +26,22 @@ enum InspectionPhase {
   /// → detectionReady. Sau 10 s không có detection → warning.
   scanning,
 
-  /// Detections found — showing "Xác nhận / Thiếu tổn thất". Sau 5 s không
-  /// bấm gì sẽ tự động chụp ngầm lặp lại, nhưng vẫn giữ tooltip cho tới khi
-  /// user bấm "Xác nhận" hoặc "Thiếu tổn thất". Dùng cho cả ảnh tổng quan
-  /// (overview) lẫn ảnh chi tiết (detail) — phân biệt bằng
-  /// [_CameraControllerBase._inDetailStage].
+  /// Detections found — showing "Xác nhận / Thiếu tổn thất". Sau 10 s không
+  /// bấm gì sẽ tự động xác nhận: chụp + hiển thị thông báo như bấm "Xác nhận"
+  /// (không blink). Dùng cho cả ảnh tổng quan (overview) lẫn ảnh chi tiết
+  /// (detail) — phân biệt bằng [_CameraControllerBase._inDetailStage].
   detectionReady,
 
   /// Đang chụp ảnh tổn thất (tự động hoặc do bấm "Xác nhận").
   capturingDamage,
 
   /// Sau khi chụp ảnh tổng quan: nhắc "Di chuyển camera đến gần vùng có tổn
-  /// thất để chụp ảnh chi tiết". Trong 3 s: phát hiện tổn thất → quay lại
-  /// detectionReady (detail); cứ hết 3 s không thấy → tự động chụp ngầm 1 ảnh
-  /// chi tiết rồi tiếp tục chờ ở detailGuide.
+  /// thất để chụp ảnh chi tiết". Nếu sau 10 s vẫn chưa nhận diện tổn thất thì
+  /// tự chụp một ảnh; sau thêm 5 s vẫn chưa nhận diện thì chuyển sang nhắc di
+  /// chuyển tới vùng tổn thất khác.
   detailGuide,
 
-  /// Hiển thị message "Tiếp tục di chuyển camera…" trong 5 s rồi quay lại
+  /// Hiển thị message "Tiếp tục di chuyển camera…" trong 10 s rồi quay lại
   /// scanning.
   continueOrChange,
 }
@@ -62,6 +61,33 @@ const _plateReadFreshDuration = Duration(milliseconds: 700);
 /// Giữ message yêu cầu căn biển rõ tối thiểu khoảng này trước khi cho phép
 /// auto-capture lại, để user kịp đọc và điều chỉnh camera.
 const _plateClearPromptMinDuration = Duration(seconds: 3);
+
+/// Giữ thông báo chụp thành công đủ lâu để user kịp đọc trước khi chuyển sang
+/// hướng dẫn tiếp theo.
+const _captureSuccessVisibleDuration = Duration(seconds: 3);
+
+/// Mỗi tooltip khi đã xuất hiện phải được giữ tối thiểu khoảng này trước khi
+/// một message/phase khác thay thế, để tránh user chưa kịp đọc.
+const _tooltipMinVisibleDuration = Duration(seconds: 3);
+
+/// Khung góc (CameraFrameCorners) nháy trạng thái success khoảng này mỗi lần
+/// chụp ảnh — tương đương thời gian blink màn hình.
+const _cornerSuccessFlashDuration = Duration(milliseconds: 500);
+
+/// Ở màn xác nhận tổn thất: sau khoảng này không bấm gì → tự động xác nhận
+/// (chụp + hiển thị thông báo như bấm "Xác nhận", không blink).
+const _damageAutoCaptureInterval = Duration(seconds: 10);
+
+/// Ở pha chụp ảnh chi tiết, chờ user đưa camera lại gần trước khi auto-capture.
+const _detailAutoCaptureDelay = Duration(seconds: 10);
+
+/// Giữ hướng dẫn "Di chuyển camera đến gần tổn thất…" (detailGuide) tối thiểu
+/// khoảng này trước khi cho phép detection mở lại màn xác nhận — để user kịp
+/// đọc, tránh bị bounce liên tiếp giữa 2 tooltip khi AI nhận diện liên tục.
+const _detailGuideMinVisibleDuration = Duration(seconds: 5);
+
+/// Sau ảnh chi tiết tự động, nếu vẫn không nhận diện thì chuyển hướng user.
+const _detailPostCaptureNoDetectionDelay = Duration(seconds: 5);
 
 /// Cấu hình mỗi góc: (tên ba đờ sốc cần thấy, message điều hướng tới góc đó).
 const _segmentConfigs = {
@@ -123,7 +149,17 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// Bumped every time a photo is actually captured — the view listens to
   /// this to trigger a screen-blink (flash) effect.
   int _captureFlashTick = 0;
+
+  /// True trong ~0.5s sau MỖI lần chụp (kể cả chụp ngầm không blink) —
+  /// CameraFrameCorners hiển thị trạng thái success trong khoảng này.
+  bool _cornerSuccessActive = false;
+  Timer? _cornerSuccessTimer;
   CameraMessage? _message;
+  InspectionPhase? _messagePhase;
+  DateTime? _messageShownAt;
+  CameraMessage? _pendingMessage;
+  InspectionPhase? _pendingMessagePhase;
+  Timer? _pendingMessageTimer;
 
   /// Segment index (0–3) đang được detect, null nếu chưa nhận kết quả.
   /// Đây là góc cho LUỒNG xử lý (bị khoá khi [_classificationLocked]).
@@ -185,7 +221,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// Current phase of the damage inspection sub-flow. null = not in inspection.
   InspectionPhase? _inspectionPhase;
 
-  /// 5s timer chạy ở detectionReady: cứ mỗi 5s tự động chụp ngầm một ảnh tổn
+  /// Timer chạy ở detectionReady: cứ mỗi 10s tự động chụp ngầm một ảnh tổn
   /// thất cho tới khi user bấm "Xác nhận" hoặc "Thiếu tổn thất".
   Timer? _autoCaptureTimer;
 
@@ -193,8 +229,13 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// thì hiển thị warning, nhưng không tự rời góc.
   Timer? _noDetectionWarningTimer;
 
-  /// 3s timer của pha [InspectionPhase.detailGuide] (chụp ảnh chi tiết).
+  /// Timer của pha [InspectionPhase.detailGuide] (chụp ảnh chi tiết).
   Timer? _detailTimer;
+
+  /// Mốc bắt đầu hiển thị hướng dẫn detailGuide ("Di chuyển camera đến gần
+  /// tổn thất…"). Detection chỉ được mở lại màn xác nhận sau khi hướng dẫn đã
+  /// hiển thị tối thiểu [_detailGuideMinVisibleDuration].
+  DateTime? _detailGuideShownAt;
 
   /// True khi detectionReady đến từ pha detailGuide (đang chờ xác nhận ảnh chi
   /// tiết) — phân biệt với ảnh tổng quan để biết bước kế tiếp sau khi chụp.
@@ -218,7 +259,9 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// đó. (Flow 4 góc giữ nguyên: highlight vàng đè lên xanh.)
   bool get completedTakesPriority => !_require4Angles;
   CameraMessage? get message => _message;
+  InspectionPhase? get messagePhase => _messagePhase;
   int get captureFlashTick => _captureFlashTick;
+  bool get cornerSuccessActive => _cornerSuccessActive;
   List<DetectionResult> get latestDetections => _latestDetections;
   List<DetectionResult> get latestCarPartDetections => _latestCarPartDetections;
   InspectionPhase? get inspectionPhase => _inspectionPhase;
@@ -289,6 +332,22 @@ abstract class _CameraControllerBase extends ChangeNotifier {
     }
   }
 
+  // ── Corner success flash ──────────────────────────────────────────────────
+
+  /// Nháy trạng thái success trên CameraFrameCorners. Gọi ở đúng khoảnh khắc
+  /// chụp để đồng bộ với blink (nếu có). Mặc định ~0.5s; truyền [duration] dài
+  /// hơn để giữ viền theo thời gian hiển thị message (vd bấm "Xác nhận").
+  void _flashCornerSuccess([Duration duration = _cornerSuccessFlashDuration]) {
+    _cornerSuccessActive = true;
+    _cornerSuccessTimer?.cancel();
+    _cornerSuccessTimer = Timer(duration, () {
+      _cornerSuccessTimer = null;
+      _cornerSuccessActive = false;
+      notifyListeners();
+    });
+    notifyListeners();
+  }
+
   // ── Torch ─────────────────────────────────────────────────────────────────
 
   Future<void> toggleFlash() async {
@@ -301,9 +360,72 @@ abstract class _CameraControllerBase extends ChangeNotifier {
 
   void clearMessage() => _setMessage(null);
 
-  void _setMessage(CameraMessage? msg) {
-    if (_message == msg) return;
+  void _setMessage(CameraMessage? msg, {bool immediate = false}) {
+    final phase = _inspectionPhase;
+    if (immediate) {
+      _applyMessage(msg, phase);
+      return;
+    }
+
+    if (_isSameMessageState(_message, _messagePhase, msg, phase)) {
+      _cancelPendingMessage();
+      return;
+    }
+    if (_isSameMessageState(
+        _pendingMessage, _pendingMessagePhase, msg, phase)) {
+      return;
+    }
+
+    final remaining = _tooltipRemainingVisibleDuration;
+    if (remaining > Duration.zero) {
+      _cancelPendingMessage();
+      _pendingMessage = msg;
+      _pendingMessagePhase = phase;
+      _pendingMessageTimer = Timer(remaining, () {
+        final pendingMessage = _pendingMessage;
+        final pendingPhase = _pendingMessagePhase;
+        _pendingMessage = null;
+        _pendingMessagePhase = null;
+        _pendingMessageTimer = null;
+        _applyMessage(pendingMessage, pendingPhase);
+      });
+      return;
+    }
+
+    _applyMessage(msg, phase);
+  }
+
+  bool _isSameMessageState(
+    CameraMessage? a,
+    InspectionPhase? aPhase,
+    CameraMessage? b,
+    InspectionPhase? bPhase,
+  ) {
+    if (a == null || b == null) return a == null && b == null;
+    return a.message == b.message && a.type == b.type && aPhase == bPhase;
+  }
+
+  Duration get _tooltipRemainingVisibleDuration {
+    final shownAt = _messageShownAt;
+    if (_message == null || shownAt == null) return Duration.zero;
+    final visibleDuration = DateTime.now().difference(shownAt);
+    if (visibleDuration >= _tooltipMinVisibleDuration) return Duration.zero;
+    return _tooltipMinVisibleDuration - visibleDuration;
+  }
+
+  void _cancelPendingMessage() {
+    _pendingMessageTimer?.cancel();
+    _pendingMessageTimer = null;
+    _pendingMessage = null;
+    _pendingMessagePhase = null;
+  }
+
+  void _applyMessage(CameraMessage? msg, InspectionPhase? phase) {
+    _cancelPendingMessage();
+    if (_isSameMessageState(_message, _messagePhase, msg, phase)) return;
     _message = msg;
+    _messagePhase = msg == null ? null : phase;
+    _messageShownAt = msg == null ? null : DateTime.now();
     notifyListeners();
   }
 
@@ -338,6 +460,8 @@ abstract class _CameraControllerBase extends ChangeNotifier {
     _noDetectionWarningTimer?.cancel();
     _detailTimer?.cancel();
     _plateReadTimer?.cancel();
+    _cornerSuccessTimer?.cancel();
+    _cancelPendingMessage();
     stopCamera(); // no-op nếu đã gọi trước đó
     super.dispose();
   }
@@ -355,6 +479,10 @@ abstract class _CameraControllerBase extends ChangeNotifier {
 
   /// [_InspectionMixin] — mở 10 s no-detection warning timeout.
   void _startNoDetectionWarningTimer();
+
+  /// [_InspectionMixin] — sau khi user chụp manual từ warning không nhận diện
+  /// tổn thất, hiển thị hướng dẫn di chuyển tiếp rồi quay lại scanning.
+  Future<void> _showManualCaptureContinueGuide();
 
   /// [_InspectionMixin] — tự động rời góc hiện tại khi classifier nhận diện
   /// user đã di chuyển sang góc xe khác.
