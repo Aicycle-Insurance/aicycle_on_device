@@ -15,4 +15,10 @@ abstract class ResultRepository {
 
   /// Fetches the inspection result after all photos are uploaded.
   Future<List<VehiclePart>> fetchResult();
+
+  /// POST /insurance/v2/claimimages/{imageId}/additional-damages
+  Future<void> submitAdditionalDamages({
+    required int imageId,
+    required List<Map<String, dynamic>> additionalImageDamage,
+  });
 }

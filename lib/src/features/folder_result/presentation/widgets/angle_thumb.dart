@@ -11,7 +11,7 @@ class AngleThumb extends StatelessWidget {
     required this.index,
     required this.selected,
     required this.hasImages,
-    required this.onTap,
+    this.onTap,
     this.width,
     this.height,
   });
@@ -19,9 +19,9 @@ class AngleThumb extends StatelessWidget {
   final int index;
   final bool selected;
 
-  /// Góc này có ảnh kết quả hay không (giữ cho caller).
+  /// Góc này có ảnh kết quả hay không — không có thì không nhận tap + mờ đi.
   final bool hasImages;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   /// Kích thước tùy chỉnh; mặc định 84×44 theo design.
   final double? width;
@@ -29,32 +29,39 @@ class AngleThumb extends StatelessWidget {
 
   static const double _defaultWidth = 84;
   static const double _defaultHeight = 44;
+  static const double _disabledOpacity = 0.4;
 
   @override
   Widget build(BuildContext context) {
     final w = width ?? _defaultWidth.w;
     final h = height ?? _defaultHeight.h;
+    final enabled = hasImages && onTap != null;
 
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: w,
-        height: h,
-        padding: EdgeInsets.all(3.r),
-        decoration: BoxDecoration(
-          color: AppColors.white,
-          borderRadius: BorderRadius.circular(8.r),
-          border: Border.all(
-            color: selected ? AppColors.primaryA600 : AppColors.divider,
-            width: selected ? 2 : 1,
+      onTap: enabled ? onTap : null,
+      child: Opacity(
+        opacity: hasImages ? 1 : _disabledOpacity,
+        child: Container(
+          width: w,
+          height: h,
+          padding: EdgeInsets.all(3.r),
+          decoration: BoxDecoration(
+            color: AppColors.white,
+            borderRadius: BorderRadius.circular(8.r),
+            border: Border.all(
+              color: selected && hasImages
+                  ? AppColors.primaryA600
+                  : AppColors.divider,
+              width: selected && hasImages ? 2 : 1,
+            ),
           ),
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(4.r),
-          child: Image.asset(
-            AppAssets.carAngleSamples[index],
-            fit: BoxFit.contain,
-            package: 'aicycle_on_device',
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(4.r),
+            child: Image.asset(
+              AppAssets.carAngleSamples[index],
+              fit: BoxFit.contain,
+              package: 'aicycle_on_device',
+            ),
           ),
         ),
       ),

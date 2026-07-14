@@ -121,6 +121,17 @@ class ResultRemoteDataSource {
     return null;
   }
 
+  /// POST /insurance/v2/claimimages/{imageId}/additional-damages
+  Future<void> submitAdditionalDamages({
+    required int imageId,
+    required List<Map<String, dynamic>> additionalImageDamage,
+  }) async {
+    await _client.post<dynamic>(
+      '/insurance/v2/claimimages/$imageId/additional-damages',
+      data: {'additionalImageDamage': additionalImageDamage},
+    );
+  }
+
   // /// GET insurance/v2/claimfolders/$sessionId/segment-classify-result
   // /// Không còn dùng: [ResultRepositoryImpl] build kết quả trực tiếp từ upload
   // /// response cache, không cần gọi thêm endpoint này.

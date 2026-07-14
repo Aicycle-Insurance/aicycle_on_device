@@ -5,6 +5,7 @@ class DamageAnnotationDraft {
     required this.imageId,
     required this.normalizedPosition,
     required this.vehiclePartName,
+    required this.vehiclePartSlug,
     required this.damageTypeSlug,
     required this.damageTypeName,
     this.logicalPixelPosition,
@@ -15,6 +16,8 @@ class DamageAnnotationDraft {
   final List<double> normalizedPosition;
   final List<int>? logicalPixelPosition;
   final String vehiclePartName;
+
+  final String vehiclePartSlug;
   final String damageTypeSlug;
   final String damageTypeName;
 
@@ -34,6 +37,7 @@ class DamageAnnotationDraft {
         if (logicalPixelPosition != null) 'pixelX': logicalPixelPosition![0],
         if (logicalPixelPosition != null) 'pixelY': logicalPixelPosition![1],
         'vehiclePartName': vehiclePartName,
+        'vehiclePartSlug': vehiclePartSlug,
         'damageTypeSlug': damageTypeSlug,
         'damageTypeName': damageTypeName,
       };

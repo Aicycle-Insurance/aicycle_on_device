@@ -14,6 +14,7 @@ import 'add_damage_view.dart';
 import 'controller/result_controller.dart';
 import 'models/add_damage_view_result.dart';
 import 'models/damage_annotation_draft.dart';
+import 'models/damage_type_option.dart';
 import 'models/mask_tap_result.dart';
 import 'widgets/result_bottom_bar.dart';
 import 'widgets/result_thumbnail_strip.dart';
@@ -26,6 +27,7 @@ class ResultView extends StatefulWidget {
     required this.capturedPhotos,
     this.onAngleUploaded,
     this.onComplete,
+    this.onError,
     this.onAddPhoto,
   });
 
@@ -38,6 +40,9 @@ class ResultView extends StatefulWidget {
   /// so a repeated "next" press won't re-upload them.
   final void Function(int angleId)? onAngleUploaded;
   final Function(dynamic result)? onComplete;
+
+  /// Lỗi submit / validate tổn thất — host tự hiển thị (cùng pattern camera/upload).
+  final void Function(String error)? onError;
 
   /// Hành vi nút "Thêm ảnh tổn thất". Mặc định (null) là pop về màn trước
   /// (camera). Bootstrap có thể truyền hành vi khác (vd push lại camera khi
@@ -54,6 +59,7 @@ class _ResultViewState extends State<ResultView> {
   int _selectedAngle = 0;
   int _selectedImageIndex = 0;
   bool _initialAngleSynced = false;
+  bool _isSubmitting = false;
 
   /// Tap đang active — hiện nút "Thêm tổn thất" tại vị trí chạm.
   MaskTapResult? _activeTap;
@@ -100,6 +106,68 @@ class _ResultViewState extends State<ResultView> {
     setState(() => _activeTap = result);
   }
 
+  void _reportError(String message) {
+    widget.onError?.call(message);
+  }
+
+  void _completeWithResult() {
+    final result =
+        _controller.result?.map((e) => e.toJson()).toList() ?? [];
+    widget.onComplete?.call(result);
+  }
+
+  /// Map draft → object trong `additionalImageDamage[]`.
+  Map<String, dynamic>? _toAdditionalDamageItem(DamageAnnotationDraft draft) {
+    final beSlug = DamageTypeOptions.toBeSlug(draft.damageTypeSlug);
+    final coord = draft.logicalPixelPosition;
+    if (beSlug == null ||
+        draft.vehiclePartSlug.isEmpty ||
+        coord == null ||
+        coord.length < 2) {
+      return null;
+    }
+    return {
+      'vehiclePartSlug': draft.vehiclePartSlug,
+      'damageSlug': [beSlug],
+      'damageCoordinate': [coord[0], coord[1]],
+    };
+  }
+
+  Future<void> _onEstimate() async {
+    if (_isSubmitting) return;
+
+    if (_pendingDamageAnnotations.isEmpty) {
+      _completeWithResult();
+      return;
+    }
+
+    final byImageId = <int, List<Map<String, dynamic>>>{};
+    for (final draft in _pendingDamageAnnotations) {
+      final item = _toAdditionalDamageItem(draft);
+      if (item == null) {
+        _reportError(StringSheet.invalidDamageAnnotation);
+        return;
+      }
+      byImageId.putIfAbsent(draft.imageId, () => []).add(item);
+    }
+
+    setState(() => _isSubmitting = true);
+    try {
+      for (final entry in byImageId.entries) {
+        await sl.resultRepository.submitAdditionalDamages(
+          imageId: entry.key,
+          additionalImageDamage: entry.value,
+        );
+      }
+      if (!mounted) return;
+      _completeWithResult();
+    } catch (_) {
+      _reportError(StringSheet.submitAdditionalDamagesFailed);
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
   /// Mở màn chọn loại tổn thất; lưu draft khi user bấm "Lưu thay đổi".
   Future<void> _openAddDamageScreen(
     BuildContext context,
@@ -107,6 +175,12 @@ class _ResultViewState extends State<ResultView> {
   ) async {
     final tap = _activeTap;
     if (tap == null) return;
+
+    final partSlug = tap.mask.vehiclePartSlug;
+    if (partSlug == null || partSlug.isEmpty) {
+      _reportError(StringSheet.missingVehiclePartSlug);
+      return;
+    }
 
     final result = await Navigator.of(context).push<AddDamageViewResult>(
       MaterialPageRoute(
@@ -309,40 +383,51 @@ class _ResultViewState extends State<ResultView> {
     final clampedIndex =
         images.isEmpty ? 0 : _selectedImageIndex.clamp(0, images.length - 1);
 
-    return Column(
+    return Stack(
+      fit: StackFit.expand,
       children: [
-        Expanded(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: images.isEmpty
-                    ? _buildEmpty()
-                    : _buildMainImage(
-                        context,
-                        images[clampedIndex],
-                      ),
+        Column(
+          children: [
+            Expanded(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: images.isEmpty
+                        ? _buildEmpty()
+                        : _buildMainImage(
+                            context,
+                            images[clampedIndex],
+                          ),
+                  ),
+                  if (images.isNotEmpty)
+                    ResultThumbnailStrip(
+                      images: images,
+                      selectedIndex: clampedIndex,
+                      onSelected: _selectImage,
+                    ),
+                ],
               ),
-              if (images.isNotEmpty)
-                ResultThumbnailStrip(
-                  images: images,
-                  selectedIndex: clampedIndex,
-                  onSelected: _selectImage,
-                ),
-            ],
+            ),
+            ResultBottomBar(
+              selectedAngle: _selectedAngle,
+              angleLabel: _angleLabel(_selectedAngle),
+              grouped: grouped,
+              onAngleSelected: _selectAngle,
+              onEstimate: _onEstimate,
+              isSubmitting: _isSubmitting,
+            ),
+          ],
+        ),
+        if (_isSubmitting)
+          const ColoredBox(
+            color: Color(0x66000000),
+            child: Center(
+              child: CircularProgressIndicator(
+                color: AppColors.primaryA500,
+              ),
+            ),
           ),
-        ),
-        ResultBottomBar(
-          selectedAngle: _selectedAngle,
-          angleLabel: _angleLabel(_selectedAngle),
-          grouped: grouped,
-          onAngleSelected: _selectAngle,
-          onEstimate: () {
-            final result =
-                _controller.result?.map((e) => e.toJson()).toList() ?? [];
-            widget.onComplete?.call(result);
-          },
-        ),
       ],
     );
   }

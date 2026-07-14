@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../../../core/themes/app_colors.dart';
 import '../../../../core/themes/app_textstyle.dart';
@@ -72,7 +73,13 @@ class _DamageTypeTile extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(option.icon, size: 22.r, color: accent),
+              SvgPicture.asset(
+                option.iconAsset,
+                width: 16.r,
+                height: 16.r,
+                colorFilter: ColorFilter.mode(accent, BlendMode.srcIn),
+                package: 'aicycle_on_device',
+              ),
               6.verticalSpace,
               Text(
                 option.label,

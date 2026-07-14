@@ -1,5 +1,4 @@
-import 'package:flutter/material.dart';
-
+import '../../../../core/constants/app_assets.dart';
 import '../../../../core/constants/string_sheet.dart';
 
 /// Một loại tổn thất chọn được trên màn [AddDamageView].
@@ -7,12 +6,12 @@ class DamageTypeOption {
   const DamageTypeOption({
     required this.slug,
     required this.label,
-    required this.icon,
+    required this.iconAsset,
   });
 
   final String slug;
   final String label;
-  final IconData icon;
+  final String iconAsset;
 }
 
 /// Danh sách cố định loại tổn thất — slug dùng khi gửi BE.
@@ -21,34 +20,43 @@ abstract final class DamageTypeOptions {
     DamageTypeOption(
       slug: 'scratch',
       label: StringSheet.damageTypeScratch,
-      icon: Icons.show_chart_rounded,
+      iconAsset: AppAssets.scratch,
     ),
     DamageTypeOption(
       slug: 'dent',
       label: StringSheet.damageTypeDent,
-      icon: Icons.grid_view_rounded,
+      iconAsset: AppAssets.dent,
     ),
     DamageTypeOption(
       slug: 'crack',
       label: StringSheet.damageTypeCrack,
-      icon: Icons.hub_outlined,
+      iconAsset: AppAssets.crack,
     ),
     DamageTypeOption(
       slug: 'loose',
       label: StringSheet.damageTypeLoose,
-      icon: Icons.open_in_full_rounded,
+      iconAsset: AppAssets.loose,
     ),
     DamageTypeOption(
       slug: 'puncture',
       label: StringSheet.damageTypePuncture,
-      icon: Icons.photo_size_select_actual_outlined,
+      iconAsset: AppAssets.puncture,
     ),
     DamageTypeOption(
       slug: 'missing',
       label: StringSheet.damageTypeMissing,
-      icon: Icons.visibility_off_outlined,
+      iconAsset: AppAssets.missing,
     ),
   ];
+
+  static const Map<String, String> _beSlugByUiSlug = {
+    'scratch': 'tray-xuoc-g06jcx',
+    'dent': 'mop-bep-jtep4m',
+    'crack': 'vo-nut-E6BNTw',
+    'loose': 'long-rung-i2rm16',
+    'puncture': 'thung-rach-EcfqAl',
+    'missing': 'mat-4iytj1',
+  };
 
   static DamageTypeOption? bySlug(String? slug) {
     if (slug == null) return null;
@@ -56,5 +64,10 @@ abstract final class DamageTypeOptions {
       if (o.slug == slug) return o;
     }
     return null;
+  }
+
+  static String? toBeSlug(String? uiSlug) {
+    if (uiSlug == null) return null;
+    return _beSlugByUiSlug[uiSlug];
   }
 }

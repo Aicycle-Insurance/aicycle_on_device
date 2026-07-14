@@ -197,6 +197,7 @@ class PartMask {
     this.masksPath,
     this.boxes,
     this.vehiclePartName,
+    this.vehiclePartSlug,
     this.vehicleColor,
     this.scores,
     this.isPart,
@@ -207,6 +208,8 @@ class PartMask {
   final String? masksPath;
   final List<double>? boxes;
   final String? vehiclePartName;
+
+  final String? vehiclePartSlug;
   final String? vehicleColor;
   final num? scores;
   final bool? isPart;
@@ -222,6 +225,7 @@ class PartMask {
       'masksPath': masksPath,
       'boxes': boxes,
       'vehiclePartName': vehiclePartName,
+      'vehiclePartSlug': vehiclePartSlug,
       'vehicleColor': vehicleColor,
       'scores': scores,
       'isPart': isPart,

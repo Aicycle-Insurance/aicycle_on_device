@@ -185,6 +185,7 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
         sessionId: widget.aiCycleConfig.generalConfig.documentId,
         capturedPhotos: const {},
         onComplete: (_) => widget.onComplete?.call(),
+        onError: widget.onError,
         onAddPhoto: (_) => setState(() {
           _uploadPhotos = null;
           _showResult = false;

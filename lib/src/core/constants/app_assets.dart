@@ -13,4 +13,11 @@ class AppAssets {
 
   static const List<String> carAngleSamples = [sample2, sample3, sample4, sample1];
   static const hand = '$_images/hand.png';
+
+  static const scratch = '$_images/scratch.svg';
+  static const dent = '$_images/dent.svg';
+  static const crack = '$_images/crack.svg';
+  static const loose = '$_images/loose.svg';
+  static const puncture = '$_images/puncture.svg';
+  static const missing = '$_images/missing.svg';
 }

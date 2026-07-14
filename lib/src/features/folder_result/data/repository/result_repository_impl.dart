@@ -43,6 +43,17 @@ class ResultRepositoryImpl implements ResultRepository {
         .toList();
   }
 
+  @override
+  Future<void> submitAdditionalDamages({
+    required int imageId,
+    required List<Map<String, dynamic>> additionalImageDamage,
+  }) {
+    return _dataSource.submitAdditionalDamages(
+      imageId: imageId,
+      additionalImageDamage: additionalImageDamage,
+    );
+  }
+
   // /// Fallback gọi endpoint khi cache rỗng (chưa dùng).
   // Future<List<VehiclePart>> _fetchResultFromEndpoint() async {
   //   final models = await _dataSource.fetchResult();
@@ -87,6 +98,7 @@ class ResultRepositoryImpl implements ResultRepository {
           masksPath: p['maskPath'] as String?,
           boxes: _parseBoxes(p['box']),
           vehiclePartName: p['name'] as String?,
+          vehiclePartSlug: p['carPartKey'] as String?,
           vehicleColor: p['maskColor'] as String?,
           scores: p['score'] as num?,
           isPart: true,

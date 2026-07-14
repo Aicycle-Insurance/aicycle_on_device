@@ -16,6 +16,7 @@ class ResultBottomBar extends StatelessWidget {
     required this.grouped,
     required this.onAngleSelected,
     required this.onEstimate,
+    this.isSubmitting = false,
   });
 
   final int selectedAngle;
@@ -23,6 +24,7 @@ class ResultBottomBar extends StatelessWidget {
   final Map<int, List<ResultImage>> grouped;
   final ValueChanged<int> onAngleSelected;
   final VoidCallback onEstimate;
+  final bool isSubmitting;
 
   static const int _angleCount = 4;
   static const double _thumbDesignW = 84;
@@ -103,7 +105,7 @@ class ResultBottomBar extends StatelessWidget {
                   index: i,
                   selected: i == selectedAngle,
                   hasImages: (grouped[i] ?? []).isNotEmpty,
-                  onTap: () => onAngleSelected(i),
+                  onTap: isSubmitting ? null : () => onAngleSelected(i),
                   width: thumbW,
                   height: thumbH,
                 ),
@@ -128,9 +130,10 @@ class ResultBottomBar extends StatelessWidget {
               child: ConstrainedBox(
                 constraints: BoxConstraints(maxWidth: constraints.maxWidth),
                 child: FilledButton(
-                  onPressed: onEstimate,
+                  onPressed: isSubmitting ? null : onEstimate,
                   style: FilledButton.styleFrom(
                     backgroundColor: AppColors.primaryA600,
+                    disabledBackgroundColor: AppColors.primaryA300,
                     minimumSize: Size(0, 45.h),
                     padding: EdgeInsets.symmetric(horizontal: 14.w),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -139,12 +142,21 @@ class ResultBottomBar extends StatelessWidget {
                       borderRadius: BorderRadius.circular(8.r),
                     ),
                   ),
-                  child: Text(
-                    StringSheet.estimateDamage,
-                    style: AppTextStyles.base.s14.w700().copyWith(
-                          color: AppColors.white,
+                  child: isSubmitting
+                      ? SizedBox(
+                          width: 18.r,
+                          height: 18.r,
+                          child: const CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.white,
+                          ),
+                        )
+                      : Text(
+                          StringSheet.estimateDamage,
+                          style: AppTextStyles.base.s14.w700().copyWith(
+                                color: AppColors.white,
+                              ),
                         ),
-                  ),
                 ),
               ),
             );

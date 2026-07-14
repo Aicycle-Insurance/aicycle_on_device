@@ -106,6 +106,12 @@ class StringSheet {
   static const damageTypeLoose = 'Long, rụng';
   static const damageTypePuncture = 'Thủng, rách';
   static const damageTypeMissing = 'Mất';
+  static const missingVehiclePartSlug =
+      'Không xác định được bộ phận xe. Vui lòng chọn lại vị trí.';
+  static const submitAdditionalDamagesFailed =
+      'Gửi tổn thất thất bại. Vui lòng thử lại.';
+  static const invalidDamageAnnotation =
+      'Dữ liệu tổn thất không hợp lệ. Vui lòng kiểm tra lại.';
   static const done = 'Xong';
   static const estimateDamage = 'Ước tính thiệt hại';
   static const viewResult = 'Xem kết quả';

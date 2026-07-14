@@ -39,7 +39,7 @@ class AddDamageTapButton extends StatelessWidget {
                 alignment: Alignment.center,
                 child: Icon(
                   Icons.add,
-                  size: 14.r,
+                  size: 18.r,
                   color: AppColors.white,
                 ),
               ),

@@ -64,6 +64,7 @@ class _AddDamageViewState extends State<AddDamageView> {
         normalizedPosition: draft.normalizedPosition,
         logicalPixelPosition: draft.logicalPixelPosition,
         vehiclePartName: draft.vehiclePartName,
+        vehiclePartSlug: draft.vehiclePartSlug,
         damageTypeSlug: option.slug,
         damageTypeName: option.label,
       );
@@ -76,6 +77,7 @@ class _AddDamageViewState extends State<AddDamageView> {
       normalizedPosition: tap.normalizedPosition,
       logicalPixelPosition: tap.logicalPixelPosition,
       vehiclePartName: _partName,
+      vehiclePartSlug: tap.mask.vehiclePartSlug!,
       damageTypeSlug: option.slug,
       damageTypeName: option.label,
     );
@@ -87,6 +89,11 @@ class _AddDamageViewState extends State<AddDamageView> {
 
     final option = DamageTypeOptions.bySlug(slug);
     if (option == null) return;
+
+    if (!_isEdit) {
+      final partSlug = widget.tapResult!.mask.vehiclePartSlug;
+      if (partSlug == null || partSlug.isEmpty) return;
+    }
 
     Navigator.of(context).pop(
       AddDamageViewSaved(_buildDraftFromForm(option)),
