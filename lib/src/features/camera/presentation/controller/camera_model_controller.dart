@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import '../../../../config/aicycle_config.dart';
 import '../../../../core/cache/session_cache.dart';
 import '../../../ai_model_manager/data/model/ai_model.dart';
+import '../../../ai_model_manager/data/model/downloaded_model_info.dart';
+import '../../../ai_model_manager/data/model/model_manifest.dart';
 import '../../../ai_model_manager/domain/entity/ai_model_type.dart';
 import '../../../ai_model_manager/domain/repository/ai_model_repository.dart';
 import '../../../aicycle_folder/domain/repository/aicycle_folder_repository.dart';
@@ -144,6 +146,10 @@ class CameraModelController extends ChangeNotifier {
   /// 1. Uses provided path if file exists
   /// 2. Otherwise, ensures the latest model is available (downloading if needed)
   ///
+  /// The remote model lists (one API call per type) and the local manifest
+  /// are fetched concurrently, so total latency is one round trip instead
+  /// of one per model type.
+  ///
   /// Sets isPreparing to true during the process and catches any errors.
   /// Notifies listeners of completion.
   ///
@@ -157,13 +163,33 @@ class CameraModelController extends ChangeNotifier {
     notifyListeners();
 
     try {
+      final remoteTypes = <AiModelType>[];
       for (final type in AiModelType.values) {
         final provided = paths[type];
         if (provided != null && File(provided).existsSync()) {
-          _modelPaths[type] = await _validateModelPath(provided, type);
+          _modelPaths[type] = (await _validateModelPath(provided, type)).path;
           continue;
         }
-        _modelPaths[type] = await _ensureLatestModel(type);
+        remoteTypes.add(type);
+      }
+      if (remoteTypes.isEmpty) return;
+
+      final manifestFuture = _modelRepository.getLocalState();
+      final listResults = await Future.wait([
+        for (final type in remoteTypes) _modelRepository.getModels(type),
+      ]);
+      final manifest = (await manifestFuture).fold(
+        (failure) => throw _PrepareException(failure.message),
+        (manifest) => manifest,
+      );
+
+      for (var i = 0; i < remoteTypes.length; i++) {
+        final type = remoteTypes[i];
+        final models = listResults[i].fold(
+          (failure) => throw _PrepareException(failure.message),
+          (models) => models,
+        );
+        _modelPaths[type] = await _ensureLatestModel(type, models, manifest);
       }
     } on _PrepareException catch (e) {
       _modelError = e.message;
@@ -178,12 +204,12 @@ class CameraModelController extends ChangeNotifier {
   /// Ensures the latest model of a given type is available locally.
   ///
   /// Process:
-  /// 1. Fetches all available models of the type from the repository
-  /// 2. Finds the newest version (by version number, then by creation date)
-  /// 3. Checks if this model is already downloaded
-  /// 4. If not, downloads it with progress tracking
-  /// 5. Deletes older versions of the same type
-  /// 6. Marks the latest model as selected
+  /// 1. Finds the newest version (by version number, then by creation date)
+  ///    among [models] fetched from the repository
+  /// 2. Checks if this model is already downloaded (per [manifest])
+  /// 3. If not, downloads it with progress tracking
+  /// 4. Deletes older versions of the same type
+  /// 5. Marks the latest model as selected
   ///
   /// Returns the file path to the model.
   ///
@@ -191,25 +217,23 @@ class CameraModelController extends ChangeNotifier {
   ///
   /// Parameters:
   ///   - type: The AI model type to ensure
-  Future<String> _ensureLatestModel(AiModelType type) async {
-    final models = (await _modelRepository.getModels(type)).fold(
-      (failure) => throw _PrepareException(failure.message),
-      (models) => models,
-    );
+  ///   - models: Available models of this type, already fetched from server
+  ///   - manifest: Local state, already read from disk
+  Future<String> _ensureLatestModel(
+    AiModelType type,
+    List<AiModel> models,
+    ModelManifest manifest,
+  ) async {
     if (models.isEmpty) {
       throw _PrepareException('No model available for ${type.apiValue}');
     }
     final latest = models.reduce(_newer);
 
-    final manifest = (await _modelRepository.getLocalState()).fold(
-      (failure) => throw _PrepareException(failure.message),
-      (manifest) => manifest,
-    );
     final existing =
         manifest.downloaded.where((e) => e.id == latest.id).firstOrNull;
     if (existing != null) {
       try {
-        final validPath = await _validateModelPath(existing.filePath, type);
+        final validPath = await _validPathOfDownloaded(existing, type);
         await _modelRepository.selectModel(latest);
         return validPath;
       } on _PrepareException {
@@ -236,13 +260,14 @@ class CameraModelController extends ChangeNotifier {
     );
 
     _downloadingType = null;
-    late final String validPath;
+    late final ({String path, String? task}) validated;
     try {
-      validPath = await _validateModelPath(info.filePath, type);
+      validated = await _validateModelPath(info.filePath, type);
     } on _PrepareException {
       await _modelRepository.deleteModel(info.id);
       rethrow;
     }
+    await _modelRepository.markModelValidated(info.id, validated.task ?? '');
 
     final oldVersions =
         manifest.downloaded.where((e) => e.type == type && e.id != latest.id);
@@ -251,29 +276,80 @@ class CameraModelController extends ChangeNotifier {
     }
 
     await _modelRepository.selectModel(latest);
-    return validPath;
+    return validated.path;
   }
 
-  Future<String> _validateModelPath(String path, AiModelType type) async {
+  /// Returns a valid path for an already-downloaded model.
+  ///
+  /// When the model was validated before (validatedTask recorded in the
+  /// manifest), only resolves the path and re-checks the recorded task —
+  /// skipping the native inspect step, which on iOS recompiles the CoreML
+  /// model and dominates the preparing-screen latency. Models without the
+  /// marker (first run, or downloaded by an older app version) go through
+  /// the full validation once and are then marked.
+  Future<String> _validPathOfDownloaded(
+    DownloadedModelInfo info,
+    AiModelType type,
+  ) async {
+    final cachedTask = info.validatedTask;
+    if (cachedTask == null) {
+      final validated = await _validateModelPath(info.filePath, type);
+      await _modelRepository.markModelValidated(info.id, validated.task ?? '');
+      return validated.path;
+    }
+
     try {
-      final preparedPath = await YOLOModelResolver.preparePath(path);
-      final metadata = await YOLOModelResolver.inspect(preparedPath);
-      final expectedTask = _expectedYoloTask(type);
-      final actualTask = YOLOTaskParsing.tryParse(metadata['task'] as String?);
-      if (expectedTask != null &&
-          actualTask != null &&
-          actualTask != expectedTask) {
-        throw _PrepareException(
-          '${type.apiValue} model task mismatch: expected '
-          '${expectedTask.name}, metadata says ${actualTask.name}.',
-        );
+      final preparedPath = await YOLOModelResolver.preparePath(info.filePath);
+      if (FileSystemEntity.typeSync(preparedPath) ==
+          FileSystemEntityType.notFound) {
+        throw _PrepareException('${type.apiValue} model file is missing.');
       }
+      _ensureTaskMatches(type, cachedTask);
       return preparedPath;
     } on _PrepareException {
       rethrow;
     } catch (e) {
       throw _PrepareException(
         '${type.apiValue} model is invalid or corrupted: $e',
+      );
+    }
+  }
+
+  /// Fully validates a model: resolves the path, inspects the model natively
+  /// (expensive — compiles the CoreML model on iOS) and checks its task.
+  ///
+  /// Returns the prepared path together with the metadata task string so
+  /// callers can record it as the validation cache.
+  Future<({String path, String? task})> _validateModelPath(
+    String path,
+    AiModelType type,
+  ) async {
+    try {
+      final preparedPath = await YOLOModelResolver.preparePath(path);
+      final metadata = await YOLOModelResolver.inspect(preparedPath);
+      final task = metadata['task'] as String?;
+      _ensureTaskMatches(type, task);
+      return (path: preparedPath, task: task);
+    } on _PrepareException {
+      rethrow;
+    } catch (e) {
+      throw _PrepareException(
+        '${type.apiValue} model is invalid or corrupted: $e',
+      );
+    }
+  }
+
+  /// Throws _PrepareException if [taskString] conflicts with the task
+  /// expected for [type]. Unknown/empty tasks pass (e.g. OCR models).
+  void _ensureTaskMatches(AiModelType type, String? taskString) {
+    final expectedTask = _expectedYoloTask(type);
+    final actualTask = YOLOTaskParsing.tryParse(taskString);
+    if (expectedTask != null &&
+        actualTask != null &&
+        actualTask != expectedTask) {
+      throw _PrepareException(
+        '${type.apiValue} model task mismatch: expected '
+        '${expectedTask.name}, metadata says ${actualTask.name}.',
       );
     }
   }

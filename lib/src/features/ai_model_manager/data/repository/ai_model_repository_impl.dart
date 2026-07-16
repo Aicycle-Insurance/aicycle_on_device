@@ -85,6 +85,19 @@ class AiModelRepositoryImpl implements AiModelRepository {
     }
   }
 
+  @override
+  Future<Result<void, Failure>> markModelValidated(
+    int modelId,
+    String validatedTask,
+  ) async {
+    try {
+      await _local.markModelValidated(modelId, validatedTask);
+      return const Success(null);
+    } catch (e) {
+      return FailureResult(_mapError(e));
+    }
+  }
+
   Failure _mapError(Object e) {
     return switch (e) {
       NetworkException(:final message) =>

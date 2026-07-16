@@ -182,6 +182,18 @@ class AiModelLocalDataSource {
     }
   }
 
+  /// Ghi nhận model [modelId] đã validate thành công với metadata task
+  /// [validatedTask] (chuỗi rỗng nếu model không có task — vd OCR biển số).
+  Future<void> markModelValidated(int modelId, String validatedTask) async {
+    final manifest = await readManifest();
+    final downloaded = manifest.downloaded
+        .map(
+          (e) => e.id == modelId ? e.copyWith(validatedTask: validatedTask) : e,
+        )
+        .toList();
+    await _writeManifest(manifest.copyWith(downloaded: downloaded));
+  }
+
   /// Lưu model được chọn cho loại tương ứng.
   Future<void> setSelectedModel(AiModelType type, int modelId) async {
     final manifest = await readManifest();

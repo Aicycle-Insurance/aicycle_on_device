@@ -16,6 +16,12 @@ class DownloadedModelInfo {
   final DateTime createdDate;
   final DateTime downloadedAt;
 
+  /// Giá trị `task` trong metadata model, ghi lại sau lần validate
+  /// (inspect) thành công đầu tiên. null = chưa validate — các lần mở
+  /// camera sau dựa vào trường này để bỏ qua bước inspect tốn thời gian
+  /// (trên iOS inspect phải compile lại CoreML model).
+  final String? validatedTask;
+
   const DownloadedModelInfo({
     required this.id,
     required this.modelName,
@@ -25,6 +31,7 @@ class DownloadedModelInfo {
     required this.createdDate,
     required this.downloadedAt,
     this.sizeInBytes,
+    this.validatedTask,
   });
 
   factory DownloadedModelInfo.fromModel(
@@ -44,7 +51,7 @@ class DownloadedModelInfo {
     );
   }
 
-  DownloadedModelInfo copyWith({String? filePath}) {
+  DownloadedModelInfo copyWith({String? filePath, String? validatedTask}) {
     return DownloadedModelInfo(
       id: id,
       modelName: modelName,
@@ -54,6 +61,7 @@ class DownloadedModelInfo {
       sizeInBytes: sizeInBytes,
       createdDate: createdDate,
       downloadedAt: downloadedAt,
+      validatedTask: validatedTask ?? this.validatedTask,
     );
   }
 
@@ -67,6 +75,7 @@ class DownloadedModelInfo {
       sizeInBytes: json['sizeInBytes'] as int?,
       createdDate: DateTime.parse(json['createdDate'] as String),
       downloadedAt: DateTime.parse(json['downloadedAt'] as String),
+      validatedTask: json['validatedTask'] as String?,
     );
   }
 
@@ -80,6 +89,7 @@ class DownloadedModelInfo {
       'sizeInBytes': sizeInBytes,
       'createdDate': createdDate.toIso8601String(),
       'downloadedAt': downloadedAt.toIso8601String(),
+      if (validatedTask != null) 'validatedTask': validatedTask,
     };
   }
 }
