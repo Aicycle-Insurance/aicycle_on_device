@@ -17,10 +17,10 @@ mixin _PanoramicMixin on _CameraControllerBase {
     if (_completedSegments.contains(_activeSegmentIndex)) return;
     if (_panoramicCapturedSegments.contains(_activeSegmentIndex)) return;
     if (_isCapturing) return;
-    _updateMessageSegment(_latestCarPartClasses, _activeSegmentIndex!);
+    _updateMessageSegment(_activeSegmentIndex!);
   }
 
-  void _updateMessageSegment(Set<String> classes, int segmentIndex) {
+  void _updateMessageSegment(int segmentIndex) {
     const licencePlate = _licensePlateClass;
     const door = 'Cánh cửa';
 
@@ -29,9 +29,11 @@ mixin _PanoramicMixin on _CameraControllerBase {
 
     final (frontBumper, initialGuide) = config;
 
-    final hasPlate = classes.contains(licencePlate);
-    final allPresent =
-        hasPlate && classes.contains(door) && classes.contains(frontBumper);
+    // Presence đã làm mượt qua _carPartFlickerGrace — một frame detect nhiễu
+    // (mất bộ phận 1-2 frame) không reset đồng hồ giữ yên / đổi message.
+    final hasPlate = _seenRecently(licencePlate);
+    final hasDoor = _seenRecently(door);
+    final allPresent = hasPlate && hasDoor && _seenRecently(frontBumper);
     final plateReadable = _hasFreshPlateRead;
     final now = DateTime.now();
     if (_platePromptShown) _platePromptShownAt ??= now;
@@ -55,7 +57,7 @@ mixin _PanoramicMixin on _CameraControllerBase {
     if (!hasPlate) {
       _setMessage(
           CameraMessage(message: initialGuide, type: MessageType.guide));
-    } else if (!classes.contains(door)) {
+    } else if (!hasDoor) {
       _setMessage(CameraMessage(
           message: StringSheet.moveBackGuide, type: MessageType.info));
     } else if (allPresent) {

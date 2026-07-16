@@ -106,8 +106,13 @@ mixin _StreamMixin on _CameraControllerBase {
     final visible = _filterToViewport(output.detections);
     _latestCarPartClasses = visible.map((d) => d.className).toSet();
     _latestCarPartDetections = visible;
-    // Biển không còn trong khung → cờ "đọc được" cũ không còn hiệu lực.
-    if (!_latestCarPartClasses.contains(_licensePlateClass)) {
+    final now = DateTime.now();
+    for (final className in _latestCarPartClasses) {
+      _carPartLastSeenAt[className] = now;
+    }
+    // Biển vắng mặt quá grace period (không phải flicker 1-2 frame) → cờ
+    // "đọc được" cũ không còn hiệu lực.
+    if (!_seenRecently(_licensePlateClass)) {
       _clearPlateRead();
     }
     updateMessage(); // tự notify khi message đổi

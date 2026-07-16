@@ -96,15 +96,17 @@ public class YOLOMultiTaskView: UIView {
   /// the saved (viewport-cropped) photo. Defaults to the full frame until set.
   private var ocrViewportTop: CGFloat = 0
   private var ocrViewportBottom: CGFloat = 1
-  /// Inset from the viewport band edge (buffer X = preview-vertical). Kept large so
-  /// a plate clipped near the top/bottom bar boundary (only half visible) is NOT
-  /// accepted — the whole plate must sit clearly inside the frame, not just touch it.
-  private static let ocrViewportMargin: CGFloat = 0.1
+  /// Inset from the viewport band edge (buffer X = preview-vertical). Rejects a
+  /// plate clipped near the top/bottom bar boundary (only half visible) — the whole
+  /// plate must sit inside the frame, not just touch it. Kept small: on a panoramic
+  /// full-car framing the plate sits low in the frame (bumper level), and a larger
+  /// inset silently prevented OCR from ever running there.
+  private static let ocrViewportMargin: CGFloat = 0.05
   /// Inset on the PERPENDICULAR axis (preview-horizontal = buffer Y). The viewport
   /// band only gates the buffer X axis, leaving plates flush against the LEFT/RIGHT
   /// edge of the screen readable — which produced badly-framed / half-plate captures.
-  /// Require the plate to sit well away from those edges too.
-  private static let ocrEdgeMargin: CGFloat = 0.1
+  /// Require the plate to sit away from those edges too.
+  private static let ocrEdgeMargin: CGFloat = 0.05
   /// Dedicated queue so OCR inference never blocks the camera/inference queues.
   private let ocrQueue = DispatchQueue(label: "yolo.infer.ocr", qos: .userInitiated)
   /// One-frame-deep back-pressure for OCR. Accessed only on cameraQueue.

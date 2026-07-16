@@ -58,6 +58,12 @@ const _holdStillMinDuration = Duration(seconds: 3);
 /// không dùng trạng thái cũ để auto-capture.
 const _plateReadFreshDuration = Duration(milliseconds: 700);
 
+/// Model carPart (~6.7fps) nhấp nháy giữa các frame: một bộ phận vẫn được coi
+/// là "đang thấy" nếu xuất hiện trong khoảng này (~4 frame), để một frame nhiễu
+/// không reset đồng hồ giữ yên 3s / xoá cờ đọc biển. User thực sự lia máy đi
+/// thì bộ phận biến mất quá khoảng này và trạng thái reset như cũ.
+const _carPartFlickerGrace = Duration(milliseconds: 600);
+
 /// Giữ message yêu cầu căn biển rõ tối thiểu khoảng này trước khi cho phép
 /// auto-capture lại, để user kịp đọc và điều chỉnh camera.
 const _plateClearPromptMinDuration = Duration(seconds: 3);
@@ -185,6 +191,10 @@ abstract class _CameraControllerBase extends ChangeNotifier {
 
   /// Class names bộ phận từ frame car-part detect (model thứ 2) mới nhất.
   Set<String> _latestCarPartClasses = {};
+
+  /// Thời điểm thấy gần nhất của từng bộ phận (trong khung nhìn). Dùng cùng
+  /// [_carPartFlickerGrace] để làm mượt tín hiệu detect vốn nhấp nháy từng frame.
+  final Map<String, DateTime> _carPartLastSeenAt = {};
 
   /// OCR (native) đọc được biển số ở frame mới nhất hay chưa. Là tín hiệu canh
   /// khung: đọc được biển ⇒ khung đủ rõ/đủ gần để dùng làm ảnh toàn cảnh.
@@ -319,6 +329,14 @@ abstract class _CameraControllerBase extends ChangeNotifier {
     _latestPlateReadableAt = null;
   }
 
+  /// Bộ phận [className] có được thấy trong khoảng [_carPartFlickerGrace] gần
+  /// đây không — tín hiệu "đang thấy" đã làm mượt qua các frame nhiễu.
+  bool _seenRecently(String className) {
+    final seenAt = _carPartLastSeenAt[className];
+    return seenAt != null &&
+        DateTime.now().difference(seenAt) <= _carPartFlickerGrace;
+  }
+
   void _resetPanoramicFramingState({bool clearCarParts = false}) {
     _clearPlateRead();
     _holdStillShownAt = null;
@@ -329,6 +347,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
     if (clearCarParts) {
       _latestCarPartClasses = {};
       _latestCarPartDetections = [];
+      _carPartLastSeenAt.clear();
     }
   }
 
