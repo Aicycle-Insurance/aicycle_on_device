@@ -428,6 +428,21 @@ class YOLOPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandler
         }
       }
 
+      "schedulePhotoUploadQueue" -> {
+        try {
+          val args = call.arguments as? Map<*, *>
+          val queueFilePath = args?.get("queueFilePath") as? String
+          if (queueFilePath == null) {
+            result.error("bad_args", "Missing queueFilePath", null)
+            return
+          }
+          AICycleUploadScheduler.schedule(applicationContext, queueFilePath)
+          result.success(null)
+        } catch (e: Exception) {
+          result.error("upload_queue_error", "Failed to schedule upload queue: ${e.message}", null)
+        }
+      }
+
       "inspectModel" -> {
         try {
           val args = call.arguments as? Map<*, *>

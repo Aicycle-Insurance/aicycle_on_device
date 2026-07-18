@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../../../core/cache/photo_session_cache.dart';
 import '../../../../core/constants/string_sheet.dart';
+import '../../../../core/upload/photo_upload_queue.dart';
 import '../../data/model/camera_message.dart';
 import '../../data/model/car_angle.dart';
 import '../../data/model/classify_output.dart';
@@ -139,7 +140,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// streaming từ YOLO. Bật lên qua [_StreamMixin.startCapture].
   bool _captureStarted = false;
 
-  Map<int, List<Uint8List>> _capturedPhotos = {};
+  Map<int, List<String>> _capturedPhotos = {};
 
   /// Vùng camera user thực sự nhìn thấy (giữa top bar và bottom bar), dạng tỉ lệ
   /// [0,1] theo chiều dọc của preview. Dùng để native crop ảnh chụp về đúng
@@ -260,7 +261,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
 
   bool get isTorchEnabled => _torchEnabled;
   bool get isCapturing => _isCapturing;
-  Map<int, List<Uint8List>> get capturedPhotos => _capturedPhotos;
+  Map<int, List<String>> get capturedPhotos => _capturedPhotos;
   int? get activeSegmentIndex => _detectedSegmentIndex ?? _activeSegmentIndex;
   Set<int> get completedSegments => Set.unmodifiable(_completedSegments);
 
@@ -470,17 +471,32 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   void stopCamera() {
     if (_stopped) return;
     _stopped = true;
-    yoloController.stop();
+    _captureStarted = false;
+    _cancelFlowTimers();
+    _latestDetections = [];
+    _latestCarPartDetections = [];
+    _latestCarPartClasses = {};
+    _torchEnabled = false;
+    unawaited(yoloController.stop().catchError((_) {}));
+  }
+
+  void _cancelFlowTimers() {
+    _autoCaptureTimer?.cancel();
+    _autoCaptureTimer = null;
+    _noDetectionWarningTimer?.cancel();
+    _noDetectionWarningTimer = null;
+    _detailTimer?.cancel();
+    _detailTimer = null;
+    _plateReadTimer?.cancel();
+    _plateReadTimer = null;
+    _cornerSuccessTimer?.cancel();
+    _cornerSuccessTimer = null;
+    _cancelPendingMessage();
   }
 
   @override
   void dispose() {
-    _autoCaptureTimer?.cancel();
-    _noDetectionWarningTimer?.cancel();
-    _detailTimer?.cancel();
-    _plateReadTimer?.cancel();
-    _cornerSuccessTimer?.cancel();
-    _cancelPendingMessage();
+    _cancelFlowTimers();
     stopCamera(); // no-op nếu đã gọi trước đó
     super.dispose();
   }
@@ -507,8 +523,8 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// user đã di chuyển sang góc xe khác.
   void _autoSwitchToDetectedSegment(int segment);
 
-  /// [_CaptureMixin] — chụp 1 ảnh JPEG, lưu in-memory + disk.
-  Future<Uint8List?> capturePhoto({
+  /// [_CaptureMixin] — chụp 1 ảnh JPEG xuống disk và enqueue upload nền.
+  Future<String?> capturePhoto({
     bool immediate = false,
     int? segment,
     bool flashTick = true,

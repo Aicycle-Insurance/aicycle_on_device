@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
@@ -10,6 +9,7 @@ import '../../../core/constants/string_sheet.dart';
 import '../../../core/di/injection.dart';
 import '../../../core/themes/app_colors.dart';
 import '../../../core/themes/app_textstyle.dart';
+import '../../../core/upload/photo_upload_queue.dart';
 import '../../../core/utils/screen_utils.dart';
 import 'camera_screen.dart';
 import 'controller/camera_model_controller.dart';
@@ -57,17 +57,27 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
 
   late final CameraModelController _modelController;
   Timer? _releaseCameraAfterTransition;
+  Object? _uploadResponseListenerToken;
 
   /// Khi != null: đang ở pha upload (đã bấm "Xem kết quả"). Bootstrap render
   /// UploadView ngay, rồi gỡ CameraScreen sau một nhịp ngắn để tránh cleanup
   /// native chặn frame chuyển màn.
-  Map<int, List<Uint8List>>? _uploadPhotos;
+  Map<int, List<String>>? _uploadPhotos;
   bool _keepCameraDuringResultTransition = false;
 
   @override
   void initState() {
     super.initState();
     AICycleConfigHolder.init(widget.aiCycleConfig);
+    _uploadResponseListenerToken =
+        PhotoUploadQueue.instance.addUploadedResponseListener(
+      widget.onImageUploaded,
+      sessionId: widget.aiCycleConfig.generalConfig.documentId,
+      keepAliveAfterRemove: true,
+    );
+    unawaited(PhotoUploadQueue.instance.resumeSession(
+      widget.aiCycleConfig.generalConfig.documentId,
+    ));
 
     _modelController = CameraModelController(
       sl.aiModelRepository,
@@ -88,13 +98,29 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
   }
 
   @override
+  void didUpdateWidget(covariant AICycleOnDeviceCamera oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.onImageUploaded == widget.onImageUploaded) return;
+    PhotoUploadQueue.instance
+        .removeUploadedResponseListener(_uploadResponseListenerToken);
+    _uploadResponseListenerToken =
+        PhotoUploadQueue.instance.addUploadedResponseListener(
+      widget.onImageUploaded,
+      sessionId: widget.aiCycleConfig.generalConfig.documentId,
+      keepAliveAfterRemove: true,
+    );
+  }
+
+  @override
   void dispose() {
     _releaseCameraAfterTransition?.cancel();
+    PhotoUploadQueue.instance
+        .removeUploadedResponseListener(_uploadResponseListenerToken);
     _modelController.dispose();
     super.dispose();
   }
 
-  void _openUploadView(Map<int, List<Uint8List>> photos) {
+  void _openUploadView(Map<int, List<String>> photos) {
     if (_uploadPhotos != null) return;
     unawaited(PhotoSessionCache.instance
         .markUploadPending(widget.aiCycleConfig.generalConfig.documentId));
@@ -113,7 +139,8 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
   Future<void> _restorePendingUpload() async {
     final sessionId = widget.aiCycleConfig.generalConfig.documentId;
     if (!await PhotoSessionCache.instance.isUploadPending(sessionId)) return;
-    final cached = await PhotoSessionCache.instance.loadSession(sessionId);
+    final cached =
+        await PhotoSessionCache.instance.loadSessionPhotoPaths(sessionId);
     if (!mounted) return;
     if (cached.isEmpty) {
       await PhotoSessionCache.instance.clearUploadPending(sessionId);

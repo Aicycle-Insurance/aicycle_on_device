@@ -46,6 +46,7 @@ public final class YOLOPlugin: NSObject, @preconcurrency FlutterPlugin, @uncheck
     )
     let instance = YOLOPlugin()
     registrar.addMethodCallDelegate(instance, channel: defaultChannel)
+    registrar.addApplicationDelegate(instance)
   }
 
   private func registerInstanceChannel(instanceId: String, messenger: FlutterBinaryMessenger) {
@@ -401,6 +402,30 @@ public final class YOLOPlugin: NSObject, @preconcurrency FlutterPlugin, @uncheck
         let paths = getStoragePaths()
         result(paths)
 
+      case "schedulePhotoUpload":
+        guard let item = call.arguments as? [String: Any] else {
+          result(
+            FlutterError(
+              code: "bad_args", message: "Invalid arguments for schedulePhotoUpload", details: nil)
+          )
+          return
+        }
+        AICycleBackgroundUploader.shared.scheduleUpload(item) { error in
+          DispatchQueue.main.async {
+            if let error {
+              result(
+                FlutterError(
+                  code: "upload_queue_error",
+                  message: error.localizedDescription,
+                  details: nil
+                )
+              )
+            } else {
+              result(nil)
+            }
+          }
+        }
+
       case "inspectModel":
         guard let args = call.arguments as? [String: Any],
           let modelPath = args["modelPath"] as? String
@@ -515,5 +540,17 @@ public final class YOLOPlugin: NSObject, @preconcurrency FlutterPlugin, @uncheck
         result(FlutterMethodNotImplemented)
       }
     }
+  }
+
+  public func application(
+    _ application: UIApplication,
+    handleEventsForBackgroundURLSession identifier: String,
+    completionHandler: @escaping () -> Void
+  ) -> Bool {
+    AICycleBackgroundUploader.shared.handleEvents(
+      for: identifier,
+      completionHandler: completionHandler
+    )
+    return true
   }
 }

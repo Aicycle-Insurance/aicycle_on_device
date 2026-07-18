@@ -72,6 +72,35 @@ class YOLOMultiTaskPlatformView(
                             }
                         }
                     }
+                    "capturePhotoToFile" -> {
+                        val args = call.arguments as? Map<*, *>
+                        val path = args?.get("path") as? String
+                        if (path == null) {
+                            result.error("bad_args", "path (String) is required", null)
+                            return@setMethodCallHandler
+                        }
+                        val thumbnailPath = args["thumbnailPath"] as? String
+                        val thumbnailMaxSize = (args["thumbnailMaxSize"] as? Number)?.toInt() ?: 160
+                        val quality = (args["quality"] as? Number)?.toInt() ?: 80
+                        val l = (args["cropLeft"] as? Number)?.toFloat()
+                        val t = (args["cropTop"] as? Number)?.toFloat()
+                        val r = (args["cropRight"] as? Number)?.toFloat()
+                        val b = (args["cropBottom"] as? Number)?.toFloat()
+                        val crop = if (l != null && t != null && r != null && b != null)
+                            android.graphics.RectF(l, t, r, b) else null
+                        multiTaskView.capturePhotoToFile(
+                            path,
+                            crop,
+                            quality,
+                            thumbnailPath,
+                            thumbnailMaxSize
+                        ) { savedPath ->
+                            mainHandler.post {
+                                if (savedPath != null) result.success(savedPath)
+                                else result.error("capture_failed", "Failed to capture photo", null)
+                            }
+                        }
+                    }
                     "setTorch" -> {
                         val enable = (call.arguments as? Map<*, *>)?.get("enable") as? Boolean
                             ?: run { result.error("bad_args", "enable (bool) is required", null); return@setMethodCallHandler }

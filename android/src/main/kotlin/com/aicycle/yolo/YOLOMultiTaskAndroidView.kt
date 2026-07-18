@@ -25,6 +25,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -346,12 +347,16 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         return enable
     }
 
-    fun capturePhoto(crop: android.graphics.RectF? = null, callback: (ByteArray?) -> Unit) {
+    fun capturePhoto(
+        crop: android.graphics.RectF? = null,
+        jpegQuality: Int = 80,
+        callback: (ByteArray?) -> Unit
+    ) {
         val ic = imageCaptureUseCase ?: run { callback(null); return }
         // Snapshot preview size on the main thread for the aspect-fill crop mapping.
         val previewW = previewView.width
         val previewH = previewView.height
-        ic.takePicture(ContextCompat.getMainExecutor(context), object : ImageCapture.OnImageCapturedCallback() {
+        ic.takePicture(cameraExecutor, object : ImageCapture.OnImageCapturedCallback() {
             override fun onCaptureSuccess(image: ImageProxy) {
                 try {
                     val rotationDegrees = image.imageInfo.rotationDegrees
@@ -361,11 +366,11 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
                     val jpeg = if (image.format == android.graphics.ImageFormat.JPEG) raw else {
                         val bmp = BitmapFactory.decodeByteArray(raw, 0, raw.size)
                         ByteArrayOutputStream().also { out ->
-                            bmp?.compress(Bitmap.CompressFormat.JPEG, 92, out)
+                            bmp?.compress(Bitmap.CompressFormat.JPEG, jpegQuality, out)
                             bmp?.recycle()
                         }.toByteArray()
                     }
-                    callback(processCaptured(jpeg, rotationDegrees, crop, previewW, previewH))
+                    callback(processCaptured(jpeg, rotationDegrees, crop, previewW, previewH, jpegQuality))
                 } catch (e: Exception) {
                     Log.e(TAG, "capturePhoto processing failed: ${e.message}")
                     callback(null)
@@ -379,6 +384,58 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
                 callback(null)
             }
         })
+    }
+
+    fun capturePhotoToFile(
+        path: String,
+        crop: android.graphics.RectF? = null,
+        jpegQuality: Int = 80,
+        thumbnailPath: String? = null,
+        thumbnailMaxSize: Int = 160,
+        callback: (String?) -> Unit
+    ) {
+        capturePhoto(crop, jpegQuality) { bytes ->
+            if (bytes == null) {
+                callback(null)
+                return@capturePhoto
+            }
+            try {
+                val file = File(path)
+                file.parentFile?.mkdirs()
+                file.writeBytes(bytes)
+                if (thumbnailPath != null) {
+                    runCatching {
+                        writeThumbnail(bytes, thumbnailPath, thumbnailMaxSize)
+                    }
+                }
+                callback(file.absolutePath)
+            } catch (e: Exception) {
+                Log.e(TAG, "capturePhotoToFile failed: ${e.message}")
+                callback(null)
+            }
+        }
+    }
+
+    private fun writeThumbnail(bytes: ByteArray, path: String, maxSize: Int) {
+        val source = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return
+        try {
+            val longest = maxOf(source.width, source.height).coerceAtLeast(1)
+            val scale = maxSize.toFloat() / longest.toFloat()
+            val width = maxOf(1, (source.width * scale).toInt())
+            val height = maxOf(1, (source.height * scale).toInt())
+            val thumb = Bitmap.createScaledBitmap(source, width, height, true)
+            try {
+                val file = File(path)
+                file.parentFile?.mkdirs()
+                file.outputStream().use { out ->
+                    thumb.compress(Bitmap.CompressFormat.JPEG, 65, out)
+                }
+            } finally {
+                if (thumb !== source) thumb.recycle()
+            }
+        } finally {
+            source.recycle()
+        }
     }
 
     // endregion
@@ -761,6 +818,7 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         crop: android.graphics.RectF?,
         previewW: Int,
         previewH: Int,
+        jpegQuality: Int,
     ): ByteArray {
         if (rotationDegrees == 0 && crop == null) return bytes
         var bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return bytes
@@ -774,7 +832,7 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
             if (cropped !== bmp) { bmp.recycle(); bmp = cropped }
         }
         return ByteArrayOutputStream().also { out ->
-            bmp.compress(Bitmap.CompressFormat.JPEG, 92, out)
+            bmp.compress(Bitmap.CompressFormat.JPEG, jpegQuality, out)
             bmp.recycle()
         }.toByteArray()
     }

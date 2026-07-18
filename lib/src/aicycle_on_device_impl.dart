@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -8,6 +10,7 @@ import 'core/constants/string_sheet.dart';
 import 'core/di/injection.dart';
 import 'core/themes/app_colors.dart';
 import 'core/themes/app_textstyle.dart';
+import 'core/upload/photo_upload_queue.dart';
 import 'core/utils/screen_utils.dart';
 import 'features/ai_model_manager/presentation/model_manager_screen.dart';
 
@@ -33,11 +36,21 @@ class AICycleOnDevice extends StatefulWidget {
 
 class _AICycleOnDeviceState extends State<AICycleOnDevice> {
   late final AICycleOnDeviceController _controller;
+  Object? _uploadResponseListenerToken;
 
   @override
   void initState() {
     super.initState();
     AICycleConfigHolder.init(widget.aiCycleConfig);
+    _uploadResponseListenerToken =
+        PhotoUploadQueue.instance.addUploadedResponseListener(
+      widget.onImageUploaded,
+      sessionId: widget.aiCycleConfig.generalConfig.documentId,
+      keepAliveAfterRemove: true,
+    );
+    unawaited(PhotoUploadQueue.instance.resumeSession(
+      widget.aiCycleConfig.generalConfig.documentId,
+    ));
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     _controller = AICycleOnDeviceController(
       sl.aicycleFolderRepository,
@@ -50,7 +63,23 @@ class _AICycleOnDeviceState extends State<AICycleOnDevice> {
   }
 
   @override
+  void didUpdateWidget(covariant AICycleOnDevice oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.onImageUploaded == widget.onImageUploaded) return;
+    PhotoUploadQueue.instance
+        .removeUploadedResponseListener(_uploadResponseListenerToken);
+    _uploadResponseListenerToken =
+        PhotoUploadQueue.instance.addUploadedResponseListener(
+      widget.onImageUploaded,
+      sessionId: widget.aiCycleConfig.generalConfig.documentId,
+      keepAliveAfterRemove: true,
+    );
+  }
+
+  @override
   void dispose() {
+    PhotoUploadQueue.instance
+        .removeUploadedResponseListener(_uploadResponseListenerToken);
     _controller.dispose();
     super.dispose();
   }
