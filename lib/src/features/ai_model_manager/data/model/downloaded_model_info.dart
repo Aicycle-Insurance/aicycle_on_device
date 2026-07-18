@@ -16,10 +16,10 @@ class DownloadedModelInfo {
   final DateTime createdDate;
   final DateTime downloadedAt;
 
-  /// Giá trị `task` trong metadata model, ghi lại sau lần validate
-  /// (inspect) thành công đầu tiên. null = chưa validate — các lần mở
-  /// camera sau dựa vào trường này để bỏ qua bước inspect tốn thời gian
-  /// (trên iOS inspect phải compile lại CoreML model).
+  /// Task đã được xác nhận hoặc tin cậy từ loại model do API quản lý.
+  /// null = model cũ chưa được chuẩn bị; các lần mở camera sau dựa vào trường
+  /// này để bỏ qua bước inspect tốn thời gian (trên iOS inspect phải compile
+  /// lại CoreML model).
   final String? validatedTask;
 
   const DownloadedModelInfo({

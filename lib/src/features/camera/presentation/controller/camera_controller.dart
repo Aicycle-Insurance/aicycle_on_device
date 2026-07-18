@@ -52,12 +52,12 @@ const _licensePlateClass = 'Biển số xe';
 
 /// Giữ message holdStill tối thiểu khoảng này, tránh OCR đọc nhanh khiến message
 /// flash qua quá nhanh user không kịp thấy.
-const _holdStillMinDuration = Duration(seconds: 3);
+const _holdStillMinDuration = Duration(milliseconds: 800);
 
 /// OCR đọc được biển số chỉ có hiệu lực rất ngắn. Nếu user lia máy làm biển
 /// lệch/lẹm sau frame OCR đó thì controller phải chờ OCR đọc lại ở frame mới,
 /// không dùng trạng thái cũ để auto-capture.
-const _plateReadFreshDuration = Duration(milliseconds: 700);
+const _plateReadFreshDuration = Duration(milliseconds: 1200);
 
 /// Model carPart (~6.7fps) nhấp nháy giữa các frame: một bộ phận vẫn được coi
 /// là "đang thấy" nếu xuất hiện trong khoảng này (~4 frame), để một frame nhiễu
@@ -67,7 +67,11 @@ const _carPartFlickerGrace = Duration(milliseconds: 600);
 
 /// Giữ message yêu cầu căn biển rõ tối thiểu khoảng này trước khi cho phép
 /// auto-capture lại, để user kịp đọc và điều chỉnh camera.
-const _plateClearPromptMinDuration = Duration(seconds: 3);
+const _plateClearPromptMinDuration = Duration(seconds: 1);
+
+/// Khi đã căn đủ thân xe nhưng OCR chưa đọc được biển, nhắc điều chỉnh sớm
+/// thay vì để user giữ máy chờ mà không biết nguyên nhân.
+const _plateReadPromptDelay = Duration(seconds: 2);
 
 /// Giữ thông báo chụp thành công đủ lâu để user kịp đọc trước khi chuyển sang
 /// hướng dẫn tiếp theo.
@@ -205,21 +209,21 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// khi camera đã dịch khỏi vị trí vừa đọc biển.
   DateTime? _latestPlateReadableAt;
 
-  /// Timer 5s: khi đã căn đủ bộ phận nhưng OCR chưa đọc được biển hợp lệ, hết
-  /// 5s thì nhắc user di chuyển cho biển rõ nét.
+  /// Timer ngắn: khi đã căn đủ bộ phận nhưng OCR chưa đọc được biển hợp lệ thì
+  /// nhắc user di chuyển cho biển rõ nét.
   Timer? _plateReadTimer;
 
   /// Đã hiển thị nhắc "di chuyển cho biển rõ" hay chưa — để frame carPart kế
   /// tiếp không ghi đè message về holdStill.
   bool _platePromptShown = false;
 
-  /// Mốc bắt đầu hiển thị nhắc "di chuyển cho biển rõ". Dùng để giữ warning tối
-  /// thiểu 3s trước khi auto-capture lại nếu OCR đọc được biển ngay sau đó.
+  /// Mốc bắt đầu hiển thị nhắc "di chuyển cho biển rõ". Dùng để giữ warning đủ
+  /// lâu trước khi auto-capture lại nếu OCR đọc được biển ngay sau đó.
   DateTime? _platePromptShownAt;
 
   /// Mốc thời điểm bắt đầu hiển thị "giữ yên" (đã căn đủ bộ phận). Dùng để giữ
-  /// message holdStill tối thiểu 3s, tránh OCR đọc nhanh khiến message flash qua
-  /// quá nhanh user không kịp thấy.
+  /// message holdStill trong một nhịp ngắn, vừa ổn định khung vừa tránh làm chậm
+  /// lần chụp khi OCR đã đọc tốt.
   DateTime? _holdStillShownAt;
 
   /// Chi tiết bộ phận (kèm bounding box) từ frame car-part detect mới nhất —

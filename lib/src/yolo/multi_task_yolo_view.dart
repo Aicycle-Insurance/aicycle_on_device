@@ -243,23 +243,25 @@ class _MultiTaskYOLOViewState extends State<MultiTaskYOLOView> {
 
   Future<void> _resolveModels() async {
     try {
+      // Start OCR path resolution at the same time as the three required YOLO
+      // models. It remains optional, but no longer adds a second serial path
+      // preparation pass before the native camera view can be created.
+      final ocrFuture = () async {
+        final ocrPath = widget.ocrModelPath;
+        if (ocrPath == null) return null;
+        try {
+          return await YOLOModelResolver.preparePath(ocrPath);
+        } catch (_) {
+          return null;
+        }
+      }();
       final futures = [
         YOLOModelResolver.preparePath(widget.detectModelPath),
         YOLOModelResolver.preparePath(widget.classifyModelPath),
         YOLOModelResolver.preparePath(widget.secondDetectModelPath!),
       ];
       final results = await Future.wait(futures);
-      // OCR model is optional and non-blocking — resolve it separately so a
-      // failure here never prevents the camera/YOLO models from starting.
-      String? ocrResolved;
-      final ocrPath = widget.ocrModelPath;
-      if (ocrPath != null) {
-        try {
-          ocrResolved = await YOLOModelResolver.preparePath(ocrPath);
-        } catch (_) {
-          ocrResolved = null;
-        }
-      }
+      final ocrResolved = await ocrFuture;
       if (!mounted) return;
       setState(() {
         _detectResolved = results[0];

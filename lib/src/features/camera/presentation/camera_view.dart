@@ -52,7 +52,8 @@ class AICycleOnDeviceCamera extends StatefulWidget {
   State<AICycleOnDeviceCamera> createState() => _AICycleOnDeviceCameraState();
 }
 
-class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
+class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera>
+    with WidgetsBindingObserver {
   static const _resultTransitionHold = Duration(milliseconds: 350);
 
   late final CameraModelController _modelController;
@@ -68,6 +69,7 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     AICycleConfigHolder.init(widget.aiCycleConfig);
     _uploadResponseListenerToken =
         PhotoUploadQueue.instance.addUploadedResponseListener(
@@ -113,11 +115,20 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _releaseCameraAfterTransition?.cancel();
     PhotoUploadQueue.instance
         .removeUploadedResponseListener(_uploadResponseListenerToken);
     _modelController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    unawaited(PhotoUploadQueue.instance.resumeSession(
+      widget.aiCycleConfig.generalConfig.documentId,
+    ));
   }
 
   void _openUploadView(Map<int, List<String>> photos) {

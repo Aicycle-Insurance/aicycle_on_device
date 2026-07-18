@@ -34,13 +34,15 @@ class AICycleOnDevice extends StatefulWidget {
   State<AICycleOnDevice> createState() => _AICycleOnDeviceState();
 }
 
-class _AICycleOnDeviceState extends State<AICycleOnDevice> {
+class _AICycleOnDeviceState extends State<AICycleOnDevice>
+    with WidgetsBindingObserver {
   late final AICycleOnDeviceController _controller;
   Object? _uploadResponseListenerToken;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     AICycleConfigHolder.init(widget.aiCycleConfig);
     _uploadResponseListenerToken =
         PhotoUploadQueue.instance.addUploadedResponseListener(
@@ -78,10 +80,19 @@ class _AICycleOnDeviceState extends State<AICycleOnDevice> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     PhotoUploadQueue.instance
         .removeUploadedResponseListener(_uploadResponseListenerToken);
     _controller.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    unawaited(PhotoUploadQueue.instance.resumeSession(
+      widget.aiCycleConfig.generalConfig.documentId,
+    ));
   }
 
   @override

@@ -199,25 +199,6 @@ final class AICycleBackgroundUploader: NSObject, URLSessionDelegate, URLSessionT
     }
   }
 
-  private func markSkipped(queueFilePath: String?, id: String?, reason: String) {
-    guard let queueFilePath, let id else { return }
-    updateQueueItem(queueFilePath: queueFilePath, id: id) { item in
-      item["status"] = "skipped"
-      item["updatedAtMillis"] = nowMillis()
-      item["lastError"] = reason
-    }
-  }
-
-  private func hasEngineErrorCode(_ responseBody: String) -> Bool {
-    guard let data = responseBody.data(using: .utf8),
-      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-    else {
-      return false
-    }
-    guard let value = json["errorCodeFromEngine"] else { return false }
-    return !(value is NSNull)
-  }
-
   private func markFailed(queueFilePath: String?, id: String?, error: String, attempt: Int) {
     guard let queueFilePath, let id else { return }
     updateQueueItem(queueFilePath: queueFilePath, id: id) { item in
@@ -254,12 +235,16 @@ final class AICycleBackgroundUploader: NSObject, URLSessionDelegate, URLSessionT
       queue["items"] = items
 
       let out = try JSONSerialization.data(withJSONObject: queue)
-      let tmpURL = URL(fileURLWithPath: "\(queueFilePath).tmp")
+      let tmpURL = URL(
+        fileURLWithPath: "\(queueFilePath).ios-\(UUID().uuidString).tmp"
+      )
+      defer { try? FileManager.default.removeItem(at: tmpURL) }
       try out.write(to: tmpURL, options: .atomic)
       if FileManager.default.fileExists(atPath: queueURL.path) {
-        try FileManager.default.removeItem(at: queueURL)
+        try FileManager.default.replaceItemAt(queueURL, withItemAt: tmpURL)
+      } else {
+        try FileManager.default.moveItem(at: tmpURL, to: queueURL)
       }
-      try FileManager.default.moveItem(at: tmpURL, to: queueURL)
     } catch {
       NSLog("AICycleBackgroundUploader: failed to update queue: %@", error.localizedDescription)
     }
@@ -310,32 +295,18 @@ final class AICycleBackgroundUploader: NSObject, URLSessionDelegate, URLSessionT
 
     if let bodyPath { try? FileManager.default.removeItem(atPath: bodyPath) }
     if error == nil {
-      // Server responded with a non-2xx status. Skip this image instead of
-      // retrying; network-level failures are the only retryable case.
+      // HTTP responses are final; network-level failures are the only retryable
+      // case. Cache every response (including non-2xx) so Flutter can deliver
+      // the body while alive or replay it after the next resume.
       let bodySnippet = String(responseBody.prefix(500))
-      if hasEngineErrorCode(responseBody) {
-        markSucceeded(
-          queueFilePath: queueFilePath,
-          id: id,
-          statusCode: statusCode,
-          responseBody: responseBody
-        )
-        NSLog(
-          "AICycleBackgroundUploader: upload business error delivered id=%@ HTTP %d body=%@",
-          id ?? "",
-          statusCode,
-          bodySnippet
-        )
-        if let filePath { try? FileManager.default.removeItem(atPath: filePath) }
-        return
-      }
-      markSkipped(
+      markSucceeded(
         queueFilePath: queueFilePath,
         id: id,
-        reason: "HTTP \(statusCode): \(bodySnippet)"
+        statusCode: statusCode,
+        responseBody: responseBody
       )
       NSLog(
-        "AICycleBackgroundUploader: upload skipped id=%@ HTTP %d body=%@",
+        "AICycleBackgroundUploader: upload HTTP response delivered id=%@ HTTP %d body=%@",
         id ?? "",
         statusCode,
         bodySnippet
@@ -361,7 +332,22 @@ final class AICycleBackgroundUploader: NSObject, URLSessionDelegate, URLSessionT
     )
     retryItem["attempt"] = attempt
     retryItem.removeValue(forKey: "bodyPath")
-    scheduleUpload(retryItem)
+    // Schedule directly instead of calling scheduleUpload's duplicate check
+    // from inside the completion delegate. At this point getAllTasks can still
+    // report the just-completed task and incorrectly suppress the retry.
+    ioQueue.async { [weak self] in
+      guard let self else { return }
+      do {
+        let retryTask = try self.makeUploadTask(for: retryItem)
+        retryTask.resume()
+      } catch {
+        NSLog(
+          "AICycleBackgroundUploader: failed to schedule retry id=%@ error=%@",
+          id ?? "",
+          error.localizedDescription
+        )
+      }
+    }
   }
 
   func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {

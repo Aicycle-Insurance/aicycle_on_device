@@ -61,13 +61,15 @@ mixin _CaptureMixin on _CameraControllerBase {
           quality: 80,
         );
         _capturedPhotos.putIfAbsent(seg, () => []).add(path);
-        unawaited(
-          PhotoUploadQueue.instance.enqueuePhoto(
-            sessionId: _sessionId,
-            angleId: seg,
-            photoIndex: photoIndex,
-            filePath: path,
-          ),
+        // Persist the queue entry and hand it to WorkManager/background
+        // URLSession before reporting capture completion. This closes the small
+        // window where a user could terminate the app immediately after the
+        // shutter and leave the photo on disk but not scheduled.
+        await PhotoUploadQueue.instance.enqueuePhoto(
+          sessionId: _sessionId,
+          angleId: seg,
+          photoIndex: photoIndex,
+          filePath: path,
         );
         // Config 4 góc TẮT: góc nào đã có ảnh là hiện màu xanh trên vòng tròn.
         if (!_require4Angles) _completedSegments.add(seg);

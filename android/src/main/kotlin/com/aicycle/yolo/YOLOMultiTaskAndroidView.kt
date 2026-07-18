@@ -62,11 +62,11 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         private const val REQUEST_CODE_PERMISSIONS = 1001
         private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
 
-        // Khoảng cách tối thiểu giữa 2 lần chạy của classify (carCorner) và third
-        // (carPart) — ~6–7 fps là đủ để highlight góc / căn ảnh toàn cảnh, giảm
-        // tải inference đáng kể. carDamage (detect) chạy mỗi frame khi rảnh.
+        // Classify giữ ~6–7 fps. CarPart tăng lên tối đa ~10 fps khi đang căn
+        // toàn cảnh để tạo thêm cơ hội OCR, rồi hạ về ~6–7 fps khi soi tổn thất.
         private const val CLASSIFY_MIN_INTERVAL_MS = 150L
-        private const val THIRD_MIN_INTERVAL_MS = 150L
+        private const val THIRD_PANORAMIC_INTERVAL_MS = 100L
+        private const val THIRD_INSPECTION_INTERVAL_MS = 150L
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -571,7 +571,12 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
 
     private fun claimThird(now: Long): Boolean {
         if (thirdPredictor == null) return false
-        if (now - lastThirdMs < THIRD_MIN_INTERVAL_MS) return false
+        val minInterval = if (ocrEnabled) {
+            THIRD_PANORAMIC_INTERVAL_MS
+        } else {
+            THIRD_INSPECTION_INTERVAL_MS
+        }
+        if (now - lastThirdMs < minInterval) return false
         if (!thirdBusy.compareAndSet(false, true)) return false
         lastThirdMs = now
         return true

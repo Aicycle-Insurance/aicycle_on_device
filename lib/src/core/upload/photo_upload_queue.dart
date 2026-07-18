@@ -22,6 +22,8 @@ class PhotoUploadQueue {
   final Map<Object, _UploadResponseListener> _responseListeners = {};
   Timer? _responseDeliveryTimer;
   bool _isDrainingResponses = false;
+  Future<void> _mutationTail = Future<void>.value();
+  int _tempFileSequence = 0;
 
   Object? addUploadedResponseListener(
     void Function(Map<String, dynamic> data)? listener, {
@@ -95,13 +97,19 @@ class PhotoUploadQueue {
 
       final nextItems = deliveredIds.isEmpty
           ? items
-          : [
-              for (final item in items)
-                if (!deliveredIds.contains(item.id)) item,
-            ];
-      if (deliveredIds.isNotEmpty) await _writeItems(nextItems);
+          : await _mutateItems((latestItems) => [
+                for (final item in latestItems)
+                  if (!deliveredIds.contains(item.id)) item,
+              ]);
       _removeIdleDetachedListeners(nextItems);
       _stopResponseTimerIfIdle();
+    } catch (error, stackTrace) {
+      // This method is also started from a periodic timer via unawaited. Keep a
+      // transient filesystem race from becoming an unhandled app exception;
+      // the response stays in the queue and is retried on the next tick.
+      debugPrint(
+        'AICycle upload response delivery deferred: $error\n$stackTrace',
+      );
     } finally {
       _isDrainingResponses = false;
     }
@@ -133,10 +141,10 @@ class PhotoUploadQueue {
       }
 
       if (deliveredIds.isEmpty) return;
-      await _writeItems([
-        for (final item in items)
-          if (!deliveredIds.contains(item.id)) item,
-      ]);
+      await _mutateItems((latestItems) => [
+            for (final item in latestItems)
+              if (!deliveredIds.contains(item.id)) item,
+          ]);
     } finally {
       _isDrainingResponses = false;
     }
@@ -178,6 +186,21 @@ class PhotoUploadQueue {
     required int angleId,
     required int photoIndex,
     required String filePath,
+  }) =>
+      _enqueuePhoto(
+        sessionId: sessionId,
+        angleId: angleId,
+        photoIndex: photoIndex,
+        filePath: filePath,
+        schedule: true,
+      );
+
+  Future<void> _enqueuePhoto({
+    required String sessionId,
+    required int angleId,
+    required int photoIndex,
+    required String filePath,
+    required bool schedule,
   }) async {
     final request = _buildUploadRequest();
     final item = PhotoUploadItem(
@@ -195,19 +218,17 @@ class PhotoUploadQueue {
       updatedAtMillis: DateTime.now().millisecondsSinceEpoch,
     );
 
-    final items = await _readItems();
-    final next = [
-      for (final existing in items)
-        if (existing.id != item.id) existing,
-      item,
-    ];
-    await _writeItems(next);
+    await _mutateItems((items) => [
+          for (final existing in items)
+            if (existing.id != item.id) existing,
+          item,
+        ]);
     debugPrint(
       'AICycle upload queued: session=$sessionId angle=$angleId '
       'photo=$photoIndex file=${item.fileName}',
     );
     await enforceCacheLimit();
-    unawaited(schedulePendingUploads());
+    if (schedule) await _schedulePendingUploadsBestEffort();
   }
 
   Future<void> enqueueExistingPhotos(
@@ -218,19 +239,22 @@ class PhotoUploadQueue {
       for (var i = 0; i < entry.value.length; i++) {
         final path = entry.value[i];
         if (!File(path).existsSync()) continue;
-        await enqueuePhoto(
+        await _enqueuePhoto(
           sessionId: sessionId,
           angleId: entry.key,
           photoIndex: i,
           filePath: path,
+          schedule: false,
         );
       }
     }
+    await _schedulePendingUploadsBestEffort();
   }
 
   Future<void> resumePendingUploads() async {
     await _removeMissingOrSucceededItems();
-    await schedulePendingUploads();
+    await _schedulePendingUploadsBestEffort();
+    await _drainResponsesToActiveListener();
   }
 
   Future<void> resumeSession(String sessionId) async {
@@ -244,11 +268,10 @@ class PhotoUploadQueue {
   }
 
   Future<void> clearSession(String sessionId) async {
-    final items = await _readItems();
-    await _writeItems([
-      for (final item in items)
-        if (item.sessionId != sessionId) item,
-    ]);
+    await _mutateItems((items) => [
+          for (final item in items)
+            if (item.sessionId != sessionId) item,
+        ]);
   }
 
   Future<UploadQueueProgress> progressForSession(String sessionId) async {
@@ -325,24 +348,62 @@ class PhotoUploadQueue {
 
   Future<void> _writeItems(List<PhotoUploadItem> items) async {
     final file = await _metadataFile(create: true);
-    final tmp = File('${file.path}.tmp');
-    await tmp.writeAsString(jsonEncode({
-      'version': 1,
-      'items': [for (final item in items) item.toJson()],
-    }));
-    if (file.existsSync()) await file.delete();
-    await tmp.rename(file.path);
+    final tmp = File(
+      '${file.path}.dart-$pid-${DateTime.now().microsecondsSinceEpoch}-'
+      '${_tempFileSequence++}.tmp',
+    );
+    try {
+      await tmp.writeAsString(
+        jsonEncode({
+          'version': 1,
+          'items': [for (final item in items) item.toJson()],
+        }),
+        flush: true,
+      );
+      // rename replaces the destination atomically on Android/iOS. Keeping a
+      // unique temp path prevents Dart and the native background worker from
+      // moving/deleting each other's temp file.
+      await tmp.rename(file.path);
+    } finally {
+      if (tmp.existsSync()) {
+        try {
+          await tmp.delete();
+        } catch (_) {
+          // Best-effort cleanup; the rename may already have consumed it.
+        }
+      }
+    }
   }
 
+  Future<T> _withMutationLock<T>(Future<T> Function() action) async {
+    final previous = _mutationTail;
+    final release = Completer<void>();
+    _mutationTail = release.future;
+    await previous;
+    try {
+      return await action();
+    } finally {
+      release.complete();
+    }
+  }
+
+  Future<List<PhotoUploadItem>> _mutateItems(
+    List<PhotoUploadItem> Function(List<PhotoUploadItem> items) mutate,
+  ) =>
+      _withMutationLock(() async {
+        final latestItems = await _readItems();
+        final nextItems = mutate(latestItems);
+        await _writeItems(nextItems);
+        return nextItems;
+      });
+
   Future<void> _removeMissingOrSucceededItems() async {
-    final items = await _readItems();
-    final kept = [
-      for (final item in items)
-        if (item.hasPendingResponse ||
-            (!item.status.isTerminal && File(item.filePath).existsSync()))
-          item,
-    ];
-    if (kept.length != items.length) await _writeItems(kept);
+    await _mutateItems((items) => [
+          for (final item in items)
+            if (item.hasPendingResponse ||
+                (!item.status.isTerminal && File(item.filePath).existsSync()))
+              item,
+        ]);
   }
 
   Future<void> schedulePendingUploads() async {
@@ -373,6 +434,17 @@ class PhotoUploadQueue {
         'AICycle upload scheduled on iOS URLSession: '
         'angle=${item.angleId} photo=${item.photoIndex}',
       );
+    }
+  }
+
+  Future<void> _schedulePendingUploadsBestEffort() async {
+    try {
+      await schedulePendingUploads();
+    } on PlatformException catch (error) {
+      // The queue item is already durable on disk. A lifecycle resume or the
+      // next capture will schedule it again, so a transient platform-channel
+      // failure must not turn a successfully captured photo into a failure.
+      debugPrint('AICycle upload scheduling deferred: ${error.message}');
     }
   }
 

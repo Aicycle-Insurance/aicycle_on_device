@@ -128,10 +128,12 @@ public class YOLOMultiTaskView: UIView {
   var classifyBusy = false
   var thirdBusy    = false
 
-  /// Giới hạn nhịp chạy classify (carCorner) / third (carPart): ~6–7 fps là đủ để
-  /// highlight góc / căn ảnh, giảm tải inference. carDamage (detect) chạy mỗi frame.
+  /// Classify giữ ~6–7 fps. CarPart tăng lên tối đa ~10 fps khi đang căn toàn
+  /// cảnh để tạo thêm cơ hội OCR, rồi hạ về ~6–7 fps khi soi tổn thất.
   /// Accessed only on cameraQueue.
-  private static let minInferenceInterval: CFTimeInterval = 0.15
+  private static let classifyMinInferenceInterval: CFTimeInterval = 0.15
+  private static let thirdPanoramicMinInferenceInterval: CFTimeInterval = 0.10
+  private static let thirdInspectionMinInferenceInterval: CFTimeInterval = 0.15
   private var lastClassifyTime: CFTimeInterval = 0
   private var lastThirdTime: CFTimeInterval = 0
 
@@ -844,7 +846,7 @@ extension YOLOMultiTaskView: AVCaptureVideoDataOutputSampleBufferDelegate, @unch
       detectQueue.async { p.predict(sampleBuffer: buf, onResultsListener: adapter, onInferenceTime: adapter) }
     }
     if let p = classifyPredictor, !classifyBusy, !p.isUpdating,
-      now - lastClassifyTime >= Self.minInferenceInterval
+      now - lastClassifyTime >= Self.classifyMinInferenceInterval
     {
       lastClassifyTime = now
       classifyBusy = true
@@ -853,8 +855,11 @@ extension YOLOMultiTaskView: AVCaptureVideoDataOutputSampleBufferDelegate, @unch
       let adapter = classifyAdapter
       classifyQueue.async { p.predict(sampleBuffer: buf, onResultsListener: adapter, onInferenceTime: adapter) }
     }
+    let thirdMinInterval = ocrEnabled
+      ? Self.thirdPanoramicMinInferenceInterval
+      : Self.thirdInspectionMinInferenceInterval
     if let p = thirdPredictor, !thirdBusy, !p.isUpdating,
-      now - lastThirdTime >= Self.minInferenceInterval
+      now - lastThirdTime >= thirdMinInterval
     {
       lastThirdTime = now
       thirdBusy = true

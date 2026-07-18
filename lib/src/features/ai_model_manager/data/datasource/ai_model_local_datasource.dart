@@ -182,8 +182,8 @@ class AiModelLocalDataSource {
     }
   }
 
-  /// Ghi nhận model [modelId] đã validate thành công với metadata task
-  /// [validatedTask] (chuỗi rỗng nếu model không có task — vd OCR biển số).
+  /// Ghi nhận task đã được xác nhận/tin cậy của model [modelId]
+  /// (chuỗi rỗng nếu model không có task — vd OCR biển số).
   Future<void> markModelValidated(int modelId, String validatedTask) async {
     final manifest = await readManifest();
     final downloaded = manifest.downloaded
