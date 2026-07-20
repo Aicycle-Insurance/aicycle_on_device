@@ -473,6 +473,7 @@ class PhotoUploadQueue {
           'user': vbi.userId,
           'ma_tvv': vbi.maTVV,
           'source': vbi.source,
+          'sdk': '1',
         },
       );
     }

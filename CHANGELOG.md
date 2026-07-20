@@ -1,3 +1,7 @@
+## 0.1.7
+
+* Add SDK flag to upload data
+
 ## 0.1.6
 
 * Improve photo upload queue management with better error handling and response delivery.
