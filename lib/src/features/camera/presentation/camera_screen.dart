@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import '../../../yolo/multi_task_yolo_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +10,7 @@ import '../../../core/cache/photo_session_cache.dart';
 import '../../../core/constants/string_sheet.dart';
 import '../../../core/themes/app_colors.dart';
 import '../../../core/themes/app_textstyle.dart';
+import '../../../core/upload/photo_upload_queue.dart';
 import '../../../core/utils/screen_utils.dart';
 import '../data/model/camera_message.dart';
 import 'controller/camera_controller.dart';
@@ -49,7 +52,7 @@ class CameraScreen extends StatefulWidget {
 
   /// Bấm "Xem kết quả": trả ảnh đã chụp lên bootstrap để chuyển sang pha upload
   /// (bootstrap sẽ gỡ camera này khỏi cây → giải phóng tài nguyên).
-  final void Function(Map<int, List<Uint8List>> photos)? onViewResult;
+  final void Function(Map<int, List<String>> photos)? onViewResult;
 
   @override
   State<CameraScreen> createState() => _CameraScreenState();
@@ -59,6 +62,7 @@ class _CameraScreenState extends State<CameraScreen>
     with WidgetsBindingObserver {
   late final CameraController _cameraController;
   bool _guideShown = false;
+  bool _resultRequested = false;
 
   @override
   void initState() {
@@ -190,6 +194,7 @@ class _CameraScreenState extends State<CameraScreen>
     if (confirmed == true) {
       // Dừng camera trước khi pop để native cleanup không chặn UI trong dispose().
       _cameraController.stopCamera();
+      await PhotoUploadQueue.instance.clearSession(sessionId);
       await PhotoSessionCache.instance.clearSession(sessionId);
     }
     return confirmed ?? false;
@@ -249,9 +254,13 @@ class _CameraScreenState extends State<CameraScreen>
   /// Bootstrap sẽ giữ camera phía sau thêm một nhịp ngắn để UploadView render
   /// trước, sau đó mới tháo platform view và cleanup camera/model native.
   void _goToResult() {
+    if (_resultRequested) return;
+    _resultRequested = true;
+    _cameraController.stopCamera();
+    unawaited(WakelockPlus.disable());
     final photos = {
       for (final e in _cameraController.capturedPhotos.entries)
-        e.key: List<Uint8List>.from(e.value),
+        e.key: List<String>.from(e.value),
     };
     widget.onViewResult?.call(photos);
   }

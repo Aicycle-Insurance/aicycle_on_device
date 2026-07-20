@@ -72,6 +72,38 @@ class MultiTaskYOLOController {
     return result;
   }
 
+  /// Capture a JPEG still and let the native side write it directly to [filePath].
+  /// This avoids moving the full JPEG through the platform channel just so Dart
+  /// can write it back to disk.
+  Future<String> capturePhotoToFile({
+    required String filePath,
+    String? thumbnailPath,
+    double cropLeft = 0,
+    double cropTop = 0,
+    double cropRight = 1,
+    double cropBottom = 1,
+    int quality = 80,
+    int thumbnailMaxSize = 160,
+  }) async {
+    final ch = _channel;
+    if (ch == null) throw StateError('MultiTaskYOLOView is not attached');
+    final result = await ch.invokeMethod<String>(
+      'capturePhotoToFile',
+      {
+        'path': filePath,
+        if (thumbnailPath != null) 'thumbnailPath': thumbnailPath,
+        'quality': quality,
+        'thumbnailMaxSize': thumbnailMaxSize,
+        'cropLeft': cropLeft,
+        'cropTop': cropTop,
+        'cropRight': cropRight,
+        'cropBottom': cropBottom,
+      },
+    );
+    if (result == null) throw StateError('capturePhotoToFile returned null');
+    return result;
+  }
+
   /// Turn the camera torch on ([enable] = true) or off ([enable] = false).
   /// Returns the actual torch state after the call — `false` when the device
   /// has no torch or the call is made before the view is attached.
@@ -211,23 +243,25 @@ class _MultiTaskYOLOViewState extends State<MultiTaskYOLOView> {
 
   Future<void> _resolveModels() async {
     try {
+      // Start OCR path resolution at the same time as the three required YOLO
+      // models. It remains optional, but no longer adds a second serial path
+      // preparation pass before the native camera view can be created.
+      final ocrFuture = () async {
+        final ocrPath = widget.ocrModelPath;
+        if (ocrPath == null) return null;
+        try {
+          return await YOLOModelResolver.preparePath(ocrPath);
+        } catch (_) {
+          return null;
+        }
+      }();
       final futures = [
         YOLOModelResolver.preparePath(widget.detectModelPath),
         YOLOModelResolver.preparePath(widget.classifyModelPath),
         YOLOModelResolver.preparePath(widget.secondDetectModelPath!),
       ];
       final results = await Future.wait(futures);
-      // OCR model is optional and non-blocking — resolve it separately so a
-      // failure here never prevents the camera/YOLO models from starting.
-      String? ocrResolved;
-      final ocrPath = widget.ocrModelPath;
-      if (ocrPath != null) {
-        try {
-          ocrResolved = await YOLOModelResolver.preparePath(ocrPath);
-        } catch (_) {
-          ocrResolved = null;
-        }
-      }
+      final ocrResolved = await ocrFuture;
       if (!mounted) return;
       setState(() {
         _detectResolved = results[0];

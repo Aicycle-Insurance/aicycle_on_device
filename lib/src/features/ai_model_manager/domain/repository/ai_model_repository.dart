@@ -35,8 +35,8 @@ abstract class AiModelRepository {
   /// Chọn [model] làm model sử dụng cho loại tương ứng.
   Future<Result<void, Failure>> selectModel(AiModel model);
 
-  /// Ghi nhận model [modelId] đã validate thành công với metadata task
-  /// [validatedTask], để các lần chuẩn bị model sau bỏ qua bước inspect.
+  /// Ghi nhận task đã được xác nhận hoặc tin cậy cho model [modelId], để các
+  /// lần chuẩn bị model sau bỏ qua bước inspect trùng lặp.
   Future<Result<void, Failure>> markModelValidated(
     int modelId,
     String validatedTask,

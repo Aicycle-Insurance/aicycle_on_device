@@ -66,7 +66,7 @@ mixin _InspectionMixin on _CameraControllerBase {
         type: MessageType.info,
       ),
     );
-    // Sau 10 s không bấm gì → tự động xác nhận: đi đúng flow như bấm
+    // Sau 5 s không bấm gì → tự động xác nhận: đi đúng flow như bấm
     // "Xác nhận" (chụp + thông báo thành công + hướng dẫn di chuyển, các
     // thông báo đều được giữ đủ lâu để user kịp đọc) nhưng không blink.
     _autoCaptureTimer?.cancel();
@@ -119,7 +119,7 @@ mixin _InspectionMixin on _CameraControllerBase {
     );
   }
 
-  /// User pressed "Xác nhận" (hoặc auto sau 10 s) — chụp ảnh tổn thất.
+  /// User pressed "Xác nhận" (hoặc auto sau 5 s) — chụp ảnh tổn thất.
   ///   - Nếu vừa chụp ảnh TỔNG QUAN → sang pha [detailGuide] để chụp ảnh chi tiết.
   ///   - Nếu vừa chụp ảnh CHI TIẾT → nhắc "Tiếp tục di chuyển camera…" rồi quét tiếp.
   Future<void> confirmDamage({bool flashTick = true}) async {
@@ -155,7 +155,7 @@ mixin _InspectionMixin on _CameraControllerBase {
   // ── Detail-photo stage ─────────────────────────────────────────────────────
 
   /// Sau khi chụp ảnh tổng quan: nhắc user lại gần để chụp ảnh chi tiết. Sau
-  /// 10 s chưa nhận diện thì tự chụp một ảnh; sau thêm 5 s vẫn chưa nhận diện
+  /// 5 s chưa nhận diện thì tự chụp một ảnh; sau thêm 5 s vẫn chưa nhận diện
   /// thì chuyển sang hướng dẫn tiếp tục di chuyển.
   void _enterDetailGuide() {
     _cancelNoDetectionWarningTimer();
@@ -174,7 +174,7 @@ mixin _InspectionMixin on _CameraControllerBase {
     _detailTimer = Timer(_detailAutoCaptureDelay, _onDetailTimeout);
   }
 
-  /// Hết 10 s ở pha detailGuide:
+  /// Hết 5 s ở pha detailGuide:
   ///   - Nếu đang có tổn thất trong khung → mở xác nhận ảnh chi tiết.
   ///   - Nếu chưa thấy tổn thất → chụp ngầm 1 ảnh chi tiết rồi chờ thêm 5 s.
   Future<void> _onDetailTimeout() async {

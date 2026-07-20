@@ -42,9 +42,9 @@ mixin _PanoramicMixin on _CameraControllerBase {
     final keepPlatePromptVisible =
         allPresent && _platePromptShown && !platePromptVisibleLongEnough;
 
-    // Chỉ giữ timer 5s khi đang ở trạng thái "đã căn đủ, chờ OCR". Rời trạng
+    // Chỉ giữ timer nhắc khi đang ở trạng thái "đã căn đủ, chờ OCR". Rời trạng
     // thái này (di chuyển làm mất bộ phận) → huỷ timer + reset cờ nhắc. Nếu
-    // warning căn biển rõ vừa xuất hiện thì giữ tối thiểu 3s, kể cả khi OCR đã
+    // warning căn biển rõ vừa xuất hiện thì giữ tối thiểu một nhịp, kể cả khi OCR đã
     // đọc lại được biển.
     if (!(allPresent && (!plateReadable || keepPlatePromptVisible))) {
       _cancelPlateReadTimer();
@@ -64,14 +64,14 @@ mixin _PanoramicMixin on _CameraControllerBase {
       // Bộ phận đã căn đủ — giữ yên để OCR đọc biển số. Chỉ chụp ảnh toàn cảnh
       // khi OCR đọc được biển (khung đủ rõ/đủ gần), tránh chụp ảnh mờ/xa.
       _holdStillShownAt ??= now;
-      // Giữ message "giữ yên" tối thiểu 3s trước khi auto-capture, kể cả khi OCR
-      // đọc được biển ngay — để user kịp thấy hướng dẫn.
+      // Giữ khung ổn định trong một nhịp ngắn trước khi auto-capture. OCR đã là
+      // tín hiệu chất lượng ảnh nên không cần cộng thêm nhiều giây chờ cố định.
       final heldLongEnough =
           now.difference(_holdStillShownAt!) >= _holdStillMinDuration;
       if (plateReadable && heldLongEnough && platePromptVisibleLongEnough) {
         _triggerAutoCapture();
       } else if (_platePromptShown) {
-        // Quá 5s vẫn chưa đọc được biển → giữ nhắc di chuyển cho biển rõ nét.
+        // Chưa đọc được biển → giữ nhắc di chuyển cho biển rõ nét.
         _setMessage(CameraMessage(
             message: StringSheet.movePlateClearGuide,
             type: MessageType.warning));
@@ -83,11 +83,11 @@ mixin _PanoramicMixin on _CameraControllerBase {
     }
   }
 
-  /// Bắt đầu đếm 5s chờ OCR (nếu chưa chạy). Hết 5s mà chưa đọc được biển →
+  /// Bắt đầu đếm chờ OCR (nếu chưa chạy). Hết thời gian mà chưa đọc được biển →
   /// bật cờ nhắc + hiển thị message di chuyển cho biển rõ.
   void _ensurePlateReadTimer() {
     if (_plateReadTimer != null) return;
-    _plateReadTimer = Timer(const Duration(seconds: 5), () {
+    _plateReadTimer = Timer(_plateReadPromptDelay, () {
       _plateReadTimer = null;
       _platePromptShown = true;
       _platePromptShownAt = DateTime.now();

@@ -61,6 +61,7 @@ public class YOLOMultiTaskView: UIView {
   /// Preview view size (points) snapshotted when capture is requested — used to
   /// map the normalized crop into photo pixels under aspect-fill.
   private var pendingPreviewSize: CGSize = .zero
+  private var pendingJpegQuality: CGFloat = 0.8
   private var captureDevice: AVCaptureDevice?
 
   /// Serial queue for camera delegate callbacks and busy-flag mutations only.
@@ -127,10 +128,12 @@ public class YOLOMultiTaskView: UIView {
   var classifyBusy = false
   var thirdBusy    = false
 
-  /// Giới hạn nhịp chạy classify (carCorner) / third (carPart): ~6–7 fps là đủ để
-  /// highlight góc / căn ảnh, giảm tải inference. carDamage (detect) chạy mỗi frame.
+  /// Classify giữ ~6–7 fps. CarPart tăng lên tối đa ~10 fps khi đang căn toàn
+  /// cảnh để tạo thêm cơ hội OCR, rồi hạ về ~6–7 fps khi soi tổn thất.
   /// Accessed only on cameraQueue.
-  private static let minInferenceInterval: CFTimeInterval = 0.15
+  private static let classifyMinInferenceInterval: CFTimeInterval = 0.15
+  private static let thirdPanoramicMinInferenceInterval: CFTimeInterval = 0.10
+  private static let thirdInspectionMinInferenceInterval: CFTimeInterval = 0.15
   private var lastClassifyTime: CFTimeInterval = 0
   private var lastThirdTime: CFTimeInterval = 0
 
@@ -677,9 +680,14 @@ public class YOLOMultiTaskView: UIView {
     camFpsWindowStart = CACurrentMediaTime()
   }
 
-  public func capturePhoto(crop: CGRect? = nil, completion: @escaping (Data?) -> Void) {
+  public func capturePhoto(
+    crop: CGRect? = nil,
+    quality: CGFloat = 0.8,
+    completion: @escaping (Data?) -> Void
+  ) {
     photoCaptureCompletion = completion
     pendingCrop = crop
+    pendingJpegQuality = quality
     // Read the preview bounds on the main thread (this is called from the
     // MethodChannel handler, i.e. main); the delegate may run off-main.
     pendingPreviewSize = bounds.size
@@ -689,6 +697,64 @@ public class YOLOMultiTaskView: UIView {
       guard let self else { completion(nil); return }
       self.photoOutput.capturePhoto(with: settings, delegate: self)
     }
+  }
+
+  public func capturePhotoToFile(
+    path: String,
+    crop: CGRect? = nil,
+    quality: CGFloat = 0.8,
+    thumbnailPath: String? = nil,
+    thumbnailMaxSize: CGFloat = 160,
+    completion: @escaping (String?) -> Void
+  ) {
+    capturePhoto(crop: crop, quality: quality) { data in
+      guard let data else {
+        completion(nil)
+        return
+      }
+      DispatchQueue.global(qos: .utility).async {
+        do {
+          let url = URL(fileURLWithPath: path)
+          try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+          )
+          try data.write(to: url, options: .atomic)
+          if let thumbnailPath {
+            try? self.writeThumbnail(
+              data: data,
+              path: thumbnailPath,
+              maxSize: thumbnailMaxSize
+            )
+          }
+          completion(url.path)
+        } catch {
+          NSLog("YOLOMultiTaskView: capturePhotoToFile failed: %@", error.localizedDescription)
+          completion(nil)
+        }
+      }
+    }
+  }
+
+  private nonisolated func writeThumbnail(data: Data, path: String, maxSize: CGFloat) throws {
+    guard let image = UIImage(data: data) else { return }
+    let longest = max(image.size.width, image.size.height)
+    guard longest > 0 else { return }
+    let scale = min(1, maxSize / longest)
+    let size = CGSize(
+      width: max(1, image.size.width * scale),
+      height: max(1, image.size.height * scale)
+    )
+    let renderer = UIGraphicsImageRenderer(size: size)
+    let thumbnailData = renderer.jpegData(withCompressionQuality: 0.65) { _ in
+      image.draw(in: CGRect(origin: .zero, size: size))
+    }
+    let url = URL(fileURLWithPath: path)
+    try FileManager.default.createDirectory(
+      at: url.deletingLastPathComponent(),
+      withIntermediateDirectories: true
+    )
+    try thumbnailData.write(to: url, options: .atomic)
   }
 
   @discardableResult
@@ -780,7 +846,7 @@ extension YOLOMultiTaskView: AVCaptureVideoDataOutputSampleBufferDelegate, @unch
       detectQueue.async { p.predict(sampleBuffer: buf, onResultsListener: adapter, onInferenceTime: adapter) }
     }
     if let p = classifyPredictor, !classifyBusy, !p.isUpdating,
-      now - lastClassifyTime >= Self.minInferenceInterval
+      now - lastClassifyTime >= Self.classifyMinInferenceInterval
     {
       lastClassifyTime = now
       classifyBusy = true
@@ -789,8 +855,11 @@ extension YOLOMultiTaskView: AVCaptureVideoDataOutputSampleBufferDelegate, @unch
       let adapter = classifyAdapter
       classifyQueue.async { p.predict(sampleBuffer: buf, onResultsListener: adapter, onInferenceTime: adapter) }
     }
+    let thirdMinInterval = ocrEnabled
+      ? Self.thirdPanoramicMinInferenceInterval
+      : Self.thirdInspectionMinInferenceInterval
     if let p = thirdPredictor, !thirdBusy, !p.isUpdating,
-      now - lastThirdTime >= Self.minInferenceInterval
+      now - lastThirdTime >= thirdMinInterval
     {
       lastThirdTime = now
       thirdBusy = true
@@ -820,6 +889,7 @@ extension YOLOMultiTaskView: AVCapturePhotoCaptureDelegate {
     photoCaptureCompletion = nil
     let crop = pendingCrop
     let previewSize = pendingPreviewSize
+    let quality = pendingJpegQuality
     pendingCrop = nil
     guard error == nil, let data = photo.fileDataRepresentation() else {
       completion?(nil)
@@ -849,7 +919,7 @@ extension YOLOMultiTaskView: AVCapturePhotoCaptureDelegate {
     guard let crop, previewSize.width > 0, previewSize.height > 0,
       let cg = upright.cgImage
     else {
-      completion?(upright.jpegData(compressionQuality: 0.92))
+      completion?(upright.jpegData(compressionQuality: quality))
       return
     }
 
@@ -887,9 +957,9 @@ extension YOLOMultiTaskView: AVCapturePhotoCaptureDelegate {
     }
 
     guard rect.width > 0, rect.height > 0, let cropped = cg.cropping(to: rect) else {
-      completion?(upright.jpegData(compressionQuality: 0.92))
+      completion?(upright.jpegData(compressionQuality: quality))
       return
     }
-    completion?(UIImage(cgImage: cropped).jpegData(compressionQuality: 0.92))
+    completion?(UIImage(cgImage: cropped).jpegData(compressionQuality: quality))
   }
 }

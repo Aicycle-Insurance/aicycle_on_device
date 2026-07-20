@@ -1,13 +1,15 @@
 part of 'camera_controller.dart';
 
-/// Chụp & lưu ảnh (in-memory + disk cache) và khôi phục ảnh từ cache.
+/// Chụp & lưu ảnh xuống disk cache, giữ file path trong memory và khôi phục từ
+/// cache.
 mixin _CaptureMixin on _CameraControllerBase {
   // ── Cache restore ─────────────────────────────────────────────────────────
 
   /// Restores previously captured photos from disk cache.
   /// Call once after construction; notifies listeners when done.
   Future<void> loadCachedPhotos() async {
-    final cached = await PhotoSessionCache.instance.loadSession(_sessionId);
+    final cached =
+        await PhotoSessionCache.instance.loadSessionPhotoPaths(_sessionId);
     if (cached.isEmpty) return;
     _capturedPhotos = cached;
     // Angles with cached photos are shown as completed in the progress ring.
@@ -19,11 +21,12 @@ mixin _CaptureMixin on _CameraControllerBase {
 
   // ── Photo capture ─────────────────────────────────────────────────────────
 
-  /// Captures a JPEG frame, stores it in memory and on disk.
+  /// Captures a JPEG frame, writes it to disk and enqueues it for background
+  /// upload.
   /// Does NOT modify [_completedSegments] in 4-angle mode — completion happens
   /// when the classifier detects that the user moved to another car angle.
   @override
-  Future<Uint8List?> capturePhoto({
+  Future<String?> capturePhoto({
     bool immediate = false,
     int? segment,
     bool flashTick = true,
@@ -43,19 +46,37 @@ mixin _CaptureMixin on _CameraControllerBase {
       // cùng thời điểm với blink (tự notify).
       _flashCornerSuccess();
 
-      final bytes = await yoloController.capturePhoto(
-        cropTop: _cropTop,
-        cropBottom: _cropBottom,
-      );
       final seg = segment ?? _activeSegmentIndex;
       if (seg != null) {
-        _capturedPhotos.putIfAbsent(seg, () => []).add(bytes);
-        await PhotoSessionCache.instance.savePhoto(_sessionId, seg, bytes);
+        final photoIndex = _capturedPhotos[seg]?.length ?? 0;
+        final path = await PhotoSessionCache.instance.createPhotoPath(
+          _sessionId,
+          seg,
+        );
+        await yoloController.capturePhotoToFile(
+          filePath: path,
+          thumbnailPath: PhotoSessionCache.thumbnailPathForPhotoPath(path),
+          cropTop: _cropTop,
+          cropBottom: _cropBottom,
+          quality: 80,
+        );
+        _capturedPhotos.putIfAbsent(seg, () => []).add(path);
+        // Persist the queue entry and hand it to WorkManager/background
+        // URLSession before reporting capture completion. This closes the small
+        // window where a user could terminate the app immediately after the
+        // shutter and leave the photo on disk but not scheduled.
+        await PhotoUploadQueue.instance.enqueuePhoto(
+          sessionId: _sessionId,
+          angleId: seg,
+          photoIndex: photoIndex,
+          filePath: path,
+        );
         // Config 4 góc TẮT: góc nào đã có ảnh là hiện màu xanh trên vòng tròn.
         if (!_require4Angles) _completedSegments.add(seg);
+        notifyListeners();
+        return path;
       }
-      notifyListeners();
-      return bytes;
+      return null;
     } catch (_) {
       return null;
     } finally {

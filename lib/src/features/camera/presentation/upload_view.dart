@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 
 import '../../../core/cache/photo_session_cache.dart';
@@ -24,7 +22,7 @@ class UploadView extends StatefulWidget {
   });
 
   final String sessionId;
-  final Map<int, List<Uint8List>> capturedPhotos;
+  final Map<int, List<String>> capturedPhotos;
   final Function()? onComplete;
   final Function(String)? onError;
 
@@ -37,6 +35,8 @@ class UploadView extends StatefulWidget {
 
 class _UploadViewState extends State<UploadView> {
   late final ResultController _controller;
+  bool _isRunning = false;
+  bool _completeNotified = false;
 
   @override
   void initState() {
@@ -53,7 +53,13 @@ class _UploadViewState extends State<UploadView> {
   }
 
   Future<void> _run() async {
-    await _controller.start();
+    if (_isRunning || _completeNotified) return;
+    _isRunning = true;
+    try {
+      await _controller.start();
+    } finally {
+      _isRunning = false;
+    }
     if (!mounted) return;
     if (_controller.status == ResultStatus.error) {
       // Hiếm khi xảy ra (lỗi từng ảnh đã được skip) — để UI hiện retry.
@@ -62,6 +68,12 @@ class _UploadViewState extends State<UploadView> {
     }
     await PhotoSessionCache.instance.clearUploadPending(widget.sessionId);
     // Upload xong → báo host, để host tự quyết định action tiếp theo
+    _notifyComplete();
+  }
+
+  void _notifyComplete() {
+    if (_completeNotified) return;
+    _completeNotified = true;
     widget.onComplete?.call();
   }
 
@@ -139,7 +151,7 @@ class _UploadViewState extends State<UploadView> {
               children: [
                 OutlinedButton(
                   onPressed: () {
-                    widget.onComplete?.call();
+                    _notifyComplete();
                     Navigator.of(context).pop();
                   },
                   child: Text(

@@ -1,3 +1,9 @@
+## 0.1.6
+
+* Improve photo upload queue management with better error handling and response delivery.
+* Update AI model management to streamline model validation and path preparation processes.
+* Refactor camera controller logic to optimize OCR reading and user prompts for clearer instructions.
+
 ## 0.1.5
 
 * Enhance CameraFrameCorners success indication and timing for photo captures

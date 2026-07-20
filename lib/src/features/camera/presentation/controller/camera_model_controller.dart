@@ -143,12 +143,13 @@ class CameraModelController extends ChangeNotifier {
   /// Prepares all AI models for use.
   ///
   /// For each model type:
-  /// 1. Uses provided path if file exists
-  /// 2. Otherwise, ensures the latest model is available (downloading if needed)
+  /// 1. Reuses a locally selected/downloaded model immediately when it has
+  ///    already passed validation.
+  /// 2. Uses a provided path when it is not part of the local manifest.
+  /// 3. Only calls the model APIs for types that are genuinely missing locally.
   ///
-  /// The remote model lists (one API call per type) and the local manifest
-  /// are fetched concurrently, so total latency is one round trip instead
-  /// of one per model type.
+  /// This keeps repeat camera opens off the network and avoids recompiling
+  /// CoreML packages that were already validated by the model manager.
   ///
   /// Sets isPreparing to true during the process and catches any errors.
   /// Notifies listeners of completion.
@@ -163,24 +164,46 @@ class CameraModelController extends ChangeNotifier {
     notifyListeners();
 
     try {
+      final manifest = (await _modelRepository.getLocalState()).fold(
+        (failure) => throw _PrepareException(failure.message),
+        (manifest) => manifest,
+      );
       final remoteTypes = <AiModelType>[];
+      final invalidLocalIds = <int>{};
+
       for (final type in AiModelType.values) {
         final provided = paths[type];
-        if (provided != null && File(provided).existsSync()) {
-          _modelPaths[type] = (await _validateModelPath(provided, type)).path;
+        if (provided != null && _pathExists(provided)) {
+          final downloaded = manifest.downloaded
+              .where((item) => item.type == type && item.filePath == provided)
+              .firstOrNull;
+          _modelPaths[type] = downloaded == null
+              ? (await _validateModelPath(provided, type)).path
+              : await _validPathOfDownloaded(downloaded, type);
           continue;
+        }
+
+        final local = _preferredLocalModel(manifest, type);
+        if (local != null) {
+          try {
+            _modelPaths[type] = await _validPathOfDownloaded(local, type);
+            continue;
+          } on _PrepareException {
+            invalidLocalIds.add(local.id);
+            await _modelRepository.deleteModel(local.id);
+          }
         }
         remoteTypes.add(type);
       }
       if (remoteTypes.isEmpty) return;
 
-      final manifestFuture = _modelRepository.getLocalState();
       final listResults = await Future.wait([
         for (final type in remoteTypes) _modelRepository.getModels(type),
       ]);
-      final manifest = (await manifestFuture).fold(
-        (failure) => throw _PrepareException(failure.message),
-        (manifest) => manifest,
+      final usableManifest = manifest.copyWith(
+        downloaded: manifest.downloaded
+            .where((item) => !invalidLocalIds.contains(item.id))
+            .toList(),
       );
 
       for (var i = 0; i < remoteTypes.length; i++) {
@@ -189,7 +212,8 @@ class CameraModelController extends ChangeNotifier {
           (failure) => throw _PrepareException(failure.message),
           (models) => models,
         );
-        _modelPaths[type] = await _ensureLatestModel(type, models, manifest);
+        _modelPaths[type] =
+            await _ensureLatestModel(type, models, usableManifest);
       }
     } on _PrepareException catch (e) {
       _modelError = e.message;
@@ -200,6 +224,31 @@ class CameraModelController extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  /// Returns the explicitly selected local model, falling back to the newest
+  /// downloaded model of [type] when an older manifest has no selection entry.
+  DownloadedModelInfo? _preferredLocalModel(
+    ModelManifest manifest,
+    AiModelType type,
+  ) {
+    final selectedId = manifest.selected[type];
+    final selected = manifest.downloaded
+        .where((item) => item.type == type && item.id == selectedId)
+        .firstOrNull;
+    if (selected != null) return selected;
+
+    final candidates =
+        manifest.downloaded.where((item) => item.type == type).toList()
+          ..sort((a, b) {
+            final version = _compareVersions(b.version, a.version);
+            if (version != 0) return version;
+            return b.createdDate.compareTo(a.createdDate);
+          });
+    return candidates.firstOrNull;
+  }
+
+  bool _pathExists(String path) =>
+      FileSystemEntity.typeSync(path) != FileSystemEntityType.notFound;
 
   /// Ensures the latest model of a given type is available locally.
   ///
@@ -260,14 +309,13 @@ class CameraModelController extends ChangeNotifier {
     );
 
     _downloadingType = null;
-    late final ({String path, String? task}) validated;
+    late final String preparedPath;
     try {
-      validated = await _validateModelPath(info.filePath, type);
+      preparedPath = await _prepareManagedModelPath(info, type);
     } on _PrepareException {
       await _modelRepository.deleteModel(info.id);
       rethrow;
     }
-    await _modelRepository.markModelValidated(info.id, validated.task ?? '');
 
     final oldVersions =
         manifest.downloaded.where((e) => e.type == type && e.id != latest.id);
@@ -276,26 +324,24 @@ class CameraModelController extends ChangeNotifier {
     }
 
     await _modelRepository.selectModel(latest);
-    return validated.path;
+    return preparedPath;
   }
 
   /// Returns a valid path for an already-downloaded model.
   ///
-  /// When the model was validated before (validatedTask recorded in the
-  /// manifest), only resolves the path and re-checks the recorded task —
-  /// skipping the native inspect step, which on iOS recompiles the CoreML
-  /// model and dominates the preparing-screen latency. Models without the
-  /// marker (first run, or downloaded by an older app version) go through
-  /// the full validation once and are then marked.
+  /// Server-managed models already carry their type in the API/manifest. Path
+  /// preparation verifies that the downloaded archive/package is readable; we
+  /// then record the trusted task and avoid a separate native inspect pass.
+  /// On iOS that inspect would compile CoreML once here and then compile/load it
+  /// again when the camera view starts, dominating the preparing-screen time.
+  /// External paths that are not in the manifest still use [_validateModelPath].
   Future<String> _validPathOfDownloaded(
     DownloadedModelInfo info,
     AiModelType type,
   ) async {
     final cachedTask = info.validatedTask;
     if (cachedTask == null) {
-      final validated = await _validateModelPath(info.filePath, type);
-      await _modelRepository.markModelValidated(info.id, validated.task ?? '');
-      return validated.path;
+      return _prepareManagedModelPath(info, type);
     }
 
     try {
@@ -305,6 +351,28 @@ class CameraModelController extends ChangeNotifier {
         throw _PrepareException('${type.apiValue} model file is missing.');
       }
       _ensureTaskMatches(type, cachedTask);
+      return preparedPath;
+    } on _PrepareException {
+      rethrow;
+    } catch (e) {
+      throw _PrepareException(
+        '${type.apiValue} model is invalid or corrupted: $e',
+      );
+    }
+  }
+
+  Future<String> _prepareManagedModelPath(
+    DownloadedModelInfo info,
+    AiModelType type,
+  ) async {
+    try {
+      final preparedPath = await YOLOModelResolver.preparePath(info.filePath);
+      if (FileSystemEntity.typeSync(preparedPath) ==
+          FileSystemEntityType.notFound) {
+        throw _PrepareException('${type.apiValue} model file is missing.');
+      }
+      final trustedTask = _expectedYoloTask(type)?.name ?? '';
+      await _modelRepository.markModelValidated(info.id, trustedTask);
       return preparedPath;
     } on _PrepareException {
       rethrow;
