@@ -75,7 +75,7 @@ const _plateReadPromptDelay = Duration(seconds: 2);
 
 /// Giữ thông báo chụp thành công đủ lâu để user kịp đọc trước khi chuyển sang
 /// hướng dẫn tiếp theo.
-const _captureSuccessVisibleDuration = Duration(seconds: 3);
+const _captureSuccessVisibleDuration = Duration(seconds: 1);
 
 /// Mỗi tooltip khi đã xuất hiện phải được giữ tối thiểu khoảng này trước khi
 /// một message/phase khác thay thế, để tránh user chưa kịp đọc.
@@ -87,10 +87,10 @@ const _cornerSuccessFlashDuration = Duration(milliseconds: 500);
 
 /// Ở màn xác nhận tổn thất: sau khoảng này không bấm gì → tự động xác nhận
 /// (chụp + hiển thị thông báo như bấm "Xác nhận", không blink).
-const _damageAutoCaptureInterval = Duration(seconds: 10);
+const _damageAutoCaptureInterval = Duration(seconds: 5);
 
 /// Ở pha chụp ảnh chi tiết, chờ user đưa camera lại gần trước khi auto-capture.
-const _detailAutoCaptureDelay = Duration(seconds: 10);
+const _detailAutoCaptureDelay = Duration(seconds: 5);
 
 /// Giữ hướng dẫn "Di chuyển camera đến gần tổn thất…" (detailGuide) tối thiểu
 /// khoảng này trước khi cho phép detection mở lại màn xác nhận — để user kịp
