@@ -8,6 +8,7 @@ import 'aicycle_on_device_controller.dart';
 import 'config/config_holder.dart';
 import 'core/constants/string_sheet.dart';
 import 'core/di/injection.dart';
+import 'core/themes/aicycle_theme.dart';
 import 'core/themes/app_colors.dart';
 import 'core/themes/app_textstyle.dart';
 import 'core/upload/photo_upload_queue.dart';
@@ -98,35 +99,37 @@ class _AICycleOnDeviceState extends State<AICycleOnDevice>
   @override
   Widget build(BuildContext context) {
     ScreenUtil.init(context);
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, _) {
-        if (_controller.isLoading) return _buildLoading();
-        if (_controller.error != null) return _buildError(_controller.error!);
-        return ModelManagerScreen(
-          showBackButton: widget.aiCycleConfig.displayConfig.showBackButton,
-          onContinue: (selectedModels) {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => AICycleOnDeviceCamera(
-                  aiCycleConfig: widget.aiCycleConfig,
-                  onError: widget.onError,
-                  onComplete: widget.onComplete,
-                  onImageUploaded: widget.onImageUploaded,
-                  carCornerModelPath:
-                      selectedModels[AiModelType.carCorner]?.filePath,
-                  carDamageModelPath:
-                      selectedModels[AiModelType.carDamage]?.filePath,
-                  carPartModelPath:
-                      selectedModels[AiModelType.carPart]?.filePath,
-                  licensePlateModelPath:
-                      selectedModels[AiModelType.licensePlate]?.filePath,
+    return AICycleTheme(
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          if (_controller.isLoading) return _buildLoading();
+          if (_controller.error != null) return _buildError(_controller.error!);
+          return ModelManagerScreen(
+            showBackButton: widget.aiCycleConfig.displayConfig.showBackButton,
+            onContinue: (selectedModels) {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => AICycleOnDeviceCamera(
+                    aiCycleConfig: widget.aiCycleConfig,
+                    onError: widget.onError,
+                    onComplete: widget.onComplete,
+                    onImageUploaded: widget.onImageUploaded,
+                    carCornerModelPath:
+                        selectedModels[AiModelType.carCorner]?.filePath,
+                    carDamageModelPath:
+                        selectedModels[AiModelType.carDamage]?.filePath,
+                    carPartModelPath:
+                        selectedModels[AiModelType.carPart]?.filePath,
+                    licensePlateModelPath:
+                        selectedModels[AiModelType.licensePlate]?.filePath,
+                  ),
                 ),
-              ),
-            );
-          },
-        );
-      },
+              );
+            },
+          );
+        },
+      ),
     );
   }
 

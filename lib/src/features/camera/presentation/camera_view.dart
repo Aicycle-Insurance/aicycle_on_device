@@ -7,6 +7,7 @@ import '../../../config/config_holder.dart';
 import '../../../core/cache/photo_session_cache.dart';
 import '../../../core/constants/string_sheet.dart';
 import '../../../core/di/injection.dart';
+import '../../../core/themes/aicycle_theme.dart';
 import '../../../core/themes/app_colors.dart';
 import '../../../core/themes/app_textstyle.dart';
 import '../../../core/upload/photo_upload_queue.dart';
@@ -181,30 +182,32 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera>
   @override
   Widget build(BuildContext context) {
     ScreenUtil.init(context);
-    return AnimatedBuilder(
-      animation: _modelController,
-      builder: (context, _) {
-        if (_uploadPhotos != null && !_keepCameraDuringResultTransition) {
-          return _buildReadyContent();
-        }
-        if (_modelController.folderError != null) {
+    return AICycleTheme(
+      child: AnimatedBuilder(
+        animation: _modelController,
+        builder: (context, _) {
+          if (_uploadPhotos != null && !_keepCameraDuringResultTransition) {
+            return _buildReadyContent();
+          }
+          if (_modelController.folderError != null) {
+            return _buildError(
+              _modelController.folderError!,
+              onRetry: _modelController.retryFolder,
+            );
+          }
+          if (!_modelController.folderReady) {
+            return _buildLoading(StringSheet.creatingFolder);
+          }
+          if (_modelController.isPreparing) return _buildPreparing();
+          if (_modelController.isReady) {
+            return _buildReadyContent();
+          }
           return _buildError(
-            _modelController.folderError!,
-            onRetry: _modelController.retryFolder,
+            _modelController.modelError ?? StringSheet.requirementHint,
+            onRetry: _modelController.retryModels,
           );
-        }
-        if (!_modelController.folderReady) {
-          return _buildLoading(StringSheet.creatingFolder);
-        }
-        if (_modelController.isPreparing) return _buildPreparing();
-        if (_modelController.isReady) {
-          return _buildReadyContent();
-        }
-        return _buildError(
-          _modelController.modelError ?? StringSheet.requirementHint,
-          onRetry: _modelController.retryModels,
-        );
-      },
+        },
+      ),
     );
   }
 

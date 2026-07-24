@@ -2,24 +2,25 @@ import 'package:flutter/material.dart';
 
 import '../utils/screen_utils.dart';
 import 'app_colors.dart';
+import 'app_fonts.dart';
 
 /// Standardized textstyle
 class AppTextStyles {
   AppTextStyles._();
   static TextStyle base = TextStyle(
-    // fontFamily: FontFamily.roboto,
+    fontFamily: AppFonts.inter,
     fontSize: 16.sp,
     fontWeight: FontWeight.normal,
     color: AppColors.black,
   );
   static TextStyle baseWhite = TextStyle(
-    // fontFamily: FontFamily.roboto,
+    fontFamily: AppFonts.inter,
     fontSize: 16.sp,
     fontWeight: FontWeight.normal,
     color: AppColors.white,
   );
   static TextStyle baseHyperLink = TextStyle(
-    // fontFamily: FontFamily.roboto,
+    fontFamily: AppFonts.inter,
     fontSize: 16.sp,
     fontWeight: FontWeight.normal,
     color: AppColors.primaryA500,

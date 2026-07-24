@@ -7,6 +7,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import '../core/themes/app_fonts.dart';
 import 'core/yolo_model_resolver.dart';
 
 /// Callback fired on the main thread for each inference result from one of the
@@ -339,7 +340,11 @@ class _MultiTaskYOLOViewState extends State<MultiTaskYOLOView> {
         child: Center(
           child: Text(
             'Model error: $_resolutionError',
-            style: const TextStyle(color: Color(0xFFFF4444), fontSize: 12),
+            style: const TextStyle(
+              fontFamily: AppFonts.inter,
+              color: Color(0xFFFF4444),
+              fontSize: 12,
+            ),
             textAlign: TextAlign.center,
           ),
         ),

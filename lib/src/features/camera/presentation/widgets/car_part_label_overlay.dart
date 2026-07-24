@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../../../core/themes/app_fonts.dart';
 import '../../../../core/utils/screen_utils.dart';
 import '../../data/model/detection_output.dart';
 
@@ -67,6 +68,7 @@ class _CarPartLabelPainter extends CustomPainter {
         text: TextSpan(
           text: label,
           style: TextStyle(
+            fontFamily: AppFonts.inter,
             color: Colors.white,
             fontSize: 12.sp,
             fontWeight: FontWeight.w500,

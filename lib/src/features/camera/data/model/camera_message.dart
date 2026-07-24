@@ -2,6 +2,7 @@ import 'package:aicycle_on_device/src/core/utils/screen_utils.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../core/themes/app_colors.dart';
+import '../../../../core/themes/app_fonts.dart';
 import '../../../../core/widgets/spinner_icon.dart';
 
 enum MessageType { guide, loading, info, error, success, warning }
@@ -32,6 +33,7 @@ class CameraMessage {
             child: Text(
               'i',
               style: TextStyle(
+                fontFamily: AppFonts.inter,
                 color: Colors.white,
                 fontSize: 12.r,
                 fontWeight: FontWeight.bold,
