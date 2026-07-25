@@ -1,3 +1,7 @@
+## 0.1.8
+
+* Enhance damage detection logic 
+
 ## 0.1.7
 
 * Add SDK flag to upload data

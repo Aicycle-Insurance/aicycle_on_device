@@ -100,6 +100,16 @@ const _detailGuideMinVisibleDuration = Duration(seconds: 5);
 /// Sau ảnh chi tiết tự động, nếu vẫn không nhận diện thì chuyển hướng user.
 const _detailPostCaptureNoDetectionDelay = Duration(seconds: 5);
 
+/// Khi vào pha soi tổn thất: phải có tổn thất xuất hiện liên tục qua đủ số frame
+/// này (model chính) mới coi là tổn thất thật và mở màn xác nhận. Tránh một
+/// frame nhiễu (false positive 1 frame) làm bật xác nhận sai.
+const _damageConfirmFrameCount = 5;
+
+/// Cho phép tổn thất biến mất tạm thời tối đa số frame LIÊN TIẾP này (rung tay /
+/// nhiễu model) mà không reset bộ đếm frame liên tục — chỉ khi mất quá ngưỡng
+/// này mới coi như đứt chuỗi và đếm lại từ đầu.
+const _damageStreakMissTolerance = 2;
+
 /// Cấu hình mỗi góc: (tên ba đờ sốc cần thấy, message điều hướng tới góc đó).
 const _segmentConfigs = {
   0: ('Ba đờ sốc trước', StringSheet.frontRightGuide),
@@ -233,6 +243,14 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// Detections từ frame detect mới nhất.
   List<DetectionResult> _latestDetections = [];
 
+  /// Số frame LIÊN TỤC gần đây có tổn thất trong khung nhìn. Phải đạt
+  /// [_damageConfirmFrameCount] mới mở màn xác nhận (xem [_updateDamageStreak]).
+  int _damageStreakFrames = 0;
+
+  /// Số frame LIÊN TIẾP gần đây KHÔNG có tổn thất. Vượt
+  /// [_damageStreakMissTolerance] thì coi như đứt chuỗi → reset đếm lại.
+  int _damageMissStreak = 0;
+
   /// Current phase of the damage inspection sub-flow. null = not in inspection.
   InspectionPhase? _inspectionPhase;
 
@@ -340,6 +358,33 @@ abstract class _CameraControllerBase extends ChangeNotifier {
     final seenAt = _carPartLastSeenAt[className];
     return seenAt != null &&
         DateTime.now().difference(seenAt) <= _carPartFlickerGrace;
+  }
+
+  // ── Damage streak (5 frame liên tục) ───────────────────────────────────────
+
+  /// Cập nhật bộ đếm số frame LIÊN TỤC có tổn thất trong khung nhìn. Gọi mỗi
+  /// frame carDamage. Cho phép tổn thất biến mất tạm thời tối đa
+  /// [_damageStreakMissTolerance] frame liên tiếp (rung tay / nhiễu model) mà
+  /// không reset — chỉ khi mất quá ngưỡng mới coi là đứt chuỗi và đếm lại.
+  void _updateDamageStreak() {
+    if (_latestDetections.isNotEmpty) {
+      _damageStreakFrames++;
+      _damageMissStreak = 0;
+    } else if (_damageStreakFrames > 0) {
+      _damageMissStreak++;
+      if (_damageMissStreak > _damageStreakMissTolerance) {
+        _resetDamageStreak();
+      }
+    }
+  }
+
+  /// Đã đủ số frame liên tục có tổn thất để coi là tổn thất thật (mở xác nhận).
+  bool get _damageStreakConfirmed =>
+      _damageStreakFrames >= _damageConfirmFrameCount;
+
+  void _resetDamageStreak() {
+    _damageStreakFrames = 0;
+    _damageMissStreak = 0;
   }
 
   void _resetPanoramicFramingState({bool clearCarParts = false}) {
@@ -458,6 +503,9 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   ///   inspection (phase != null) → carDamage ON,  OCR OFF
   /// carCorner/carPart luôn chạy. Chỉ gửi xuống native khi trạng thái đổi.
   void _setInspectionPhase(InspectionPhase? phase) {
+    // Rời hẳn inspection (đổi góc) → xoá bộ đếm frame liên tục để góc kế tiếp
+    // bắt đầu đếm lại từ đầu.
+    if (phase == null) _resetDamageStreak();
     _inspectionPhase = phase;
     final active = phase != null;
     if (_sentInspectionActive != active) {
