@@ -118,8 +118,12 @@ class CameraFrameCorners extends StatelessWidget {
         height: double.infinity,
         margin: EdgeInsets.all(padding),
         decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(24.r),
-            border: Border.all(color: AppColors.crack)),
+          borderRadius: BorderRadius.circular(24.r),
+          border: Border.all(
+            color: AppColors.crack,
+            width: strokeWidth,
+          ),
+        ),
       );
     }
     CameraCornerBracket bracket(bool fx, bool fy) => CameraCornerBracket(

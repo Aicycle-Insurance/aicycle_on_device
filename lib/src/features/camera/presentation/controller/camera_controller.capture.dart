@@ -43,8 +43,10 @@ mixin _CaptureMixin on _CameraControllerBase {
       // hiện sau khi capture xong.
       if (flashTick) _captureFlashTick++;
       // Khung góc nháy success ở MỌI lần chụp — kể cả chụp ngầm không blink —
-      // cùng thời điểm với blink (tự notify).
-      _flashCornerSuccess();
+      // cùng thời điểm với blink (tự notify). Giữ đúng bằng hiệu ứng dừng hình:
+      // ảnh đóng băng che khung góc, nên khung xanh phải còn sống khi ảnh co về
+      // thumbnail và để lộ khung ra lại.
+      _flashCornerSuccess(_captureFreezeDuration);
 
       final seg = segment ?? _activeSegmentIndex;
       if (seg != null) {
@@ -74,6 +76,11 @@ mixin _CaptureMixin on _CameraControllerBase {
         // Config 4 góc TẮT: góc nào đã có ảnh là hiện màu xanh trên vòng tròn.
         if (!_require4Angles) _completedSegments.add(seg);
         notifyListeners();
+        // Dừng hình ảnh vừa chụp rồi co về thumbnail — áp dụng cho MỌI lần chụp
+        // (mọi lần khung góc nháy xanh success), kể cả chụp ngầm không blink.
+        // Chờ hết hiệu ứng trước khi trả về để message/pha kế tiếp không cắt
+        // ngang: đây là nhịp để user kịp nhận ra ảnh đã được chụp.
+        await _playCaptureFreeze(path);
         return path;
       }
       return null;
@@ -81,7 +88,9 @@ mixin _CaptureMixin on _CameraControllerBase {
       return null;
     } finally {
       _isCapturing = false;
-      notifyListeners();
+      // Nhịp chờ (delay auto-capture / hiệu ứng dừng hình) có thể kéo dài qua
+      // lúc user đóng màn camera → controller đã dispose, không notify nữa.
+      if (!_stopped) notifyListeners();
     }
   }
 

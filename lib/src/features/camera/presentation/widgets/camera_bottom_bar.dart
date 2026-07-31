@@ -18,6 +18,16 @@ class CameraBottomBar extends StatelessWidget {
     this.completedTakesPriority = false,
   });
 
+  /// Chiều cao bar — dùng chung với overlay/animation cần biết vị trí thumbnail.
+  static const barHeight = 115.0;
+
+  /// Hình học thumbnail ảnh vừa chụp (góc dưới trái). Hiệu ứng "ảnh co về
+  /// thumbnail" ([CaptureFreezeOverlay]) bay đúng vào ô này nên dùng chung số.
+  static const thumbnailSize = 48.0;
+  static const thumbnailMargin = 16.0;
+  static const thumbnailRadius = 8.0;
+  static const thumbnailBorderWidth = 2.0;
+
   final Map<int, List<String>> capturedPhotos;
   final int? activeSegmentIndex;
   final Set<int> completedSegments;
@@ -33,9 +43,9 @@ class CameraBottomBar extends StatelessWidget {
       alignment: Alignment.bottomCenter,
       child: Container(
         width: double.infinity,
-        height: 115.h,
+        height: barHeight.h,
         color: AppColors.black,
-        padding: EdgeInsets.symmetric(horizontal: 16.w),
+        padding: EdgeInsets.symmetric(horizontal: thumbnailMargin.w),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -87,11 +97,12 @@ class CameraBottomBar extends StatelessWidget {
       return RotatedBox(
         quarterTurns: 1,
         child: Container(
-          width: 48.w,
-          height: 48.w,
+          width: thumbnailSize.w,
+          height: thumbnailSize.w,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8.r),
-            border: Border.all(color: AppColors.white, width: 2),
+            borderRadius: BorderRadius.circular(thumbnailRadius.r),
+            border:
+                Border.all(color: AppColors.white, width: thumbnailBorderWidth),
             image: DecorationImage(
               image: FileImage(File(previewPath)),
               fit: BoxFit.cover,
@@ -101,11 +112,11 @@ class CameraBottomBar extends StatelessWidget {
       );
     }
     return Container(
-      width: 48.w,
-      height: 48.w,
+      width: thumbnailSize.w,
+      height: thumbnailSize.w,
       decoration: BoxDecoration(
         color: AppColors.white.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(8.r),
+        borderRadius: BorderRadius.circular(thumbnailRadius.r),
       ),
       child: Icon(Icons.photo_library_outlined,
           size: 24.r, color: AppColors.white),

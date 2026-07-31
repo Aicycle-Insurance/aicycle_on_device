@@ -20,6 +20,7 @@ import 'widgets/car_part_label_overlay.dart';
 import 'widgets/camera_corner_bracket.dart';
 import 'widgets/camera_guide_sheet.dart';
 import 'widgets/camera_top_bar.dart';
+import 'widgets/capture_freeze_overlay.dart';
 import 'widgets/car_progress_dialog.dart';
 import 'widgets/manual_capture_hint_hand.dart';
 import 'widgets/tool_tip.dart';
@@ -420,6 +421,22 @@ class _CameraScreenState extends State<CameraScreen>
                               child: ViewResultButton(onPressed: _goToResult),
                             ),
                           ),
+
+                        /// Ảnh vừa chụp dừng hình rồi co nhỏ về thumbnail góc
+                        /// dưới trái — phải nằm trên bottom bar để "hạ cánh"
+                        /// đúng vào ô thumbnail.
+                        Positioned.fill(
+                          child: CaptureFreezeOverlay(
+                            tick: _cameraController.captureFreezeTick,
+                            photoPath: _cameraController.captureFreezePath,
+                            holdDuration:
+                                _cameraController.captureFreezeHoldDuration,
+                            shrinkDuration:
+                                _cameraController.captureFreezeShrinkDuration,
+                            topBarHeight: 83.h,
+                            bottomBarHeight: CameraBottomBar.barHeight.h,
+                          ),
+                        ),
 
                         /// Screen-blink (flash) effect — triggered on every photo capture.
                         Positioned.fill(
