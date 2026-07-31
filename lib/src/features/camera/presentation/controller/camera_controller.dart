@@ -167,9 +167,12 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   int _captureFlashTick = 0;
 
   /// Ảnh của lượt "dừng hình + co về thumbnail" gần nhất, và tick để view biết
-  /// có lượt mới cần chạy hiệu ứng.
+  /// có lượt mới cần chạy hiệu ứng. [_captureFreezeStartedAt] là mốc bật hiệu
+  /// ứng — dùng để tính phần thời gian còn lại (kể cả khi view bị dựng lại giữa
+  /// lượt).
   String? _captureFreezePath;
   int _captureFreezeTick = 0;
+  DateTime? _captureFreezeStartedAt;
 
   /// True trong ~0.5s sau MỖI lần chụp (kể cả chụp ngầm không blink) —
   /// CameraFrameCorners hiển thị trạng thái success trong khoảng này.
@@ -293,6 +296,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// đang chờ.
   String? get captureFreezePath => _captureFreezePath;
   int get captureFreezeTick => _captureFreezeTick;
+  DateTime? get captureFreezeStartedAt => _captureFreezeStartedAt;
   Duration get captureFreezeHoldDuration => _captureFreezeHoldDuration;
   Duration get captureFreezeShrinkDuration => _captureFreezeShrinkDuration;
   List<DetectionResult> get latestDetections => _latestDetections;
@@ -392,15 +396,27 @@ abstract class _CameraControllerBase extends ChangeNotifier {
 
   // ── Capture freeze ────────────────────────────────────────────────────────
 
-  /// Dừng hình ảnh vừa chụp trên preview rồi co nhỏ về thumbnail, và CHỜ hết
-  /// hiệu ứng. Chờ ngay trong luồng chụp để message/pha kế tiếp không cắt ngang
-  /// animation — đây cũng chính là nhịp delay giúp user kịp thấy ảnh đã chụp.
-  Future<void> _playCaptureFreeze(String photoPath) async {
+  /// Bật hiệu ứng dừng hình ảnh vừa chụp rồi co nhỏ về thumbnail (không chờ).
+  /// Gọi NGAY khi ảnh đã ghi xuống disk: phản hồi thị giác không được phụ thuộc
+  /// vào các bước nặng/có thể lỗi phía sau (ghi queue, gọi platform channel).
+  void _startCaptureFreeze(String photoPath) {
     if (_stopped) return;
     _captureFreezePath = photoPath;
+    _captureFreezeStartedAt = DateTime.now();
     _captureFreezeTick++;
     notifyListeners();
-    await Future.delayed(_captureFreezeDuration);
+  }
+
+  /// Chờ phần còn lại của hiệu ứng đang chạy, để message/pha kế tiếp không cắt
+  /// ngang animation. Tính theo mốc bắt đầu nên thời gian đã tiêu ở các bước
+  /// sau khi chụp (ghi queue upload…) được tính vào nhịp dừng hình, không cộng
+  /// thêm delay.
+  Future<void> _awaitCaptureFreeze() async {
+    final startedAt = _captureFreezeStartedAt;
+    if (startedAt == null) return;
+    final remaining =
+        _captureFreezeDuration - DateTime.now().difference(startedAt);
+    if (remaining > Duration.zero) await Future.delayed(remaining);
   }
 
   /// Tổng thời gian dừng hình + co ảnh về thumbnail.

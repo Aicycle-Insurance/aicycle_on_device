@@ -429,6 +429,7 @@ class _CameraScreenState extends State<CameraScreen>
                           child: CaptureFreezeOverlay(
                             tick: _cameraController.captureFreezeTick,
                             photoPath: _cameraController.captureFreezePath,
+                            startedAt: _cameraController.captureFreezeStartedAt,
                             holdDuration:
                                 _cameraController.captureFreezeHoldDuration,
                             shrinkDuration:

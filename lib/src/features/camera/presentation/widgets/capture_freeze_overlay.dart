@@ -18,6 +18,7 @@ class CaptureFreezeOverlay extends StatefulWidget {
     super.key,
     required this.tick,
     required this.photoPath,
+    required this.startedAt,
     required this.holdDuration,
     required this.shrinkDuration,
     required this.topBarHeight,
@@ -26,6 +27,10 @@ class CaptureFreezeOverlay extends StatefulWidget {
 
   final int tick;
   final String? photoPath;
+
+  /// Mốc controller bật lượt hiệu ứng hiện tại — dùng để chạy tiếp từ đúng thời
+  /// điểm đã trôi nếu widget bị dựng lại giữa lượt (cây widget đổi cấu trúc).
+  final DateTime? startedAt;
 
   /// Giữ nguyên ảnh full-screen (dừng hình) trước khi bắt đầu co nhỏ.
   final Duration holdDuration;
@@ -69,6 +74,19 @@ class _CaptureFreezeOverlayState extends State<CaptureFreezeOverlay>
         setState(() => _path = null);
       }
     });
+    // Widget có thể được dựng lại ngay giữa một lượt hiệu ứng (cây widget đổi
+    // cấu trúc → element bị tạo lại, [didUpdateWidget] không được gọi). Chạy
+    // tiếp từ đúng thời điểm đã trôi thay vì mất hẳn hiệu ứng.
+    final startedAt = widget.startedAt;
+    if (startedAt != null && widget.photoPath != null) {
+      final elapsed = DateTime.now().difference(startedAt);
+      if (elapsed < total) {
+        _path = widget.photoPath;
+        _controller.forward(
+          from: elapsed.inMicroseconds / total.inMicroseconds,
+        );
+      }
+    }
   }
 
   @override
