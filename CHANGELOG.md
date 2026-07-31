@@ -1,3 +1,7 @@
+## 0.1.8
+
+* Update capture effects and timing for better user experience
+
 ## 0.1.7
 
 * Add SDK flag to upload data
