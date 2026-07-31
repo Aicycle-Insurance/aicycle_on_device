@@ -43,8 +43,10 @@ mixin _CaptureMixin on _CameraControllerBase {
       // hiện sau khi capture xong.
       if (flashTick) _captureFlashTick++;
       // Khung góc nháy success ở MỌI lần chụp — kể cả chụp ngầm không blink —
-      // cùng thời điểm với blink (tự notify).
-      _flashCornerSuccess();
+      // cùng thời điểm với blink (tự notify). Giữ đúng bằng hiệu ứng dừng hình:
+      // ảnh đóng băng che khung góc, nên khung xanh phải còn sống khi ảnh co về
+      // thumbnail và để lộ khung ra lại.
+      _flashCornerSuccess(_captureFreezeDuration);
 
       final seg = segment ?? _activeSegmentIndex;
       if (seg != null) {
@@ -61,6 +63,15 @@ mixin _CaptureMixin on _CameraControllerBase {
           quality: 80,
         );
         _capturedPhotos.putIfAbsent(seg, () => []).add(path);
+        // Config 4 góc TẮT: góc nào đã có ảnh là hiện màu xanh trên vòng tròn.
+        if (!_require4Angles) _completedSegments.add(seg);
+        // Dừng hình ảnh vừa chụp rồi co về thumbnail — áp dụng cho MỌI lần chụp
+        // (mọi lần khung góc nháy xanh success), kể cả chụp ngầm không blink.
+        // Bật NGAY khi ảnh đã nằm trên disk, TRƯỚC khi enqueue upload: enqueue
+        // ghi queue + quét cache + gọi platform channel (chậm, và có thể lỗi) —
+        // phản hồi thị giác cho user không được phụ thuộc vào đường upload.
+        // (tự notifyListeners)
+        _startCaptureFreeze(path);
         // Persist the queue entry and hand it to WorkManager/background
         // URLSession before reporting capture completion. This closes the small
         // window where a user could terminate the app immediately after the
@@ -71,17 +82,20 @@ mixin _CaptureMixin on _CameraControllerBase {
           photoIndex: photoIndex,
           filePath: path,
         );
-        // Config 4 góc TẮT: góc nào đã có ảnh là hiện màu xanh trên vòng tròn.
-        if (!_require4Angles) _completedSegments.add(seg);
-        notifyListeners();
         return path;
       }
       return null;
     } catch (_) {
       return null;
     } finally {
+      // Chờ hết hiệu ứng ở MỌI đường ra (kể cả khi enqueue upload lỗi) và chờ
+      // TRƯỚC khi mở lại cổng chụp, để frame kế tiếp không kích hoạt chụp lần
+      // nữa ngay giữa animation.
+      await _awaitCaptureFreeze();
       _isCapturing = false;
-      notifyListeners();
+      // Nhịp chờ (delay auto-capture / hiệu ứng dừng hình) có thể kéo dài qua
+      // lúc user đóng màn camera → controller đã dispose, không notify nữa.
+      if (!_stopped) notifyListeners();
     }
   }
 

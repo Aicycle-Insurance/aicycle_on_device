@@ -81,9 +81,14 @@ const _captureSuccessVisibleDuration = Duration(seconds: 1);
 /// một message/phase khác thay thế, để tránh user chưa kịp đọc.
 const _tooltipMinVisibleDuration = Duration(seconds: 3);
 
-/// Khung góc (CameraFrameCorners) nháy trạng thái success khoảng này mỗi lần
-/// chụp ảnh — tương đương thời gian blink màn hình.
-const _cornerSuccessFlashDuration = Duration(milliseconds: 500);
+/// Sau khi chụp, ảnh vừa chụp được vẽ đè lên preview và "dừng hình" khoảng này —
+/// chụp (nhất là auto-capture ảnh toàn cảnh) diễn ra rất nhanh, chỉ một nháy
+/// trắng thì user không kịp nhận ra đã có ảnh.
+const _captureFreezeHoldDuration = Duration(milliseconds: 700);
+
+/// Hết nhịp dừng hình, ảnh co nhỏ dần về thumbnail góc dưới trái trong khoảng
+/// này để user thấy rõ ảnh "đi vào" thư viện.
+const _captureFreezeShrinkDuration = Duration(milliseconds: 450);
 
 /// Ở màn xác nhận tổn thất: sau khoảng này không bấm gì → tự động xác nhận
 /// (chụp + hiển thị thông báo như bấm "Xác nhận", không blink).
@@ -160,6 +165,14 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// Bumped every time a photo is actually captured — the view listens to
   /// this to trigger a screen-blink (flash) effect.
   int _captureFlashTick = 0;
+
+  /// Ảnh của lượt "dừng hình + co về thumbnail" gần nhất, và tick để view biết
+  /// có lượt mới cần chạy hiệu ứng. [_captureFreezeStartedAt] là mốc bật hiệu
+  /// ứng — dùng để tính phần thời gian còn lại (kể cả khi view bị dựng lại giữa
+  /// lượt).
+  String? _captureFreezePath;
+  int _captureFreezeTick = 0;
+  DateTime? _captureFreezeStartedAt;
 
   /// True trong ~0.5s sau MỖI lần chụp (kể cả chụp ngầm không blink) —
   /// CameraFrameCorners hiển thị trạng thái success trong khoảng này.
@@ -277,6 +290,15 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   InspectionPhase? get messagePhase => _messagePhase;
   int get captureFlashTick => _captureFlashTick;
   bool get cornerSuccessActive => _cornerSuccessActive;
+
+  /// Hiệu ứng "dừng hình rồi co ảnh về thumbnail" — view đọc path/tick để chạy
+  /// animation, và dùng 2 duration để chia 2 pha đúng bằng thời gian controller
+  /// đang chờ.
+  String? get captureFreezePath => _captureFreezePath;
+  int get captureFreezeTick => _captureFreezeTick;
+  DateTime? get captureFreezeStartedAt => _captureFreezeStartedAt;
+  Duration get captureFreezeHoldDuration => _captureFreezeHoldDuration;
+  Duration get captureFreezeShrinkDuration => _captureFreezeShrinkDuration;
   List<DetectionResult> get latestDetections => _latestDetections;
   List<DetectionResult> get latestCarPartDetections => _latestCarPartDetections;
   InspectionPhase? get inspectionPhase => _inspectionPhase;
@@ -358,10 +380,10 @@ abstract class _CameraControllerBase extends ChangeNotifier {
 
   // ── Corner success flash ──────────────────────────────────────────────────
 
-  /// Nháy trạng thái success trên CameraFrameCorners. Gọi ở đúng khoảnh khắc
-  /// chụp để đồng bộ với blink (nếu có). Mặc định ~0.5s; truyền [duration] dài
+  /// Nháy trạng thái success trên CameraFrameCorners trong [duration]. Gọi ở
+  /// đúng khoảnh khắc chụp để đồng bộ với blink (nếu có); truyền duration dài
   /// hơn để giữ viền theo thời gian hiển thị message (vd bấm "Xác nhận").
-  void _flashCornerSuccess([Duration duration = _cornerSuccessFlashDuration]) {
+  void _flashCornerSuccess(Duration duration) {
     _cornerSuccessActive = true;
     _cornerSuccessTimer?.cancel();
     _cornerSuccessTimer = Timer(duration, () {
@@ -371,6 +393,35 @@ abstract class _CameraControllerBase extends ChangeNotifier {
     });
     notifyListeners();
   }
+
+  // ── Capture freeze ────────────────────────────────────────────────────────
+
+  /// Bật hiệu ứng dừng hình ảnh vừa chụp rồi co nhỏ về thumbnail (không chờ).
+  /// Gọi NGAY khi ảnh đã ghi xuống disk: phản hồi thị giác không được phụ thuộc
+  /// vào các bước nặng/có thể lỗi phía sau (ghi queue, gọi platform channel).
+  void _startCaptureFreeze(String photoPath) {
+    if (_stopped) return;
+    _captureFreezePath = photoPath;
+    _captureFreezeStartedAt = DateTime.now();
+    _captureFreezeTick++;
+    notifyListeners();
+  }
+
+  /// Chờ phần còn lại của hiệu ứng đang chạy, để message/pha kế tiếp không cắt
+  /// ngang animation. Tính theo mốc bắt đầu nên thời gian đã tiêu ở các bước
+  /// sau khi chụp (ghi queue upload…) được tính vào nhịp dừng hình, không cộng
+  /// thêm delay.
+  Future<void> _awaitCaptureFreeze() async {
+    final startedAt = _captureFreezeStartedAt;
+    if (startedAt == null) return;
+    final remaining =
+        _captureFreezeDuration - DateTime.now().difference(startedAt);
+    if (remaining > Duration.zero) await Future.delayed(remaining);
+  }
+
+  /// Tổng thời gian dừng hình + co ảnh về thumbnail.
+  Duration get _captureFreezeDuration =>
+      _captureFreezeHoldDuration + _captureFreezeShrinkDuration;
 
   // ── Torch ─────────────────────────────────────────────────────────────────
 
