@@ -1,3 +1,7 @@
+## 0.1.9
+
+* Enhance damage detection logic
+
 ## 0.1.8
 
 * Update capture effects and timing for better user experience
