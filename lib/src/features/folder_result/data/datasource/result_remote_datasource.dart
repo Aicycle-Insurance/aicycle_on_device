@@ -95,7 +95,9 @@ class ResultRemoteDataSource {
       if (longitude != null) 'longitude': longitude.toString(),
       'ma_tvv': vbi.maTVV,
       'source': vbi.source,
-      'sdk': '1',
+      'btx_khoang_cach': vbi.btxKhoangCach,
+      'dia_chi': vbi.diaChi,
+      'sdk': vbi.sdk,
     });
 
     /// Chắc chắn != null do org VBI bắt buộc khai báo
