@@ -125,7 +125,10 @@ mixin _StreamMixin on _CameraControllerBase {
     final output = DetectionOutput.fromJson(data);
     // Bỏ qua tổn thất nằm ngoài khung nhìn (bị top/bottom bar che).
     _latestDetections = _filterToViewport(output.detections);
-    // Phát hiện tổn thất → hiển thị xác nhận ngay, không chờ timer auto-capture.
+    // Đếm số frame liên tục có tổn thất trước khi đánh giá mở xác nhận.
+    _updateDamageStreak();
+    // Phát hiện tổn thất ổn định qua đủ số frame → mở xác nhận (không chờ timer
+    // auto-capture). Box vẫn được vẽ mỗi frame kể cả khi chưa đủ chuỗi.
     _maybeShowDetectionReady(); // tự notify khi chuyển pha
     // Bounding box chỉ vẽ khi đang trong pha inspection; ngoài ra việc đổi
     // _latestDetections không ảnh hưởng UI → khỏi rebuild.

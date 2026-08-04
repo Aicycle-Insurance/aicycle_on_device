@@ -39,6 +39,9 @@ mixin _InspectionMixin on _CameraControllerBase {
         _inspectionPhase != InspectionPhase.detailGuide) {
       return;
     }
+    // Chỉ coi là tổn thất thật khi đã xuất hiện liên tục qua đủ số frame — một
+    // frame nhiễu chưa đủ để mở màn xác nhận. Box vẫn tiếp tục hiển thị.
+    if (!_damageStreakConfirmed) return;
     // Hướng dẫn "Di chuyển camera đến gần tổn thất…" phải hiển thị tối thiểu
     // 5s trước khi detection mở lại màn xác nhận — AI nhận diện liên tiếp sẽ
     // không làm user bị bounce ngay sang tooltip xác nhận khi chưa kịp đọc.
@@ -59,6 +62,9 @@ mixin _InspectionMixin on _CameraControllerBase {
     _cancelNoDetectionWarningTimer();
     _detailTimer?.cancel();
     _detailTimer = null;
+    // Đã mở xác nhận cho chuỗi này → reset đếm để lần soi kế tiếp lại cần đủ
+    // số frame liên tục mới mở xác nhận tiếp.
+    _resetDamageStreak();
     _setInspectionPhase(InspectionPhase.detectionReady);
     _setMessage(
       CameraMessage(
@@ -233,7 +239,8 @@ mixin _InspectionMixin on _CameraControllerBase {
     // Guard: flow có thể đã tự chuyển góc trong lúc chờ.
     if (_inspectionPhase != InspectionPhase.continueOrChange) return;
     _enterScanning();
-    if (_latestDetections.isNotEmpty) _enterDetectionReady();
+    // Chỉ mở lại xác nhận khi tổn thất đã ổn định đủ số frame liên tục.
+    _maybeShowDetectionReady();
   }
 
   @override
