@@ -86,6 +86,9 @@ class _ExampleHomePageState extends State<ExampleHomePage>
   final _vbiUserIdController = TextEditingController(text: '');
   final _vbiMaTVVController = TextEditingController(text: '');
   final _vbiSourceController = TextEditingController(text: '');
+  final _vbiBtxKhoangCachController = TextEditingController(text: '0.4');
+  final _vbiDiaChiController = TextEditingController(text: '');
+  final _vbiSdkController = TextEditingController(text: '2');
 
   // Display Config
   bool _showBackButton = true;
@@ -221,6 +224,9 @@ class _ExampleHomePageState extends State<ExampleHomePage>
                   _textField('User ID', _vbiUserIdController, isRequired: true),
                   _textField('Mã TVV', _vbiMaTVVController, isRequired: true),
                   _textField('Source', _vbiSourceController, isRequired: true),
+                  _textField('BTX Khoảng Cách', _vbiBtxKhoangCachController, isRequired: true),
+                  _textField('Địa Chỉ', _vbiDiaChiController, isRequired: true),
+                  _textField('SDK Version', _vbiSdkController, isRequired: true),
                 ],
 
                 const Divider(height: 32),
@@ -616,7 +622,10 @@ class _ExampleHomePageState extends State<ExampleHomePage>
           _vbiDepartmentIdController.text.isEmpty ||
           _vbiUserIdController.text.isEmpty ||
           _vbiMaTVVController.text.isEmpty ||
-          _vbiSourceController.text.isEmpty) {
+          _vbiSourceController.text.isEmpty ||
+          _vbiBtxKhoangCachController.text.isEmpty ||
+          _vbiDiaChiController.text.isEmpty ||
+          _vbiSdkController.text.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Please fill all required VBI fields')),
         );
@@ -635,6 +644,9 @@ class _ExampleHomePageState extends State<ExampleHomePage>
         userId: _vbiUserIdController.text,
         maTVV: _vbiMaTVVController.text,
         source: _vbiSourceController.text,
+        btxKhoangCach: _vbiBtxKhoangCachController.text,
+        diaChi: _vbiDiaChiController.text,
+        sdk: _vbiSdkController.text,
       );
     }
 
