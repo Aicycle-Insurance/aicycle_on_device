@@ -337,6 +337,9 @@ Chỉ dùng khi `generalConfig.organization == AiCycleOrg.vbi`. Tất cả các 
 | `userId` | `String` | ID người dùng. |
 | `maTVV` | `String` | Mã TVV. |
 | `source` | `String` | Nguồn. |
+| `btxKhoangCach` | `String` | Khoảng cách BTX |
+| `diaChi` | `String` | Địa chỉ. |
+| `sdk` | `String` | Phiên bản SDK (mặc định `'2'`). |
 
 ```dart
 final config = AICycleConfig(
@@ -361,6 +364,9 @@ final config = AICycleConfig(
     userId: '...',
     maTVV: '...',
     source: '...',
+    btxKhoangCach: '0.4',
+    diaChi: '...',
+    sdk: '2',
   ),
 );
 ```

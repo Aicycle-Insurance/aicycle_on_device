@@ -220,6 +220,9 @@ class VBIConfig {
   final String userId;
   final String maTVV;
   final String source;
+  final String btxKhoangCach;
+  final String diaChi;
+  final String sdk;
 
   VBIConfig({
     required this.apiVersionCode,
@@ -234,5 +237,8 @@ class VBIConfig {
     required this.userId,
     required this.maTVV,
     required this.source,
+    required this.btxKhoangCach,
+    required this.diaChi,
+    this.sdk = '2',
   });
 }
