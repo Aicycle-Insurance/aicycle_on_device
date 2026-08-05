@@ -13,7 +13,7 @@ class CameraCornerBracket extends StatelessWidget {
     this.armLength = 28.0,
     this.cornerRadius = 10.0,
     this.strokeWidth = 4.0,
-    this.color = const Color(0xFFFFD600),
+    this.color = AppColors.yellowFrame,
     this.flipX = false,
     this.flipY = false,
   });
@@ -96,7 +96,7 @@ class CameraFrameCorners extends StatelessWidget {
     this.armLength = 100.0,
     this.cornerRadius = 16.0,
     this.strokeWidth = 4.0,
-    this.color = const Color(0xFFFFD600),
+    this.color = AppColors.yellowFrame,
     this.padding = 16.0,
     this.isSuccess = false,
   });

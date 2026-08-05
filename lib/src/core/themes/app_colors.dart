@@ -27,6 +27,7 @@ class AppColors {
   static const Color inkA100 = Color(0xFFF2F3F4);
 
   ///support colors
+  static const Color yellowFrame = Color(0xFFFFB300);
   static const Color backgroundLight = Color(0xFFF8F9FC);
   static const Color backgroundNeutral = Color(0xFFE8EAF3);
   static const Color iconColor = Color(0xFF555B7C);

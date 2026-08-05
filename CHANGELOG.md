@@ -1,3 +1,6 @@
+## 0.1.10
+
+* update AppColor
 ## 0.1.9
 
 * Enhance damage detection logic
