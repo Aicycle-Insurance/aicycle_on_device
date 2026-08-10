@@ -186,12 +186,14 @@ class PhotoUploadQueue {
     required int angleId,
     required int photoIndex,
     required String filePath,
+    int? imageOrder,
   }) =>
       _enqueuePhoto(
         sessionId: sessionId,
         angleId: angleId,
         photoIndex: photoIndex,
         filePath: filePath,
+        imageOrder: imageOrder,
         schedule: true,
       );
 
@@ -200,20 +202,26 @@ class PhotoUploadQueue {
     required int angleId,
     required int photoIndex,
     required String filePath,
+    int? imageOrder,
     required bool schedule,
   }) async {
     final request = _buildUploadRequest();
+    final fields = {
+      ...request.fields,
+      if (imageOrder != null) 'imageOrder': imageOrder.toString(),
+    };
     final item = PhotoUploadItem(
       id: _stableId('$sessionId|$angleId|$filePath'),
       sessionId: sessionId,
       angleId: angleId,
       photoIndex: photoIndex,
+      imageOrder: imageOrder,
       filePath: filePath,
       fileName: '${angleId}_$photoIndex.jpg',
       fileField: request.fileField,
       url: request.url,
       headers: request.headers,
-      fields: request.fields,
+      fields: fields,
       createdAtMillis: DateTime.now().millisecondsSinceEpoch,
       updatedAtMillis: DateTime.now().millisecondsSinceEpoch,
     );
@@ -225,7 +233,7 @@ class PhotoUploadQueue {
         ]);
     debugPrint(
       'AICycle upload queued: session=$sessionId angle=$angleId '
-      'photo=$photoIndex file=${item.fileName}',
+      'photo=$photoIndex imageOrder=$imageOrder file=${item.fileName}',
     );
     await enforceCacheLimit();
     if (schedule) await _schedulePendingUploadsBestEffort();
@@ -235,18 +243,31 @@ class PhotoUploadQueue {
     String sessionId,
     Map<int, List<String>> photoPaths,
   ) async {
+    final allPhotos = <_ExistingPhotoInfo>[];
     for (final entry in photoPaths.entries) {
       for (var i = 0; i < entry.value.length; i++) {
         final path = entry.value[i];
-        if (!File(path).existsSync()) continue;
-        await _enqueuePhoto(
-          sessionId: sessionId,
-          angleId: entry.key,
-          photoIndex: i,
-          filePath: path,
-          schedule: false,
-        );
+        if (File(path).existsSync()) {
+          allPhotos.add(_ExistingPhotoInfo(
+            angleId: entry.key,
+            photoIndex: i,
+            path: path,
+          ));
+        }
       }
+    }
+    allPhotos.sort((a, b) => a.path.compareTo(b.path));
+
+    for (var idx = 0; idx < allPhotos.length; idx++) {
+      final photo = allPhotos[idx];
+      await _enqueuePhoto(
+        sessionId: sessionId,
+        angleId: photo.angleId,
+        photoIndex: photo.photoIndex,
+        filePath: photo.path,
+        imageOrder: idx + 1,
+        schedule: false,
+      );
     }
     await _schedulePendingUploadsBestEffort();
   }
@@ -540,6 +561,7 @@ class PhotoUploadItem {
     required this.sessionId,
     required this.angleId,
     required this.photoIndex,
+    this.imageOrder,
     required this.filePath,
     required this.fileName,
     required this.fileField,
@@ -560,6 +582,7 @@ class PhotoUploadItem {
   final String sessionId;
   final int angleId;
   final int photoIndex;
+  final int? imageOrder;
   final String filePath;
   final String fileName;
   final String fileField;
@@ -586,6 +609,7 @@ class PhotoUploadItem {
       sessionId: json['sessionId'] as String,
       angleId: json['angleId'] as int,
       photoIndex: json['photoIndex'] as int,
+      imageOrder: json['imageOrder'] as int?,
       filePath: json['filePath'] as String,
       fileName: json['fileName'] as String,
       fileField: json['fileField'] as String,
@@ -611,6 +635,7 @@ class PhotoUploadItem {
         'sessionId': sessionId,
         'angleId': angleId,
         'photoIndex': photoIndex,
+        if (imageOrder != null) 'imageOrder': imageOrder,
         'filePath': filePath,
         'fileName': fileName,
         'fileField': fileField,
@@ -713,4 +738,16 @@ class _PhotoFileStat {
 
   final File file;
   final FileStat stat;
+}
+
+class _ExistingPhotoInfo {
+  const _ExistingPhotoInfo({
+    required this.angleId,
+    required this.photoIndex,
+    required this.path,
+  });
+
+  final int angleId;
+  final int photoIndex;
+  final String path;
 }

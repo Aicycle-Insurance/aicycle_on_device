@@ -11,6 +11,7 @@ abstract class ResultRepository {
     required int angleId,
     required Uint8List photoBytes,
     required int photoIndex,
+    int? imageOrder,
   });
 
   /// Fetches the inspection result after all photos are uploaded.

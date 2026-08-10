@@ -12,6 +12,8 @@ mixin _CaptureMixin on _CameraControllerBase {
         await PhotoSessionCache.instance.loadSessionPhotoPaths(_sessionId);
     if (cached.isEmpty) return;
     _capturedPhotos = cached;
+    _imageOrderCounter =
+        cached.values.fold<int>(0, (sum, list) => sum + list.length);
     // Angles with cached photos are shown as completed in the progress ring.
     _completedSegments.addAll(cached.keys);
     _panoramicCapturedSegments.addAll(cached.keys);
@@ -51,6 +53,7 @@ mixin _CaptureMixin on _CameraControllerBase {
       final seg = segment ?? _activeSegmentIndex;
       if (seg != null) {
         final photoIndex = _capturedPhotos[seg]?.length ?? 0;
+        final imageOrder = ++_imageOrderCounter;
         final path = await PhotoSessionCache.instance.createPhotoPath(
           _sessionId,
           seg,
@@ -81,6 +84,7 @@ mixin _CaptureMixin on _CameraControllerBase {
           angleId: seg,
           photoIndex: photoIndex,
           filePath: path,
+          imageOrder: imageOrder,
         );
         return path;
       }

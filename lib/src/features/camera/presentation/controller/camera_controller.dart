@@ -160,6 +160,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   bool _captureStarted = false;
 
   Map<int, List<String>> _capturedPhotos = {};
+  int _imageOrderCounter = 0;
 
   /// Vùng camera user thực sự nhìn thấy (giữa top bar và bottom bar), dạng tỉ lệ
   /// [0,1] theo chiều dọc của preview. Dùng để native crop ảnh chụp về đúng

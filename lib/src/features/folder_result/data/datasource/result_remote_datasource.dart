@@ -22,6 +22,7 @@ class ResultRemoteDataSource {
     required int angleId,
     required Uint8List photoBytes,
     required int photoIndex,
+    int? imageOrder,
   }) async {
     final config = AICycleConfigHolder.config;
     final sessionId = config.generalConfig.documentId;
@@ -40,6 +41,7 @@ class ResultRemoteDataSource {
           'claimFolderId': sessionId,
         if (config.generalConfig.organization != AiCycleOrg.aicycle)
           'externalSessionId': sessionId,
+        if (imageOrder != null) 'imageOrder': imageOrder,
         'img': MultipartFile.fromBytes(
           photoBytes,
           filename: '${angleId}_$photoIndex.jpg',
