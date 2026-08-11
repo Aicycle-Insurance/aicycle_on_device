@@ -14,11 +14,13 @@ class ResultRepositoryImpl implements ResultRepository {
     required int angleId,
     required Uint8List photoBytes,
     required int photoIndex,
+    int? imageOrder,
   }) =>
       _dataSource.uploadAnglePhoto(
         angleId: angleId,
         photoBytes: photoBytes,
         photoIndex: photoIndex,
+        imageOrder: imageOrder,
       );
 
   @override
