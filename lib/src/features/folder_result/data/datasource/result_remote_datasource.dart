@@ -33,6 +33,7 @@ class ResultRemoteDataSource {
         angleId: angleId,
         photoBytes: photoBytes,
         photoIndex: photoIndex,
+        imageOrder: imageOrder,
       );
     } else {
       // Upload to AICycle server
@@ -62,6 +63,7 @@ class ResultRemoteDataSource {
     required int angleId,
     required Uint8List photoBytes,
     required int photoIndex,
+    int? imageOrder,
   }) async {
     final config = AICycleConfigHolder.config;
     final vbi = config.vbiConfig;
@@ -100,6 +102,7 @@ class ResultRemoteDataSource {
       'btx_khoang_cach': vbi.btxKhoangCach,
       'dia_chi': vbi.diaChi,
       'sdk': vbi.sdk,
+      if (imageOrder != null) 'imageOrder': imageOrder,
     });
 
     /// Chắc chắn != null do org VBI bắt buộc khai báo
