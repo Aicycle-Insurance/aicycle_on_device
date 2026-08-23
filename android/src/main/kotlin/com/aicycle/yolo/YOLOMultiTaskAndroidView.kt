@@ -62,15 +62,37 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         private const val REQUEST_CODE_PERMISSIONS = 1001
         private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
 
-        // Classify giữ ~6–7 fps. CarPart tăng lên tối đa ~10 fps khi đang căn
-        // toàn cảnh để tạo thêm cơ hội OCR, rồi hạ về ~6–7 fps khi soi tổn thất.
-        private const val CLASSIFY_MIN_INTERVAL_MS = 150L
-        private const val THIRD_PANORAMIC_INTERVAL_MS = 100L
-        private const val THIRD_INSPECTION_INTERVAL_MS = 150L
+        // ── Nhịp chạy model theo bậc nhiệt ───────────────────────────────────
+        // Mỗi bảng có 4 cột, index theo ThermalTier.ordinal:
+        //   [NORMAL, WARM, HOT, CRITICAL]
+        // Giá trị là khoảng cách tối thiểu (ms) giữa 2 lần chạy; 0 = không giới
+        // hạn (chạy mỗi frame khi predictor rảnh). Máy càng nóng, nhịp càng thưa
+        // → GPU/NPU có thời gian nghỉ giữa các lần inference.
+        //
+        // Ở bậc NORMAL các giá trị giữ nguyên hành vi cũ: classify ~6–7 fps,
+        // carPart tối đa ~10 fps khi căn toàn cảnh rồi hạ về ~6–7 fps khi soi
+        // tổn thất, carDamage/OCR không giới hạn.
 
         // Context stream (inspection phase background upload)
         private const val STREAM_INTERVAL_MS = 1000L
         private const val STREAM_JPEG_QUALITY = 70
+
+        /** carDamage — model chính, tốn nhiều nhất vì chạy mỗi frame khi rảnh. */
+        private val DETECT_MIN_INTERVAL_MS = longArrayOf(0L, 100L, 200L, 400L)
+
+        /** carCorner. */
+        private val CLASSIFY_MIN_INTERVAL_MS = longArrayOf(150L, 250L, 350L, 500L)
+
+        // carPart phải chạy nhanh hơn _carPartFlickerGrace (600 ms) phía Dart —
+        // nếu thưa hơn thì `_seenRecently` không bao giờ đúng và luồng canh
+        // khung ảnh toàn cảnh đứng hẳn. Vì vậy trần ở đây là 450 ms, kể cả bậc
+        // CRITICAL.
+        private val THIRD_PANORAMIC_INTERVAL_MS = longArrayOf(100L, 200L, 300L, 400L)
+        private val THIRD_INSPECTION_INTERVAL_MS = longArrayOf(150L, 250L, 350L, 450L)
+
+        // OCR phải chạy nhanh hơn _plateReadFreshDuration (1200 ms) phía Dart,
+        // nếu không cờ "đọc được biển" hết hạn trước khi đủ điều kiện chụp.
+        private val OCR_MIN_INTERVAL_MS = longArrayOf(0L, 0L, 400L, 700L)
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -119,9 +141,23 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     private val thirdBusy    = AtomicBoolean(false)
 
     // Mốc thời gian lần chạy gần nhất (chỉ truy cập trên cameraExecutor) — dùng
-    // để giới hạn nhịp chạy của classify/third theo *_MIN_INTERVAL_MS.
+    // để giới hạn nhịp chạy của từng model theo *_MIN_INTERVAL_MS.
+    private var lastDetectMs = 0L
     private var lastClassifyMs = 0L
     private var lastThirdMs = 0L
+
+    /** Mốc lần OCR gần nhất — chỉ ghi sau khi giành được [ocrBusy], trên thirdExecutor. */
+    @Volatile private var lastOcrMs = 0L
+
+    // ── Hạ nhiệt ──────────────────────────────────────────────────────────────
+    // Bậc nhiệt hiện tại, dùng để tra các bảng *_MIN_INTERVAL_MS. Ghi trên main
+    // thread (callback của governor), đọc trên cameraExecutor/thirdExecutor.
+    @Volatile private var thermalTier = ThermalTier.NORMAL
+
+    private val thermalGovernor = ThermalGovernor(context) { tier ->
+        thermalTier = tier
+        emitThermalState(tier)
+    }
 
     private var lifecycleOwner: LifecycleOwner? = null
     private var imageCaptureUseCase: ImageCapture? = null
@@ -157,6 +193,7 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         // COMPATIBLE forces a TextureView so Stack overlays stay visible inside a Flutter AndroidView.
         previewView.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         addView(previewView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        thermalGovernor.start()
     }
 
     // region Public API
@@ -293,6 +330,7 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         isStopped = true
         onMultiTaskStream = null
         cameraExecutor.execute { stopContextStreamInternal() }
+        thermalGovernor.stop()
         // Unbind camera phải chạy trên main thread (yêu cầu của CameraX).
         if (Looper.myLooper() == Looper.getMainLooper()) {
             stopCameraInternal()
@@ -512,6 +550,9 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
                 }
             }
             preview.setSurfaceProvider(previewView.surfaceProvider)
+            // Sink phía Flutter đã gắn xong ở thời điểm này — báo bậc nhiệt khởi
+            // điểm (máy có thể đã nóng sẵn từ trước khi mở màn camera).
+            emitThermalState(thermalTier)
         }, ContextCompat.getMainExecutor(context))
     }
 
@@ -544,9 +585,12 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
 
         // Phase 1 — claim slots ngay trên cameraExecutor (đơn luồng): áp giới hạn
         // nhịp theo model + back-pressure. Chưa chạy inference ở đây.
-        val runDetect = claimDetect()
-        val runClassify = claimClassify(now)
-        val runThird = claimThird(now)
+        // Snapshot một lần cho cả frame: bậc nhiệt có thể đổi giữa 3 lệnh claim,
+        // và ba model nên cùng chạy theo một bậc để nhịp không lệch nhau.
+        val tier = thermalTier.ordinal
+        val runDetect = claimDetect(now, tier)
+        val runClassify = claimClassify(now, tier)
+        val runThird = claimThird(now, tier)
 
         val count = (if (runDetect) 1 else 0) +
             (if (runClassify) 1 else 0) +
@@ -569,26 +613,33 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         }
     }
 
-    /** carDamage: chạy mỗi frame khi rảnh — trừ pha panorama (input bị chặn). */
-    private fun claimDetect(): Boolean {
+    /**
+     * carDamage: chạy mỗi frame khi rảnh — trừ pha panorama (input bị chặn) và
+     * trừ khi máy đã nóng (bậc nhiệt > NORMAL áp thêm nhịp tối thiểu).
+     */
+    private fun claimDetect(now: Long, tier: Int): Boolean {
         if (detectPredictor == null || !detectEnabled) return false
-        return detectBusy.compareAndSet(false, true)
+        val minInterval = DETECT_MIN_INTERVAL_MS[tier]
+        if (minInterval > 0 && now - lastDetectMs < minInterval) return false
+        if (!detectBusy.compareAndSet(false, true)) return false
+        lastDetectMs = now
+        return true
     }
 
-    private fun claimClassify(now: Long): Boolean {
+    private fun claimClassify(now: Long, tier: Int): Boolean {
         if (classifyPredictor == null) return false
-        if (now - lastClassifyMs < CLASSIFY_MIN_INTERVAL_MS) return false
+        if (now - lastClassifyMs < CLASSIFY_MIN_INTERVAL_MS[tier]) return false
         if (!classifyBusy.compareAndSet(false, true)) return false
         lastClassifyMs = now
         return true
     }
 
-    private fun claimThird(now: Long): Boolean {
+    private fun claimThird(now: Long, tier: Int): Boolean {
         if (thirdPredictor == null) return false
         val minInterval = if (ocrEnabled) {
-            THIRD_PANORAMIC_INTERVAL_MS
+            THIRD_PANORAMIC_INTERVAL_MS[tier]
         } else {
-            THIRD_INSPECTION_INTERVAL_MS
+            THIRD_INSPECTION_INTERVAL_MS[tier]
         }
         if (now - lastThirdMs < minInterval) return false
         if (!thirdBusy.compareAndSet(false, true)) return false
@@ -635,6 +686,12 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         if (!ocrEnabled) return // gated off during inspection
         if (!ocrBusy.compareAndSet(false, true)) return
 
+        // Nhịp tối thiểu theo bậc nhiệt — kiểm tra SAU khi đã giành được cờ bận
+        // để chỉ một luồng đọc/ghi lastOcrMs tại một thời điểm.
+        val now = System.currentTimeMillis()
+        val ocrMinInterval = OCR_MIN_INTERVAL_MS[thermalTier.ordinal]
+        if (ocrMinInterval > 0 && now - lastOcrMs < ocrMinInterval) { ocrBusy.set(false); return }
+
         // Only the highest-confidence plate box that sits FULLY inside the exact
         // aspect-fill crop rect used by capturePhoto. Comparing directly with
         // ocrViewportTop/bottom is not enough because capturePhoto applies
@@ -673,6 +730,7 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
             return
         }
 
+        lastOcrMs = now
         ocrExecutor.execute {
             try {
                 val read = ocr.read(crop)
@@ -807,6 +865,21 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     // endregion
 
     // region Stream data builder
+
+    /**
+     * Báo bậc nhiệt hiện tại lên Dart (`type == "thermal"`). Bắn khi bậc đổi và
+     * một lần lúc camera khởi động, để host biết SDK đang tự hạ nhịp.
+     */
+    private fun emitThermalState(tier: ThermalTier) {
+        val event = mapOf(
+            "type" to "thermal",
+            "modelId" to "thermal",
+            "level" to tier.ordinal,
+            "state" to tier.label,
+            "throttled" to (tier != ThermalTier.NORMAL),
+        )
+        mainHandler.post { onMultiTaskStream?.invoke(event) }
+    }
 
     private fun buildTaskData(result: YOLOResult, slot: Slot, camFpsNow: Double): Map<String, Any> {
         val now = System.currentTimeMillis()

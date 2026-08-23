@@ -13,6 +13,7 @@ import '../../../core/themes/app_textstyle.dart';
 import '../../../core/upload/photo_upload_queue.dart';
 import '../../../core/utils/screen_utils.dart';
 import '../data/model/camera_message.dart';
+import '../data/model/detection_output.dart';
 import 'controller/camera_controller.dart';
 import 'widgets/bounding_box_overlay.dart';
 import 'widgets/camera_bottom_bar.dart';
@@ -317,29 +318,37 @@ class _CameraScreenState extends State<CameraScreen>
                   onStreamingData: _cameraController.onStreamingData,
                 ),
 
-                // Các overlay động gom trong 1 AnimatedBuilder phủ kín màn hình.
+                // ── Overlay TẦN SỐ CAO ───────────────────────────────────
+                // Box tổn thất + nhãn bộ phận đổi theo từng frame inference
+                // (~10–30 lần/giây). Chúng nghe ValueNotifier riêng của
+                // controller nên chỉ lớp vẽ này rebuild — phần UI bên dưới
+                // (thanh trên/dưới, vòng tròn góc, tooltip) đứng yên.
+
+                /// Bounding boxes — only during inspection phase.
+                Positioned.fill(
+                  child: ValueListenableBuilder<List<DetectionResult>>(
+                    valueListenable: _cameraController.damageBoxes,
+                    builder: (context, boxes, _) =>
+                        BoundingBoxOverlay(detections: boxes),
+                  ),
+                ),
+
+                /// Nhãn tên bộ phận — chỉ khi đang căn chỉnh ảnh toàn cảnh.
+                Positioned.fill(
+                  child: ValueListenableBuilder<List<DetectionResult>>(
+                    valueListenable: _cameraController.carPartBoxes,
+                    builder: (context, boxes, _) =>
+                        CarPartLabelOverlay(detections: boxes),
+                  ),
+                ),
+
+                // ── Overlay TẦN SỐ THẤP ──────────────────────────────────
+                // Chỉ đổi khi message/pha/danh sách ảnh đổi — vài lần mỗi phút.
                 Positioned.fill(
                   child: AnimatedBuilder(
                     animation: _cameraController,
                     builder: (context, _) => Stack(
                       children: [
-                        /// Bounding boxes — only during inspection phase
-                        Positioned.fill(
-                          child: BoundingBoxOverlay(
-                            detections: _cameraController.showBoundingBoxes
-                                ? _cameraController.latestDetections
-                                : const [],
-                          ),
-                        ),
-
-                        /// Nhãn tên bộ phận — chỉ khi đang căn chỉnh ảnh toàn cảnh.
-                        Positioned.fill(
-                          child: CarPartLabelOverlay(
-                            detections:
-                                _cameraController.latestCarPartDetections,
-                          ),
-                        ),
-
                         /// Overlay UI — khung góc vàng hiển thị xuyên suốt quá
                         /// trình chụp. Viền success hiện khi: đang "giữ yên"
                         /// chờ OCR (loading), hoặc nháy theo mỗi lần chụp ảnh
@@ -388,7 +397,7 @@ class _CameraScreenState extends State<CameraScreen>
 
                         // Bottom bar (thumbnail + nút chụp thủ công + progress ring)
                         CameraBottomBar(
-                          capturedPhotos: _cameraController.capturedPhotos,
+                          previewPath: _cameraController.lastPhotoPreviewPath,
                           activeSegmentIndex:
                               _cameraController.activeSegmentIndex,
                           completedSegments:

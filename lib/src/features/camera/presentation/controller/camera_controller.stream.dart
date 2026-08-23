@@ -15,8 +15,7 @@ mixin _StreamMixin on _CameraControllerBase {
   // notifyListeners() đúng một lần và chỉ khi có thay đổi nhìn thấy được, để
   // tránh rebuild thừa khi stream bắn nhiều frame/giây.
   void onStreamingData(Map<String, dynamic> data) {
-    // User chưa bấm "Bắt đầu chụp ảnh xe" → bỏ qua toàn bộ frame streaming.
-    if (!_captureStarted || _stopped) return;
+    if (_stopped) return;
 
     if (data['type'] == 'streamFrame') {
       final path = data['filePath'];
@@ -27,6 +26,16 @@ mixin _StreamMixin on _CameraControllerBase {
     }
 
     final type = data['type'];
+    // Bậc nhiệt không phải kết quả inference — nhận cả trước khi user bấm "Bắt
+    // đầu chụp ảnh xe", vì native đã bắt đầu chạy model từ lúc camera lên hình.
+    if (type == 'thermal') {
+      _handleThermal(data);
+      return;
+    }
+
+    // User chưa bấm "Bắt đầu chụp ảnh xe" → bỏ qua toàn bộ frame streaming.
+    if (!_captureStarted) return;
+
     // Hai model detect đều trả type=='detect'; phân biệt bằng modelId:
     //   'detect'  -> car damage (model chính)
     //   'detect2' -> car part   (model thứ 2)
@@ -49,6 +58,15 @@ mixin _StreamMixin on _CameraControllerBase {
     if (type == 'detect') {
       _handleCarDamage(data);
     }
+  }
+
+  /// Bậc nhiệt từ native. Native đã tự hạ nhịp model; ở đây chỉ lưu lại để UI
+  /// có thể báo cho user biết SDK đang chạy chậm hơn bình thường.
+  void _handleThermal(Map<String, dynamic> data) {
+    final status = ThermalStatus.fromJson(data);
+    if (status.level == _thermalStatus.level) return;
+    _thermalStatus = status;
+    notifyListeners();
   }
 
   /// carCorner — phân loại góc xe.
@@ -108,12 +126,10 @@ mixin _StreamMixin on _CameraControllerBase {
   /// carPart — model detect bộ phận, dùng để căn ảnh toàn cảnh.
   void _handleCarPart(Map<String, dynamic> data) {
     final output = DetectionOutput.fromJson(data);
-    final wasEmpty = _latestCarPartDetections.isEmpty;
     // Chỉ giữ bộ phận nằm trong vùng user thực sự nhìn thấy (giữa top/bottom
     // bar) — model xử lý cả phần bị che nên phải lọc lại.
     final visible = _filterToViewport(output.detections);
     _latestCarPartClasses = visible.map((d) => d.className).toSet();
-    _latestCarPartDetections = visible;
     final now = DateTime.now();
     for (final className in _latestCarPartClasses) {
       _carPartLastSeenAt[className] = now;
@@ -124,8 +140,9 @@ mixin _StreamMixin on _CameraControllerBase {
       _clearPlateRead();
     }
     updateMessage(); // tự notify khi message đổi
-    // Bỏ qua redraw nếu không có nhãn bộ phận nào để vẽ (trước & sau đều rỗng).
-    if (!(wasEmpty && visible.isEmpty)) notifyListeners();
+    // Nhãn bộ phận đi qua notifier riêng — không kéo theo rebuild thanh
+    // trên/dưới. Hai frame cùng rỗng không sinh sự kiện (xem [_setCarPartBoxes]).
+    _setCarPartBoxes(visible);
   }
 
   /// carDamage — model detect tổn thất (model chính).
@@ -138,8 +155,9 @@ mixin _StreamMixin on _CameraControllerBase {
     // Phát hiện tổn thất ổn định qua đủ số frame → mở xác nhận (không chờ timer
     // auto-capture). Box vẫn được vẽ mỗi frame kể cả khi chưa đủ chuỗi.
     _maybeShowDetectionReady(); // tự notify khi chuyển pha
-    // Bounding box chỉ vẽ khi đang trong pha inspection; ngoài ra việc đổi
-    // _latestDetections không ảnh hưởng UI → khỏi rebuild.
-    if (showBoundingBoxes) notifyListeners();
+    // Bounding box chỉ vẽ khi đang trong pha inspection. Đọc showBoundingBoxes
+    // SAU _maybeShowDetectionReady() để dùng đúng pha vừa chuyển. Đi qua
+    // notifier riêng nên không kéo theo rebuild thanh trên/dưới.
+    _setDamageBoxes(showBoundingBoxes ? _latestDetections : _noBoxes);
   }
 }

@@ -23,6 +23,7 @@ mixin _CaptureMixin on _CameraControllerBase {
     _completedSegments.addAll(cached.keys);
     _panoramicCapturedSegments.addAll(cached.keys);
     _firstPanoramicCaptured = cached.isNotEmpty;
+    _refreshPreviewPath();
     notifyListeners();
   }
 
@@ -88,6 +89,9 @@ mixin _CaptureMixin on _CameraControllerBase {
           await yoloController.setCapturingAnchor(false);
         }
         _capturedPhotos.putIfAbsent(seg, () => []).add(path);
+        // Ảnh mới nhất đổi → giải lại đường dẫn thumbnail (native đã ghi xong
+        // thumbnail trước khi capturePhotoToFile trả về).
+        _refreshPreviewPath();
         // Config 4 góc TẮT: góc nào đã có ảnh là hiện màu xanh trên vòng tròn.
         if (!_require4Angles) _completedSegments.add(seg);
         // Dừng hình ảnh vừa chụp rồi co về thumbnail — áp dụng cho MỌI lần chụp
@@ -148,6 +152,7 @@ mixin _CaptureMixin on _CameraControllerBase {
     _capturedPhotos.remove(angleId);
     _completedSegments.add(angleId);
     _panoramicCapturedSegments.remove(angleId);
+    _refreshPreviewPath();
     notifyListeners();
   }
 }
