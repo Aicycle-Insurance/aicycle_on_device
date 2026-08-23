@@ -250,10 +250,53 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// lâu trước khi auto-capture lại nếu OCR đọc được biển ngay sau đó.
   DateTime? _platePromptShownAt;
 
-  /// Mốc thời điểm bắt đầu hiển thị "giữ yên" (đã căn đủ bộ phận). Dùng để giữ
-  /// message holdStill trong một nhịp ngắn, vừa ổn định khung vừa tránh làm chậm
-  /// lần chụp khi OCR đã đọc tốt.
-  DateTime? _holdStillShownAt;
+  /// Mốc thời điểm tooltip "Hãy giữ yên điện thoại…" THỰC SỰ hiện trên màn
+  /// hình, hoặc null khi nó chưa hiện.
+  ///
+  /// Không dùng mốc "đã căn đủ bộ phận": [_setMessage] có thể hoãn holdStill tới
+  /// [_tooltipMinVisibleDuration] để tooltip trước đó (vd "Lùi camera ra xa…")
+  /// kịp hiển thị đủ lâu. Nếu đếm từ lúc căn đủ, đồng hồ chạy trong lúc holdStill
+  /// còn nằm trong hàng đợi → ảnh có thể được chụp ngay khi user vừa nhìn thấy
+  /// "Hãy giữ yên điện thoại…". Đếm từ [_messageShownAt] đảm bảo user luôn có
+  /// trọn [_holdStillMinDuration] kể từ khi thật sự đọc được thông báo.
+  DateTime? get _holdStillGuideShownAt =>
+      _message?.message == StringSheet.holdStillGuide ? _messageShownAt : null;
+
+  /// Đếm [_holdStillMinDuration] kể từ khi tooltip "Hãy giữ yên điện thoại…"
+  /// hiện, rồi CHẮC CHẮN chụp ảnh toàn cảnh.
+  ///
+  /// Timer (không phải kiểm tra theo frame) vì lời hứa với user là tuyệt đối:
+  /// đã hiện "Hãy giữ yên…" thì đúng 3s sau phải có ảnh, kể cả khi bộ phận rời
+  /// khung, OCR không đọc được biển, hay stream ngừng bắn frame.
+  Timer? _holdStillCaptureTimer;
+
+  /// Đang trong nhịp 3s đã hứa chụp → message bị "đóng băng" ở "Hãy giữ yên…"
+  /// để user không thấy tooltip khác nhảy vào giữa lúc chờ.
+  bool get _holdStillCapturePending => _holdStillCaptureTimer != null;
+
+  /// Tooltip holdStill vừa hiện → hẹn giờ chụp. Tooltip khác thay thế (hoặc rời
+  /// pha canh khung) → huỷ hẹn. Gọi từ [_applyMessage] nên luôn bám đúng message
+  /// đang thực sự hiển thị.
+  void _syncHoldStillCaptureTimer() {
+    final showingHoldStill = _inspectionPhase == null &&
+        _message?.message == StringSheet.holdStillGuide;
+    if (!showingHoldStill) {
+      _cancelHoldStillCaptureTimer();
+      return;
+    }
+    if (_holdStillCaptureTimer != null) return;
+    _holdStillCaptureTimer = Timer(_holdStillMinDuration, () {
+      _holdStillCaptureTimer = null;
+      if (_stopped || _isCapturing) return;
+      if (_inspectionPhase != null) return;
+      _triggerAutoCapture();
+    });
+  }
+
+  void _cancelHoldStillCaptureTimer() {
+    _holdStillCaptureTimer?.cancel();
+    _holdStillCaptureTimer = null;
+  }
 
   /// Chi tiết bộ phận (kèm bounding box) từ frame car-part detect mới nhất —
   /// dùng để vẽ nhãn tên bộ phận lên màn hình.
@@ -417,7 +460,6 @@ abstract class _CameraControllerBase extends ChangeNotifier {
 
   void _resetPanoramicFramingState({bool clearCarParts = false}) {
     _clearPlateRead();
-    _holdStillShownAt = null;
     _plateReadTimer?.cancel();
     _plateReadTimer = null;
     _platePromptShown = false;
@@ -552,6 +594,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
     _message = msg;
     _messagePhase = msg == null ? null : phase;
     _messageShownAt = msg == null ? null : DateTime.now();
+    _syncHoldStillCaptureTimer();
     notifyListeners();
   }
 
@@ -598,6 +641,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
     _detailTimer = null;
     _plateReadTimer?.cancel();
     _plateReadTimer = null;
+    _cancelHoldStillCaptureTimer();
     _cornerSuccessTimer?.cancel();
     _cornerSuccessTimer = null;
     _cancelPendingMessage();
@@ -614,6 +658,9 @@ abstract class _CameraControllerBase extends ChangeNotifier {
 
   /// [_PanoramicMixin] — cập nhật message canh khung theo bộ phận/OCR.
   Future<void> updateMessage();
+
+  /// [_PanoramicMixin] — chụp ảnh toàn cảnh cho góc đang active.
+  Future<void> _triggerAutoCapture();
 
   /// [_InspectionMixin] — bắt đầu (hoặc quay lại) trạng thái scanning.
   void startDamageScanning();

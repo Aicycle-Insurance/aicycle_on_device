@@ -63,13 +63,11 @@ flowchart TD
     Q1 -->|không| M1["msg: initialGuide (guide)<br/>'Vui lòng di chuyển về góc chéo ...'"]
     Q1 -->|có| Q2{"thấy cửa?"}
     Q2 -->|chưa| M2["msg: moveBackGuide (info)<br/>'Lùi camera ra xa để chụp ảnh toàn cảnh xe'"]
-    Q2 -->|"có (allPresent)"| H["set _holdStillShownAt (lần đầu)<br/>giữ holdStill tối thiểu 3s"]
+    Q2 -->|"có (allPresent)"| M4["msg: holdStillGuide (loading)<br/>'Hãy giữ yên điện thoại. Đang nhận diện biển số'"]
 
-    H --> Q3{"OCR readable && đã giữ ≥3s<br/>&& prompt rõ biển đã hiện đủ 3s?"}
-    Q3 -->|có| CAP["_triggerAutoCapture()"]
-    Q3 -->|không| Q4{"_platePromptShown<br/>(đã chờ OCR 5s)?"}
-    Q4 -->|có| M3["msg: movePlateClearGuide (warning)<br/>'Vui lòng di chuyển camera để biển số rõ nét...'<br/>giữ tối thiểu 1s"]
-    Q4 -->|không| M4["msg: holdStillGuide (loading)<br/>'Hãy giữ yên điện thoại. Đang nhận diện biển số'<br/>+ _ensurePlateReadTimer(5s)"]
+    M4 --> T3["tooltip THỰC SỰ hiện → _syncHoldStillCaptureTimer()<br/>hẹn giờ 3s (_holdStillCaptureTimer)"]
+    T3 --> FREEZE["updateMessage() bị đóng băng<br/>(_holdStillCapturePending) — không tooltip nào chen vào"]
+    FREEZE --> CAP["hết 3s → _triggerAutoCapture()<br/>CHẮC CHẮN chụp, không cần đủ bộ phận / OCR / frame mới"]
 ```
 
 ### `_triggerAutoCapture()` — ảnh toàn cảnh
@@ -230,8 +228,8 @@ flowchart TD
 |---|---|---|
 | `*Guide` (`frontLeftGuide`, `frontRightGuide`, ...) | guide | GĐ1: chưa thấy biển / điều hướng góc |
 | `moveBackGuide` | info | GĐ1: thấy biển, chưa thấy cửa |
-| `holdStillGuide` | loading | GĐ1: đủ bộ phận, đang đọc biển; giữ ≥3s mới chụp |
-| `movePlateClearGuide` | warning | GĐ1: quá 5s chưa đọc được biển; giữ warning ≥1s |
+| `holdStillGuide` | loading | GĐ1: đủ bộ phận; hiện xong là hẹn giờ 3s rồi CHẮC CHẮN chụp |
+| `movePlateClearGuide` | warning | **Hiện không còn tới lượt** — lời hứa chụp 3s luôn xảy ra trước `_plateReadPromptDelay` (5s) |
 | `plateValidCaptured` | success | Chụp toàn cảnh xong; giữ 3s |
 | `inspectDamageGuide` | info | Vào `panoramicGuide` |
 | `damageDetectedGuide` | info | `detectionReady`, có nút `Xác nhận` / `Thiếu tổn thất` |
@@ -247,7 +245,7 @@ flowchart TD
 
 | Đường chụp | Lệnh | Blink? | Ghi chú |
 |---|---|---|---|
-| Toàn cảnh từ biển số | `capturePhoto(immediate:true)` | Có | Sau khi OCR readable và giữ khung đủ 3s |
+| Toàn cảnh | `capturePhoto(immediate:true)` | Có | Đúng 3s sau khi tooltip "Hãy giữ yên…" hiển thị, vô điều kiện |
 | Thủ công (nút shutter) | `capturePhoto(immediate:true)` | Có | Nếu đang ở `noDamageDetectedGuide`, capture xong chuyển `continueToNextDamage` |
 | Xác nhận tổn thất (bấm tay) | `capturePhoto(immediate:true, flashTick:true)` | Có | Sau ảnh tổng quan → `detailGuide`; sau ảnh chi tiết → `continueToNextDamage` |
 | Tự động xác nhận tổn thất | `confirmDamage(flashTick:false)` | Không | Sau 5s user không bấm gì; đi đúng flow như bấm `Xác nhận` |

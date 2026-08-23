@@ -1,7 +1,10 @@
 part of 'camera_controller.dart';
 
-/// Canh khung ảnh toàn cảnh: theo bộ phận (carPart) + OCR biển số, và tự động
-/// chụp ảnh toàn cảnh khi biển số đọc được.
+/// Canh khung ảnh toàn cảnh theo bộ phận (carPart) + OCR biển số.
+///
+/// Đủ bộ phận → hiện "Hãy giữ yên điện thoại…" → đúng [_holdStillMinDuration]
+/// sau là CHẮC CHẮN chụp ([_CameraControllerBase._syncHoldStillCaptureTimer]).
+/// OCR không còn là điều kiện chụp: tooltip đã hiện là đã hứa với user.
 mixin _PanoramicMixin on _CameraControllerBase {
   @override
   Future<void> updateMessage() async {
@@ -14,6 +17,10 @@ mixin _PanoramicMixin on _CameraControllerBase {
     // không nằm trong _panoramicCapturedSegments) thì không ghi đè message
     // scanning bằng hướng dẫn canh khung/"di chuyển về góc chéo".
     if (_inspectionPhase != null) return;
+    // Đã hiện "Hãy giữ yên điện thoại…" ⇒ đã hứa 3s nữa sẽ chụp. Giữ nguyên
+    // message tới lúc chụp: bộ phận rời khung cũng không được đổi sang hướng dẫn
+    // khác, vì đổi message sẽ huỷ hẹn chụp.
+    if (_holdStillCapturePending) return;
     if (_completedSegments.contains(_activeSegmentIndex)) return;
     if (_panoramicCapturedSegments.contains(_activeSegmentIndex)) return;
     if (_isCapturing) return;
@@ -49,10 +56,6 @@ mixin _PanoramicMixin on _CameraControllerBase {
     if (!(allPresent && (!plateReadable || keepPlatePromptVisible))) {
       _cancelPlateReadTimer();
     }
-    // Rời trạng thái căn đủ → reset mốc đếm thời gian giữ yên.
-    if (!allPresent) {
-      _holdStillShownAt = null;
-    }
 
     if (!hasPlate) {
       _setMessage(
@@ -61,17 +64,15 @@ mixin _PanoramicMixin on _CameraControllerBase {
       _setMessage(CameraMessage(
           message: StringSheet.moveBackGuide, type: MessageType.info));
     } else if (allPresent) {
-      // Bộ phận đã căn đủ — giữ yên để OCR đọc biển số. Chỉ chụp ảnh toàn cảnh
-      // khi OCR đọc được biển (khung đủ rõ/đủ gần), tránh chụp ảnh mờ/xa.
-      _holdStillShownAt ??= now;
-      // Giữ khung ổn định đủ [_holdStillMinDuration] (3s) trước khi auto-capture,
-      // để user kịp đọc "Hãy giữ yên điện thoại…" và chuẩn bị giữ máy — OCR đọc
-      // được biển ngay frame đầu cũng không làm ảnh bị chụp vội.
-      final heldLongEnough =
-          now.difference(_holdStillShownAt!) >= _holdStillMinDuration;
-      if (plateReadable && heldLongEnough && platePromptVisibleLongEnough) {
-        _triggerAutoCapture();
-      } else if (_platePromptShown) {
+      // Bộ phận đã căn đủ → hiện "Hãy giữ yên điện thoại…". Nhánh này KHÔNG
+      // quyết định thời điểm chụp: [_syncHoldStillCaptureTimer] hẹn giờ ngay khi
+      // tooltip thật sự hiện và chụp sau đúng [_holdStillMinDuration], dù sau đó
+      // bộ phận rời khung, OCR không đọc được biển, hay stream ngừng bắn frame.
+      //
+      // LƯU Ý: vì lời hứa 3s là tuyệt đối và [_plateReadPromptDelay] (5s) dài
+      // hơn, nhắc "biển số chưa rõ" bên dưới hiện KHÔNG BAO GIỜ chạy tới — giữ
+      // lại để dễ khôi phục nếu muốn chụp có điều kiện OCR trở lại.
+      if (_platePromptShown) {
         // Chưa đọc được biển → giữ nhắc di chuyển cho biển rõ nét.
         _setMessage(CameraMessage(
             message: StringSheet.movePlateClearGuide,
@@ -79,7 +80,7 @@ mixin _PanoramicMixin on _CameraControllerBase {
       } else {
         _setMessage(CameraMessage(
             message: StringSheet.holdStillGuide, type: MessageType.loading));
-        _ensurePlateReadTimer();
+        if (_holdStillGuideShownAt != null) _ensurePlateReadTimer();
       }
     }
   }
@@ -106,15 +107,15 @@ mixin _PanoramicMixin on _CameraControllerBase {
     _platePromptShownAt = null;
   }
 
+  @override
   Future<void> _triggerAutoCapture() async {
     // Cờ "đọc được biển" chỉ dùng cho 1 lần chụp toàn cảnh; reset để góc sau
     // phải đọc lại biển mới chụp.
     _clearPlateRead();
-    _holdStillShownAt = null;
     _platePromptShownAt = null;
     _cancelPlateReadTimer();
-    // OCR vừa đọc được biển ở frame hiện tại ⇒ chụp NGAY (immediate, bỏ delay 3s)
-    // để ảnh toàn cảnh sát nhất với frame đã canh đúng khung + đọc được biển.
+    // Nhịp chờ 3s đã nằm ở [_holdStillCaptureTimer] rồi ⇒ chụp NGAY (immediate,
+    // bỏ delay 3s trong capturePhoto), tránh cộng dồn thành 6s.
     await capturePhoto(immediate: true);
     if (_activeSegmentIndex != null) {
       _panoramicCapturedSegments.add(_activeSegmentIndex!);
