@@ -207,6 +207,8 @@ class PhotoUploadQueue {
     required String filePath,
     int? imageOrder,
     bool isCallEngine = false,
+    double? latitude,
+    double? longitude,
   }) =>
       _enqueuePhoto(
         sessionId: sessionId,
@@ -215,6 +217,8 @@ class PhotoUploadQueue {
         filePath: filePath,
         imageOrder: imageOrder,
         isCallEngine: isCallEngine,
+        latitude: latitude,
+        longitude: longitude,
         schedule: true,
       );
 
@@ -225,11 +229,15 @@ class PhotoUploadQueue {
     required String filePath,
     int? imageOrder,
     bool isCallEngine = false,
+    double? latitude,
+    double? longitude,
     required bool schedule,
   }) async {
     final request = _buildUploadRequest();
     final fields = {
       ...request.fields,
+      if (latitude != null) 'latitude': latitude.toString(),
+      if (longitude != null) 'longitude': longitude.toString(),
       if (imageOrder != null) 'imageOrder': imageOrder.toString(),
       'isCallEngine': isCallEngine ? 'true' : 'false',
     };

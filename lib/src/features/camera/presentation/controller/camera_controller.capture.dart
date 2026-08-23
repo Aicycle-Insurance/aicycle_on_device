@@ -7,7 +7,12 @@ mixin _CaptureMixin on _CameraControllerBase {
 
   /// Restores previously captured photos from disk cache.
   /// Call once after construction; notifies listeners when done.
+  /// Restores previously captured photos from disk cache.
+  /// Call once after construction; notifies listeners when done.
   Future<void> loadCachedPhotos() async {
+    // Pre-fetch GPS position in background when camera session initializes
+    unawaited(LocationService().getFastCurrentPosition());
+
     final cached =
         await PhotoSessionCache.instance.loadSessionPhotoPaths(_sessionId);
     if (cached.isEmpty) return;
@@ -44,6 +49,18 @@ mixin _CaptureMixin on _CameraControllerBase {
       final seg = segment ?? _activeSegmentIndex;
       if (seg == null) return null;
 
+      // Lấy vị trí GPS nhanh tại thời điểm chụp ảnh Anchor
+      double? latitude;
+      double? longitude;
+      final posResult = await LocationService().getFastCurrentPosition();
+      posResult.fold(
+        (_) {},
+        (pos) {
+          latitude = pos.latitude;
+          longitude = pos.longitude;
+        },
+      );
+
       if (Platform.isIOS) {
         final dir = await PhotoSessionCache.instance.createBurstDir(_sessionId);
 
@@ -70,6 +87,8 @@ mixin _CaptureMixin on _CameraControllerBase {
           filePath: anchor.filePath,
           imageOrder: anchor.stepIndex,
           isCallEngine: true,
+          latitude: latitude,
+          longitude: longitude,
         );
 
         // Phase 2: collect post-roll + enqueue surrounding burst frames in
@@ -107,6 +126,8 @@ mixin _CaptureMixin on _CameraControllerBase {
         filePath: anchor.filePath,
         imageOrder: anchor.stepIndex,
         isCallEngine: true,
+        latitude: latitude,
+        longitude: longitude,
       );
 
       // Phase 2: collect post-roll + enqueue surrounding burst frames in

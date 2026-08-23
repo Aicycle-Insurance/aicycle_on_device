@@ -98,6 +98,45 @@ class LocationService {
     }
   }
 
+  static Position? _lastKnownPosition;
+
+  /// Vị trí GPS vừa lấy thành công gần đây nhất trong phiên làm việc.
+  static Position? get lastKnownPosition => _lastKnownPosition;
+
+  /// Lấy vị trí GPS hiện tại với [timeLimit] ngắn (mặc định 3s).
+  /// Nếu bị timeout hoặc có lỗi, tự động fallback về [_lastKnownPosition]
+  /// hoặc vị trí gần nhất từ Geolocator để không làm chậm UX.
+  Future<Result<Position, LocationFailure>> getFastCurrentPosition({
+    Duration timeLimit = const Duration(seconds: 3),
+  }) async {
+    try {
+      final position = await _determinePosition(timeLimit: timeLimit);
+      _lastKnownPosition = position;
+      _logger.i(
+          '$_tag: Fast toạ độ → lat=${position.latitude}, lng=${position.longitude}');
+      return Success(position);
+    } catch (e, st) {
+      _logger.w('$_tag: Fast location failed/timeout ($e), thử fallback...');
+      if (_lastKnownPosition != null) {
+        _logger.i(
+            '$_tag: Dùng _lastKnownPosition cache → lat=${_lastKnownPosition!.latitude}, lng=${_lastKnownPosition!.longitude}');
+        return Success(_lastKnownPosition!);
+      }
+      try {
+        final lastKnown = await Geolocator.getLastKnownPosition();
+        if (lastKnown != null) {
+          _lastKnownPosition = lastKnown;
+          _logger.i(
+              '$_tag: Dùng Geolocator.getLastKnownPosition() → lat=${lastKnown.latitude}, lng=${lastKnown.longitude}');
+          return Success(lastKnown);
+        }
+      } catch (_) {}
+
+      _logger.e('$_tag: Fast location exception, không có fallback', e, st);
+      return FailureResult(LocationFailure(e.toString()));
+    }
+  }
+
   /// Chỉ lấy toạ độ GPS (không geocode), hữu ích khi chỉ cần lat/lng.
   ///
   /// Trả về [Result]:
@@ -152,7 +191,9 @@ class LocationService {
   // ---------------------------------------------------------------------------
 
   /// Kiểm tra quyền và trả về [Position] hiện tại.
-  Future<Position> _determinePosition() async {
+  Future<Position> _determinePosition({
+    Duration timeLimit = const Duration(seconds: 15),
+  }) async {
     // 1. Kiểm tra location service có bật không
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
@@ -182,12 +223,14 @@ class LocationService {
 
     // 3. Lấy vị trí
     try {
-      return await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: LocationSettings(
           accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 15),
+          timeLimit: timeLimit,
         ),
       );
+      _lastKnownPosition = pos;
+      return pos;
     } catch (e) {
       throw LocationException('Không thể lấy vị trí GPS: $e');
     }

@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import '../../../../core/cache/photo_session_cache.dart';
 import '../../../../core/constants/string_sheet.dart';
 import '../../../../core/upload/photo_upload_queue.dart';
+import '../../../../core/utils/location_services.dart';
 import '../../data/model/camera_message.dart';
 import '../../data/model/car_angle.dart';
 import '../../data/model/classify_output.dart';
