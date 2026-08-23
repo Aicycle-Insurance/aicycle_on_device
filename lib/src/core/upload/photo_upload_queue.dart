@@ -79,18 +79,28 @@ class PhotoUploadQueue {
       for (final item in items) {
         if (!item.hasPendingResponse) continue;
         final listener = _lastMatchingListener(item.sessionId);
-        if (listener == null) continue;
-
         final data = _decodeResponseMap(item);
-        debugPrint(
-          'AICycle upload completed: session=${item.sessionId} '
-          'angle=${item.angleId} photo=${item.photoIndex} '
-          'status=${item.responseStatusCode}',
-        );
-        try {
-          listener.onData(data);
-        } catch (_) {
-          // Host callback errors must not block queue cleanup or replay.
+
+        if (item.isCallEngine) {
+          debugPrint(
+            'AICycle upload completed: session=${item.sessionId} '
+            'angle=${item.angleId} photo=${item.photoIndex} '
+            'status=${item.responseStatusCode}',
+          );
+          if (listener != null) {
+            try {
+              listener.onData(data);
+            } catch (_) {
+              // Host callback errors must not block queue cleanup or replay.
+            }
+          }
+        } else {
+          final url = _extractUploadImageUrl(data);
+          debugPrint(
+            'AICycle burst frame ok: stepIndex=${item.imageOrder} '
+            'httpCode=${item.responseStatusCode} '
+            'url=${url ?? "(no url in response)"}',
+          );
         }
         deliveredIds.add(item.id);
       }
@@ -127,15 +137,24 @@ class PhotoUploadQueue {
       for (final item in items) {
         if (!item.hasPendingResponse) continue;
         final data = _decodeResponseMap(item);
-        debugPrint(
-          'AICycle upload completed: session=${item.sessionId} '
-          'angle=${item.angleId} photo=${item.photoIndex} '
-          'status=${item.responseStatusCode}',
-        );
-        try {
-          onImageUploaded(data);
-        } catch (_) {
-          // Host callback errors must not block queue cleanup or replay.
+        if (item.isCallEngine) {
+          debugPrint(
+            'AICycle upload completed: session=${item.sessionId} '
+            'angle=${item.angleId} photo=${item.photoIndex} '
+            'status=${item.responseStatusCode}',
+          );
+          try {
+            onImageUploaded(data);
+          } catch (_) {
+            // Host callback errors must not block queue cleanup or replay.
+          }
+        } else {
+          final url = _extractUploadImageUrl(data);
+          debugPrint(
+            'AICycle burst frame ok: stepIndex=${item.imageOrder} '
+            'httpCode=${item.responseStatusCode} '
+            'url=${url ?? "(no url in response)"}',
+          );
         }
         deliveredIds.add(item.id);
       }
@@ -187,6 +206,7 @@ class PhotoUploadQueue {
     required int photoIndex,
     required String filePath,
     int? imageOrder,
+    bool isCallEngine = false,
   }) =>
       _enqueuePhoto(
         sessionId: sessionId,
@@ -194,6 +214,7 @@ class PhotoUploadQueue {
         photoIndex: photoIndex,
         filePath: filePath,
         imageOrder: imageOrder,
+        isCallEngine: isCallEngine,
         schedule: true,
       );
 
@@ -203,12 +224,14 @@ class PhotoUploadQueue {
     required int photoIndex,
     required String filePath,
     int? imageOrder,
+    bool isCallEngine = false,
     required bool schedule,
   }) async {
     final request = _buildUploadRequest();
     final fields = {
       ...request.fields,
       if (imageOrder != null) 'imageOrder': imageOrder.toString(),
+      'isCallEngine': isCallEngine ? 'true' : 'false',
     };
     final item = PhotoUploadItem(
       id: _stableId('$sessionId|$angleId|$filePath'),
@@ -216,6 +239,7 @@ class PhotoUploadQueue {
       angleId: angleId,
       photoIndex: photoIndex,
       imageOrder: imageOrder,
+      isCallEngine: isCallEngine,
       filePath: filePath,
       fileName: '${angleId}_$photoIndex.jpg',
       fileField: request.fileField,
@@ -233,8 +257,12 @@ class PhotoUploadQueue {
         ]);
     debugPrint(
       'AICycle upload queued: session=$sessionId angle=$angleId '
-      'photo=$photoIndex imageOrder=$imageOrder file=${item.fileName}',
+      'photo=$photoIndex imageOrder=$imageOrder isCallEngine=$isCallEngine '
+      'file=${item.fileName}',
     );
+    if (!isCallEngine && imageOrder != null) {
+      debugPrint('AICycle burst frame uploading: stepIndex=$imageOrder');
+    }
     await enforceCacheLimit();
     if (schedule) await _schedulePendingUploadsBestEffort();
   }
@@ -553,6 +581,38 @@ class PhotoUploadQueue {
       if (rawBody != null && rawBody.isNotEmpty) 'rawBody': rawBody,
     };
   }
+
+  String? _extractUploadImageUrl(Map<String, dynamic> response) {
+    return _findNestedString(response, const {
+      'imgurl',
+    });
+  }
+
+  String? _findNestedString(
+    Map<String, dynamic> map,
+    Set<String> keys,
+  ) {
+    for (final entry in map.entries) {
+      final key = entry.key.toLowerCase();
+      if (keys.contains(key) && entry.value is String) {
+        final value = entry.value as String;
+        if (value.isNotEmpty) return value;
+      }
+      final nested = entry.value;
+      if (nested is Map) {
+        final found = _findNestedString(
+          Map<String, dynamic>.from(nested),
+          keys,
+        );
+        if (found != null) return found;
+      }
+      if (nested is Map<String, dynamic>) {
+        final found = _findNestedString(nested, keys);
+        if (found != null) return found;
+      }
+    }
+    return null;
+  }
 }
 
 class PhotoUploadItem {
@@ -562,6 +622,7 @@ class PhotoUploadItem {
     required this.angleId,
     required this.photoIndex,
     this.imageOrder,
+    this.isCallEngine = false,
     required this.filePath,
     required this.fileName,
     required this.fileField,
@@ -583,6 +644,7 @@ class PhotoUploadItem {
   final int angleId;
   final int photoIndex;
   final int? imageOrder;
+  final bool isCallEngine;
   final String filePath;
   final String fileName;
   final String fileField;
@@ -610,6 +672,8 @@ class PhotoUploadItem {
       angleId: json['angleId'] as int,
       photoIndex: json['photoIndex'] as int,
       imageOrder: json['imageOrder'] as int?,
+      isCallEngine:
+          json['isCallEngine'] as bool? ?? json['isCapture'] as bool? ?? false,
       filePath: json['filePath'] as String,
       fileName: json['fileName'] as String,
       fileField: json['fileField'] as String,
@@ -636,6 +700,7 @@ class PhotoUploadItem {
         'angleId': angleId,
         'photoIndex': photoIndex,
         if (imageOrder != null) 'imageOrder': imageOrder,
+        'isCallEngine': isCallEngine,
         'filePath': filePath,
         'fileName': fileName,
         'fileField': fileField,

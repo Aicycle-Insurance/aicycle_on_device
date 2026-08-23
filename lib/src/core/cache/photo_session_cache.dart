@@ -59,6 +59,15 @@ class PhotoSessionCache {
     return '${dir.path}/$micros.jpg';
   }
 
+  /// Creates a directory for one burst capture (JPEG files keyed by stepIndex).
+  Future<String> createBurstDir(String sessionId) async {
+    final sessionDir = await _sessionDir(sessionId, create: true);
+    final micros = DateTime.now().microsecondsSinceEpoch;
+    final dir = Directory('${sessionDir.path}/burst_$micros');
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    return dir.path;
+  }
+
   /// Saves [bytes] for the given [sessionId] and [angleId].
   Future<String> savePhoto(
       String sessionId, int angleId, Uint8List bytes) async {
