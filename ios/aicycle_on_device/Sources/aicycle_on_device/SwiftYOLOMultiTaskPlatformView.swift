@@ -20,6 +20,12 @@ public final class SwiftYOLOMultiTaskPlatformView: NSObject,
   private var eventSink: FlutterEventSink?
   private var multiTaskView: YOLOMultiTaskView?
 
+  // Two-phase burst state: stores the Flutter result callback for
+  // `captureBurstAwaitPostRoll` and the already-completed frames if post-roll
+  // finishes before Dart calls `captureBurstAwaitPostRoll`.
+  private var pendingBurstPostRollResult: FlutterResult?
+  private var completedBurstAllFrames: [[String: Any]]?
+
   init(frame: CGRect, viewId: Int64, args: Any?, messenger: FlutterBinaryMessenger) {
     self.viewId = viewId
 
@@ -105,6 +111,12 @@ public final class SwiftYOLOMultiTaskPlatformView: NSObject,
         self.multiTaskView?.stopCamera()
         self.multiTaskView?.releaseResources()
         self.multiTaskView = nil
+        // Abort any pending post-roll wait so Dart doesn't hang.
+        if let pending = self.pendingBurstPostRollResult {
+          self.pendingBurstPostRollResult = nil
+          pending(FlutterError(code: "stopped", message: "Camera stopped", details: nil))
+        }
+        self.completedBurstAllFrames = nil
         result(nil)
       case "capturePhoto":
         guard let view = self.multiTaskView else {
@@ -166,6 +178,97 @@ public final class SwiftYOLOMultiTaskPlatformView: NSObject,
             }
           }
         }
+      case "captureBurst":
+        guard let view = self.multiTaskView else {
+          result(FlutterError(code: "unavailable", message: "Camera not ready", details: nil))
+          return
+        }
+        let args = call.arguments as? [String: Any]
+        let dirPath = args?["dirPath"] as? String ?? NSTemporaryDirectory()
+        let quality = CGFloat((args?["quality"] as? Double ?? 80.0) / 100.0)
+        var crop: CGRect? = nil
+        if let l = args?["cropLeft"] as? Double,
+          let t = args?["cropTop"] as? Double,
+          let r = args?["cropRight"] as? Double,
+          let b = args?["cropBottom"] as? Double
+        {
+          crop = CGRect(x: l, y: t, width: r - l, height: b - t)
+        }
+        view.captureBurstToFiles(dirPath: dirPath, crop: crop, quality: quality) { frames in
+          DispatchQueue.main.async {
+            if let frames {
+              result(frames)
+            } else {
+              result(
+                FlutterError(code: "capture_failed", message: "Failed to capture burst", details: nil)
+              )
+            }
+          }
+        }
+      case "captureBurstAnchor":
+        guard let view = self.multiTaskView else {
+          result(FlutterError(code: "unavailable", message: "Camera not ready", details: nil))
+          return
+        }
+        let args = call.arguments as? [String: Any]
+        let dirPath = args?["dirPath"] as? String ?? NSTemporaryDirectory()
+        let quality = CGFloat((args?["quality"] as? Double ?? 80.0) / 100.0)
+        var crop: CGRect? = nil
+        if let l = args?["cropLeft"] as? Double,
+          let t = args?["cropTop"] as? Double,
+          let r = args?["cropRight"] as? Double,
+          let b = args?["cropBottom"] as? Double
+        {
+          crop = CGRect(x: l, y: t, width: r - l, height: b - t)
+        }
+        // Clear stale post-roll state from any previous burst.
+        self.completedBurstAllFrames = nil
+        if let stale = self.pendingBurstPostRollResult {
+          self.pendingBurstPostRollResult = nil
+          stale(FlutterError(code: "aborted", message: "New burst started", details: nil))
+        }
+        let anchorResult = result
+        view.startBurstForCapture(
+          dirPath: dirPath, crop: crop, quality: quality,
+          onAnchorReady: { anchorMap in
+            DispatchQueue.main.async {
+              if let map = anchorMap {
+                anchorResult(map)
+              } else {
+                anchorResult(
+                  FlutterError(
+                    code: "capture_failed", message: "Anchor capture failed", details: nil))
+              }
+            }
+          },
+          onAllReady: { [weak self] allMaps in
+            DispatchQueue.main.async {
+              guard let self else { return }
+              if let pending = self.pendingBurstPostRollResult {
+                self.pendingBurstPostRollResult = nil
+                if let maps = allMaps {
+                  pending(maps)
+                } else {
+                  pending(
+                    FlutterError(
+                      code: "capture_failed", message: "Burst post-roll failed", details: nil))
+                }
+              } else {
+                // Dart hasn't called captureBurstAwaitPostRoll yet — store frames.
+                self.completedBurstAllFrames = allMaps
+              }
+            }
+          }
+        )
+      case "captureBurstAwaitPostRoll":
+        if let completed = self.completedBurstAllFrames {
+          // Post-roll already done; return immediately.
+          self.completedBurstAllFrames = nil
+          result(completed)
+        } else {
+          // Post-roll still in progress; store result to call when done.
+          self.pendingBurstPostRollResult = result
+        }
       case "setTorch":
         guard let args = call.arguments as? [String: Any],
           let enable = args["enable"] as? Bool
@@ -223,6 +326,8 @@ public final class SwiftYOLOMultiTaskPlatformView: NSObject,
       methodChannel.setMethodCallHandler(nil)
       multiTaskView?.releaseResources()
       multiTaskView = nil
+      pendingBurstPostRollResult = nil
+      completedBurstAllFrames = nil
     }
   }
 }

@@ -156,6 +156,34 @@ public class YOLOMultiTaskView: UIView {
   private var camFpsWindowStart: Double = 0
   private var camFps: Double = 0
 
+  // MARK: Burst capture ring buffer (cameraQueue only)
+
+  private static let ringCapacity = 5
+  private static let postRollCount = 5
+  private static let ringInterval: CFTimeInterval = 0.5
+  private static let jpegEncodeContext = CIContext()
+
+  private let ringBuffer = FrameRingBuffer(capacity: ringCapacity)
+  private var stepIndex = 0
+  private var lastRingWriteTime: CFTimeInterval = 0
+  private var burstJpegQuality: CGFloat = 0.8
+
+  private enum BurstState { case rolling, triggered, collecting }
+  private var burstState: BurstState = .rolling
+  private var burstPreRoll: [BurstFrame] = []
+  private var burstPostRoll: [BurstFrame] = []
+  private var burstAnchorFrame: BurstFrame?
+  private var burstAnchorStepIndex: Int?
+  private var pendingBurstCompletion: (([BurstFrame]) -> Void)?
+  private var pendingBurstCrop: CGRect?
+  private var pendingBurstQuality: CGFloat = 0.8
+
+  // Two-phase burst (captureBurstAnchor / captureBurstAwaitPostRoll path).
+  // cameraQueue only.
+  private var pendingAnchorDirCompletion: (([String: Any]?) -> Void)?
+  private var pendingAllFramesSplitCompletion: (([[String: Any]]?) -> Void)?
+  private var burstSplitDirPath: String = ""
+
   // MARK: Callback
 
   /// Called on the main thread with a stream-data dict. Keys: "type", "fps", "cameraFps",
@@ -678,6 +706,397 @@ public class YOLOMultiTaskView: UIView {
 
     captureSession.startRunning()
     camFpsWindowStart = CACurrentMediaTime()
+    stepIndex = 0
+    lastRingWriteTime = 0
+    burstState = .rolling
+    burstPreRoll = []
+    burstPostRoll = []
+    burstAnchorFrame = nil
+    burstAnchorStepIndex = nil
+    pendingBurstCompletion = nil
+  }
+
+  // MARK: - Burst capture
+
+  public func captureBurst(
+    crop: CGRect? = nil,
+    quality: CGFloat = 0.8,
+    completion: @escaping ([BurstFrame]) -> Void
+  ) {
+    DispatchQueue.main.async { [weak self] in
+      guard let self else {
+        completion([])
+        return
+      }
+      let previewSize = self.bounds.size
+      self.cameraQueue.async { [weak self] in
+        guard let self else {
+          DispatchQueue.main.async { completion([]) }
+          return
+        }
+        self.startBurstCapture(
+          crop: crop,
+          previewSize: previewSize,
+          quality: quality,
+          completion: completion
+        )
+      }
+    }
+  }
+
+  public func captureBurstToFiles(
+    dirPath: String,
+    crop: CGRect? = nil,
+    quality: CGFloat = 0.8,
+    completion: @escaping ([[String: Any]]?) -> Void
+  ) {
+    captureBurst(crop: crop, quality: quality) { frames in
+      guard !frames.isEmpty else {
+        completion(nil)
+        return
+      }
+      DispatchQueue.global(qos: .utility).async {
+        do {
+          try FileManager.default.createDirectory(
+            atPath: dirPath,
+            withIntermediateDirectories: true
+          )
+          var maps: [[String: Any]] = []
+          for frame in frames {
+            let path = (dirPath as NSString).appendingPathComponent("\(frame.stepIndex).jpg")
+            try frame.data.write(to: URL(fileURLWithPath: path), options: .atomic)
+            maps.append([
+              "filePath": path,
+              "stepIndex": frame.stepIndex,
+              "isCallEngine": frame.isCallEngine,
+            ])
+          }
+          DispatchQueue.main.async { completion(maps) }
+        } catch {
+          NSLog(
+            "YOLOMultiTaskView: captureBurstToFiles failed: %@",
+            error.localizedDescription
+          )
+          DispatchQueue.main.async { completion(nil) }
+        }
+      }
+    }
+  }
+
+  private func startBurstCapture(
+    crop: CGRect?,
+    previewSize: CGSize,
+    quality: CGFloat,
+    completion: @escaping ([BurstFrame]) -> Void
+  ) {
+    deliverInFlightBurstIfNeeded()
+
+    pendingBurstCompletion = completion
+    pendingBurstCrop = crop
+    pendingBurstQuality = quality
+    pendingPreviewSize = previewSize
+    burstJpegQuality = quality
+
+    burstPreRoll = ringBuffer.snapshot()
+    burstPostRoll = []
+    burstAnchorFrame = nil
+    let anchorIdx = stepIndex
+    stepIndex += 1
+    burstAnchorStepIndex = anchorIdx
+    burstState = .triggered
+    lastRingWriteTime = CACurrentMediaTime()
+
+    let settings = AVCapturePhotoSettings()
+    settings.flashMode = .off
+    photoOutput.capturePhoto(with: settings, delegate: self)
+  }
+
+  /// Two-phase burst entry point. Triggers anchor capture and calls `onAnchorReady`
+  /// as soon as the anchor JPEG is written to disk (~200ms). Post-roll continues
+  /// collecting in the background; `onAllReady` fires when all 11 frames are on disk.
+  /// Use this instead of `captureBurstToFiles` when the caller needs to start a UI
+  /// freeze overlay immediately on anchor availability.
+  public func startBurstForCapture(
+    dirPath: String,
+    crop: CGRect?,
+    quality: CGFloat,
+    onAnchorReady: @escaping ([String: Any]?) -> Void,
+    onAllReady: @escaping ([[String: Any]]?) -> Void
+  ) {
+    DispatchQueue.main.async { [weak self] in
+      guard let self else {
+        onAnchorReady(nil)
+        return
+      }
+      let previewSize = self.bounds.size
+      self.cameraQueue.async { [weak self] in
+        guard let self else {
+          DispatchQueue.main.async { onAnchorReady(nil) }
+          return
+        }
+        self.deliverInFlightBurstIfNeeded()
+
+        self.burstSplitDirPath = dirPath
+        self.pendingBurstCrop = crop
+        self.pendingBurstQuality = quality
+        self.pendingPreviewSize = previewSize
+        self.burstJpegQuality = quality
+
+        self.burstPreRoll = self.ringBuffer.snapshot()
+        self.burstPostRoll = []
+        self.burstAnchorFrame = nil
+        let anchorIdx = self.stepIndex
+        self.stepIndex += 1
+        self.burstAnchorStepIndex = anchorIdx
+        self.burstState = .triggered
+        self.lastRingWriteTime = CACurrentMediaTime()
+
+        self.pendingAnchorDirCompletion = onAnchorReady
+        self.pendingAllFramesSplitCompletion = onAllReady
+
+        let settings = AVCapturePhotoSettings()
+        settings.flashMode = .off
+        self.photoOutput.capturePhoto(with: settings, delegate: self)
+      }
+    }
+  }
+
+  private func deliverInFlightBurstIfNeeded() {
+    let hasPendingSingle = pendingBurstCompletion != nil
+    let hasPendingSplit = pendingAnchorDirCompletion != nil || pendingAllFramesSplitCompletion != nil
+    guard hasPendingSingle || hasPendingSplit else { return }
+
+    let completion = pendingBurstCompletion
+    pendingBurstCompletion = nil
+    let anchorCallback = pendingAnchorDirCompletion
+    pendingAnchorDirCompletion = nil
+    let allCallback = pendingAllFramesSplitCompletion
+    pendingAllFramesSplitCompletion = nil
+
+    var frames = burstPreRoll
+    if let anchor = burstAnchorFrame { frames.append(anchor) }
+    frames.append(contentsOf: burstPostRoll)
+    frames.sort { $0.stepIndex < $1.stepIndex }
+    burstState = .rolling
+    burstPreRoll = []
+    burstPostRoll = []
+    burstAnchorFrame = nil
+    burstAnchorStepIndex = nil
+
+    if let completion {
+      DispatchQueue.main.async { completion(frames) }
+    }
+    // Split path: deliver nil (burst aborted by new trigger)
+    if let anchorCallback {
+      DispatchQueue.main.async { anchorCallback(nil) }
+    }
+    if let allCallback {
+      DispatchQueue.main.async { allCallback(nil) }
+    }
+  }
+
+  private func handleBurstAnchorPhoto(_ data: Data?) {
+    guard burstState == .triggered, let anchorIdx = burstAnchorStepIndex else { return }
+    if let data {
+      burstAnchorFrame = BurstFrame(data: data, stepIndex: anchorIdx, isCallEngine: true)
+
+      // Two-phase path: write anchor to disk immediately and call early callback so
+      // the Dart side can start the freeze overlay without waiting for post-roll.
+      if let anchorCallback = pendingAnchorDirCompletion {
+        pendingAnchorDirCompletion = nil
+        let dirPath = burstSplitDirPath
+        let anchorData = data  // already processed (cropped, oriented) JPEG
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+          guard self != nil else { return }
+          do {
+            try FileManager.default.createDirectory(
+              atPath: dirPath, withIntermediateDirectories: true)
+            let path = (dirPath as NSString).appendingPathComponent("\(anchorIdx).jpg")
+            try anchorData.write(to: URL(fileURLWithPath: path), options: .atomic)
+            let map: [String: Any] = [
+              "filePath": path,
+              "stepIndex": anchorIdx,
+              "isCallEngine": true,
+            ]
+            DispatchQueue.main.async { anchorCallback(map) }
+          } catch {
+            NSLog(
+              "YOLOMultiTaskView: anchor write failed: %@",
+              error.localizedDescription)
+            DispatchQueue.main.async { anchorCallback(nil) }
+          }
+        }
+      }
+
+      burstState = .collecting
+      lastRingWriteTime = CACurrentMediaTime()
+      if burstPostRoll.count >= Self.postRollCount {
+        finalizeBurst()
+      }
+    } else {
+      // Anchor capture failed — clear split anchor callback too.
+      pendingAnchorDirCompletion = nil
+      finalizeBurst()
+    }
+  }
+
+  private func finalizeBurst() {
+    let completion = pendingBurstCompletion
+    let allCallback = pendingAllFramesSplitCompletion
+    pendingBurstCompletion = nil
+    pendingAllFramesSplitCompletion = nil
+    burstState = .rolling
+
+    var frames = burstPreRoll
+    if let anchor = burstAnchorFrame { frames.append(anchor) }
+    frames.append(contentsOf: burstPostRoll)
+    frames.sort { $0.stepIndex < $1.stepIndex }
+
+    burstPreRoll = []
+    burstPostRoll = []
+    burstAnchorFrame = nil
+    burstAnchorStepIndex = nil
+
+    // Legacy single-call path (existing captureBurst flow).
+    if let completion {
+      DispatchQueue.main.async { completion(frames) }
+      return
+    }
+
+    // Two-phase path: write pre-roll/post-roll to disk (anchor already written)
+    // and deliver all frame maps to Dart.
+    if let allCallback {
+      let dirPath = burstSplitDirPath
+      DispatchQueue.global(qos: .utility).async {
+        do {
+          var maps: [[String: Any]] = []
+          for frame in frames {
+            let path = (dirPath as NSString).appendingPathComponent("\(frame.stepIndex).jpg")
+            if !frame.isCallEngine {
+              // Pre/post-roll frames: write to disk now.
+              try frame.data.write(to: URL(fileURLWithPath: path), options: .atomic)
+            }
+            // Anchor already written by handleBurstAnchorPhoto; include path only.
+            maps.append([
+              "filePath": path,
+              "stepIndex": frame.stepIndex,
+              "isCallEngine": frame.isCallEngine,
+            ])
+          }
+          DispatchQueue.main.async { allCallback(maps) }
+        } catch {
+          NSLog(
+            "YOLOMultiTaskView: burst split frames write failed: %@",
+            error.localizedDescription)
+          DispatchQueue.main.async { allCallback(nil) }
+        }
+      }
+    }
+    // If neither callback is set, burst was aborted — state already cleaned up.
+  }
+
+  private func sampleRingBuffer(from sampleBuffer: CMSampleBuffer, quality: CGFloat) {
+    let idx = stepIndex
+    stepIndex += 1
+    let buf = sampleBuffer
+    DispatchQueue.global(qos: .utility).async { [weak self] in
+      guard let pixelBuffer = CMSampleBufferGetImageBuffer(buf),
+        let jpegData = Self.encodeJPEG(from: pixelBuffer, quality: quality)
+      else { return }
+      let frame = BurstFrame(data: jpegData, stepIndex: idx, isCallEngine: false)
+      self?.cameraQueue.async { [weak self] in
+        self?.ringBuffer.write(frame)
+      }
+    }
+  }
+
+  private func collectPostRollFrame(from sampleBuffer: CMSampleBuffer, quality: CGFloat) {
+    let idx = stepIndex
+    stepIndex += 1
+    let buf = sampleBuffer
+    DispatchQueue.global(qos: .utility).async { [weak self] in
+      guard let pixelBuffer = CMSampleBufferGetImageBuffer(buf),
+        let jpegData = Self.encodeJPEG(from: pixelBuffer, quality: quality)
+      else { return }
+      let frame = BurstFrame(data: jpegData, stepIndex: idx, isCallEngine: false)
+      self?.cameraQueue.async { [weak self] in
+        guard let self else { return }
+        self.burstPostRoll.append(frame)
+        if self.burstPostRoll.count >= Self.postRollCount {
+          self.finalizeBurst()
+        }
+      }
+    }
+  }
+
+  private nonisolated static func encodeJPEG(
+    from pixelBuffer: CVPixelBuffer,
+    quality: CGFloat
+  ) -> Data? {
+    let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+    guard let cgImage = jpegEncodeContext.createCGImage(ciImage, from: ciImage.extent) else {
+      return nil
+    }
+    return UIImage(cgImage: cgImage).jpegData(compressionQuality: quality)
+  }
+
+  private func processPhotoJPEG(
+    data: Data,
+    crop: CGRect?,
+    previewSize: CGSize,
+    quality: CGFloat
+  ) -> Data? {
+    guard let src = UIImage(data: data) else { return data }
+    if crop == nil, src.imageOrientation == .up { return data }
+
+    let upright: UIImage
+    if src.imageOrientation == .up {
+      upright = src
+    } else {
+      let renderer = UIGraphicsImageRenderer(size: src.size)
+      upright = renderer.image { _ in
+        src.draw(in: CGRect(origin: .zero, size: src.size))
+      }
+    }
+
+    guard let crop, previewSize.width > 0, previewSize.height > 0,
+      let cg = upright.cgImage
+    else {
+      return upright.jpegData(compressionQuality: quality)
+    }
+
+    let wp = CGFloat(cg.width), hp = CGFloat(cg.height)
+    let wv = previewSize.width, hv = previewSize.height
+    let rect: CGRect
+    if (wp >= hp) != (wv >= hv) {
+      let s = max(wv / hp, hv / wp)
+      let offU = (hp * s - wv) / 2
+      let offV = (wp * s - hv) / 2
+      let u0 = (crop.minX * wv + offU) / s
+      let u1 = (crop.maxX * wv + offU) / s
+      let v0 = (crop.minY * hv + offV) / s
+      let v1 = (crop.maxY * hv + offV) / s
+      let x = max(0, v0), y = max(0, hp - u1)
+      rect = CGRect(
+        x: x, y: y,
+        width: min(wp, v1) - x,
+        height: min(hp, hp - u0) - y)
+    } else {
+      let scale = max(wv / wp, hv / hp)
+      let offX = (wp * scale - wv) / 2
+      let offY = (hp * scale - hv) / 2
+      let x = max(0, (crop.minX * wv + offX) / scale)
+      let y = max(0, (crop.minY * hv + offY) / scale)
+      rect = CGRect(
+        x: x, y: y,
+        width: min(wp, (crop.maxX * wv + offX) / scale) - x,
+        height: min(hp, (crop.maxY * hv + offY) / scale) - y)
+    }
+
+    guard rect.width > 0, rect.height > 0, let cropped = cg.cropping(to: rect) else {
+      return upright.jpegData(compressionQuality: quality)
+    }
+    return UIImage(cgImage: cropped).jpegData(compressionQuality: quality)
   }
 
   public func capturePhoto(
@@ -787,7 +1206,16 @@ public class YOLOMultiTaskView: UIView {
   public func releaseResources() {
     onMultiTaskStream = nil
     cameraQueue.async { [weak self] in
-      self?.captureSession.stopRunning()
+      guard let self else { return }
+      self.captureSession.stopRunning()
+      self.pendingBurstCompletion = nil
+      self.pendingAnchorDirCompletion = nil
+      self.pendingAllFramesSplitCompletion = nil
+      self.burstState = .rolling
+      self.burstPreRoll = []
+      self.burstPostRoll = []
+      self.burstAnchorFrame = nil
+      self.burstAnchorStepIndex = nil
     }
     DispatchQueue.main.async { [weak self] in
       self?.previewLayer?.removeFromSuperlayer()
@@ -874,6 +1302,19 @@ extension YOLOMultiTaskView: AVCaptureVideoDataOutputSampleBufferDelegate, @unch
       }
       thirdQueue.async { p.predict(sampleBuffer: buf, onResultsListener: adapter, onInferenceTime: adapter) }
     }
+
+    // Burst ring buffer (0.5s cadence) and post-roll collection.
+    if burstState == .rolling,
+      now - lastRingWriteTime >= Self.ringInterval
+    {
+      lastRingWriteTime = now
+      sampleRingBuffer(from: sampleBuffer, quality: burstJpegQuality)
+    } else if burstState == .collecting,
+      now - lastRingWriteTime >= Self.ringInterval
+    {
+      lastRingWriteTime = now
+      collectPostRollFrame(from: sampleBuffer, quality: pendingBurstQuality)
+    }
   }
 }
 
@@ -885,81 +1326,43 @@ extension YOLOMultiTaskView: AVCapturePhotoCaptureDelegate {
     didFinishProcessingPhoto photo: AVCapturePhoto,
     error: Error?
   ) {
-    let completion = photoCaptureCompletion
+    let singleCompletion = photoCaptureCompletion
     photoCaptureCompletion = nil
-    let crop = pendingCrop
+
+    let cropForBurst = pendingBurstCrop
+    let qualityForBurst = pendingBurstQuality
     let previewSize = pendingPreviewSize
     let quality = pendingJpegQuality
+    let crop = pendingCrop
     pendingCrop = nil
-    guard error == nil, let data = photo.fileDataRepresentation() else {
-      completion?(nil)
-      return
-    }
-    // No crop requested → keep the original bytes (only normalize orientation).
-    guard let src = UIImage(data: data) else {
-      completion?(data)
-      return
-    }
-    if crop == nil, src.imageOrientation == .up {
-      completion?(data)
-      return
-    }
+    pendingBurstCrop = nil
 
-    // Bake orientation so the CGImage is upright (top-left origin) before cropping.
-    let upright: UIImage
-    if src.imageOrientation == .up {
-      upright = src
-    } else {
-      let renderer = UIGraphicsImageRenderer(size: src.size)
-      upright = renderer.image { _ in
-        src.draw(in: CGRect(origin: .zero, size: src.size))
+    guard error == nil, let rawData = photo.fileDataRepresentation() else {
+      if burstState == .triggered {
+        handleBurstAnchorPhoto(nil)
+      } else {
+        singleCompletion?(nil)
       }
-    }
-
-    guard let crop, previewSize.width > 0, previewSize.height > 0,
-      let cg = upright.cgImage
-    else {
-      completion?(upright.jpegData(compressionQuality: quality))
       return
     }
 
-    // Map the normalized preview rect into photo pixels under aspect-fill (cover).
-    let wp = CGFloat(cg.width), hp = CGFloat(cg.height)
-    let wv = previewSize.width, hv = previewSize.height
-    let rect: CGRect
-    if (wp >= hp) != (wv >= hv) {
-      // Preview is portrait but the still is landscape (photo connection is
-      // .landscapeRight = the preview rotated 90° clockwise). The preview's
-      // vertical axis (where the top/bottom bars live) maps to the photo's
-      // horizontal axis, so the crop must be transposed.
-      let s = max(wv / hp, hv / wp)
-      let offU = (hp * s - wv) / 2  // overflow along preview width  → photo height
-      let offV = (wp * s - hv) / 2  // overflow along preview height → photo width
-      let u0 = (crop.minX * wv + offU) / s
-      let u1 = (crop.maxX * wv + offU) / s
-      let v0 = (crop.minY * hv + offV) / s
-      let v1 = (crop.maxY * hv + offV) / s
-      let x = max(0, v0), y = max(0, hp - u1)
-      rect = CGRect(
-        x: x, y: y,
-        width: min(wp, v1) - x,
-        height: min(hp, hp - u0) - y)
-    } else {
-      let scale = max(wv / wp, hv / hp)
-      let offX = (wp * scale - wv) / 2
-      let offY = (hp * scale - hv) / 2
-      let x = max(0, (crop.minX * wv + offX) / scale)
-      let y = max(0, (crop.minY * hv + offY) / scale)
-      rect = CGRect(
-        x: x, y: y,
-        width: min(wp, (crop.maxX * wv + offX) / scale) - x,
-        height: min(hp, (crop.maxY * hv + offY) / scale) - y)
-    }
-
-    guard rect.width > 0, rect.height > 0, let cropped = cg.cropping(to: rect) else {
-      completion?(upright.jpegData(compressionQuality: quality))
+    if burstState == .triggered {
+      let jpeg = processPhotoJPEG(
+        data: rawData,
+        crop: cropForBurst,
+        previewSize: previewSize,
+        quality: qualityForBurst
+      )
+      handleBurstAnchorPhoto(jpeg)
       return
     }
-    completion?(UIImage(cgImage: cropped).jpegData(compressionQuality: quality))
+
+    let jpeg = processPhotoJPEG(
+      data: rawData,
+      crop: crop,
+      previewSize: previewSize,
+      quality: quality
+    )
+    singleCompletion?(jpeg)
   }
 }
