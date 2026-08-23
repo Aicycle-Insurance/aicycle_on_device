@@ -1,3 +1,7 @@
+## 0.1.11
+
+* Slow down auto-capture pacing so users have time to prepare
+
 ## 0.1.10
 
 * update AppColor

@@ -18,7 +18,7 @@ Ultralytics YOLO.
   s.source_files = 'aicycle_on_device/Sources/aicycle_on_device/**/*.{swift,h,m}'
   s.dependency 'Flutter'
   s.dependency 'UltralyticsYOLO', '>= 8.9.5', '< 9.0'
-  s.platform = :ios, '13.0'
+  s.platform = :ios, '15.0'
 
   # Flutter.framework does not contain a i386 slice.
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386' }

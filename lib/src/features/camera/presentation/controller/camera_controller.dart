@@ -27,7 +27,7 @@ enum InspectionPhase {
   /// → detectionReady. Sau 10 s không có detection → warning.
   scanning,
 
-  /// Detections found — showing "Xác nhận / Thiếu tổn thất". Sau 10 s không
+  /// Detections found — showing "Xác nhận / Thiếu tổn thất". Sau 5 s không
   /// bấm gì sẽ tự động xác nhận: chụp + hiển thị thông báo như bấm "Xác nhận"
   /// (không blink). Dùng cho cả ảnh tổng quan (overview) lẫn ảnh chi tiết
   /// (detail) — phân biệt bằng [_CameraControllerBase._inDetailStage].
@@ -50,9 +50,10 @@ enum InspectionPhase {
 /// Tên class biển số xe trong model car-part (khớp với logic native OCR).
 const _licensePlateClass = 'Biển số xe';
 
-/// Giữ message holdStill tối thiểu khoảng này, tránh OCR đọc nhanh khiến message
-/// flash qua quá nhanh user không kịp thấy.
-const _holdStillMinDuration = Duration(milliseconds: 800);
+/// Giữ message holdStill tối thiểu khoảng này trước khi auto-capture ảnh toàn
+/// cảnh — user cần thời gian đọc "Hãy giữ yên điện thoại…" và giữ máy ổn định,
+/// thay vì bị chụp ngay khi OCR vừa đọc được biển.
+const _holdStillMinDuration = Duration(seconds: 3);
 
 /// OCR đọc được biển số chỉ có hiệu lực rất ngắn. Nếu user lia máy làm biển
 /// lệch/lẹm sau frame OCR đó thì controller phải chờ OCR đọc lại ở frame mới,
@@ -69,9 +70,11 @@ const _carPartFlickerGrace = Duration(milliseconds: 600);
 /// auto-capture lại, để user kịp đọc và điều chỉnh camera.
 const _plateClearPromptMinDuration = Duration(seconds: 1);
 
-/// Khi đã căn đủ thân xe nhưng OCR chưa đọc được biển, nhắc điều chỉnh sớm
-/// thay vì để user giữ máy chờ mà không biết nguyên nhân.
-const _plateReadPromptDelay = Duration(seconds: 2);
+/// Khi đã căn đủ thân xe nhưng OCR chưa đọc được biển, nhắc điều chỉnh thay vì
+/// để user giữ máy chờ mà không biết nguyên nhân. Phải dài hơn
+/// [_holdStillMinDuration] để nhắc này không chen ngang nhịp giữ yên bình
+/// thường (OCR đọc được biển trong lúc đang chờ đủ 3s).
+const _plateReadPromptDelay = Duration(seconds: 5);
 
 /// Giữ thông báo chụp thành công đủ lâu để user kịp đọc trước khi chuyển sang
 /// hướng dẫn tiếp theo.
@@ -95,7 +98,7 @@ const _captureFreezeShrinkDuration = Duration(milliseconds: 450);
 const _damageAutoCaptureInterval = Duration(seconds: 5);
 
 /// Ở pha chụp ảnh chi tiết, chờ user đưa camera lại gần trước khi auto-capture.
-const _detailAutoCaptureDelay = Duration(seconds: 5);
+const _detailAutoCaptureDelay = Duration(seconds: 10);
 
 /// Giữ hướng dẫn "Di chuyển camera đến gần tổn thất…" (detailGuide) tối thiểu
 /// khoảng này trước khi cho phép detection mở lại màn xác nhận — để user kịp
@@ -268,7 +271,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// Current phase of the damage inspection sub-flow. null = not in inspection.
   InspectionPhase? _inspectionPhase;
 
-  /// Timer chạy ở detectionReady: cứ mỗi 10s tự động chụp ngầm một ảnh tổn
+  /// Timer chạy ở detectionReady: sau 5s tự động xác nhận (chụp ngầm) ảnh tổn
   /// thất cho tới khi user bấm "Xác nhận" hoặc "Thiếu tổn thất".
   Timer? _autoCaptureTimer;
 

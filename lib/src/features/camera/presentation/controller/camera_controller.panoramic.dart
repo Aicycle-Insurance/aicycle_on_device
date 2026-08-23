@@ -64,8 +64,9 @@ mixin _PanoramicMixin on _CameraControllerBase {
       // Bộ phận đã căn đủ — giữ yên để OCR đọc biển số. Chỉ chụp ảnh toàn cảnh
       // khi OCR đọc được biển (khung đủ rõ/đủ gần), tránh chụp ảnh mờ/xa.
       _holdStillShownAt ??= now;
-      // Giữ khung ổn định trong một nhịp ngắn trước khi auto-capture. OCR đã là
-      // tín hiệu chất lượng ảnh nên không cần cộng thêm nhiều giây chờ cố định.
+      // Giữ khung ổn định đủ [_holdStillMinDuration] (3s) trước khi auto-capture,
+      // để user kịp đọc "Hãy giữ yên điện thoại…" và chuẩn bị giữ máy — OCR đọc
+      // được biển ngay frame đầu cũng không làm ảnh bị chụp vội.
       final heldLongEnough =
           now.difference(_holdStillShownAt!) >= _holdStillMinDuration;
       if (plateReadable && heldLongEnough && platePromptVisibleLongEnough) {

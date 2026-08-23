@@ -68,7 +68,7 @@ flowchart TD
     H --> Q3{"OCR readable && đã giữ ≥3s<br/>&& prompt rõ biển đã hiện đủ 3s?"}
     Q3 -->|có| CAP["_triggerAutoCapture()"]
     Q3 -->|không| Q4{"_platePromptShown<br/>(đã chờ OCR 5s)?"}
-    Q4 -->|có| M3["msg: movePlateClearGuide (warning)<br/>'Vui lòng di chuyển camera để biển số rõ nét...'<br/>giữ tối thiểu 3s"]
+    Q4 -->|có| M3["msg: movePlateClearGuide (warning)<br/>'Vui lòng di chuyển camera để biển số rõ nét...'<br/>giữ tối thiểu 1s"]
     Q4 -->|không| M4["msg: holdStillGuide (loading)<br/>'Hãy giữ yên điện thoại. Đang nhận diện biển số'<br/>+ _ensurePlateReadTimer(5s)"]
 ```
 
@@ -96,7 +96,7 @@ stateDiagram-v2
     panoramicGuide: panoramicGuide\nmsg inspectDamageGuide\nchờ tổn thất hoặc chuyển góc
     scanning: scanning\nmsg null\nchờ tổn thất
     warning: warning\nmsg noDamageDetectedGuide\nhiện hand hint tới nút chụp\nkhông tự rời góc
-    detectionReady: detectionReady\nmsg damageDetectedGuide\nnút [Xác nhận] [Thiếu tổn thất]\nmỗi 10s chụp ngầm
+    detectionReady: detectionReady\nmsg damageDetectedGuide\nnút [Xác nhận] [Thiếu tổn thất]\nsau 5s tự động xác nhận
     capturingDamage: capturingDamage\ncapturePhoto khi Xác nhận
     detailGuide: detailGuide\nmsg detailPhotoGuide\ncó detection → xác nhận ngay\n10s chưa detect → auto-chụp 1 ảnh
     detailWait: detailWait\nsau auto-chụp detail\nchờ thêm 5s
@@ -115,7 +115,7 @@ stateDiagram-v2
     warning --> continueOrChange: user bấm chụp manual\ncapture thành công
     warning --> warning: không thao tác\nvẫn chờ detection
 
-    detectionReady --> detectionReady: không bấm gì sau mỗi 10s\nchụp ngầm, giữ tooltip
+    detectionReady --> capturingDamage: không bấm gì sau 5s\ntự động xác nhận (không blink)
     detectionReady --> capturingDamage: Xác nhận
     detectionReady --> continueOrChange: Thiếu tổn thất
 
@@ -148,8 +148,8 @@ flowchart TD
     W -->|"không bấm"| W
     W -->|"có detection"| D
 
-    D -->|"không bấm gì sau mỗi 10s"| DA["auto capture ngầm<br/>flashTick:false"]
-    DA --> D
+    D -->|"không bấm gì sau 5s"| DA["tự động xác nhận<br/>confirmDamage(flashTick:false)"]
+    DA --> E
     D -->|"Thiếu tổn thất"| G["msg: moveCameraToMissing<br/>giữ 10s rồi scanning"]
     D -->|"Xác nhận"| E["capturePhoto(immediate:true)<br/>msg captureSuccess 3s"]
 
@@ -159,8 +159,8 @@ flowchart TD
     I -->|"trong 5s có detection"| J
     I -->|"sau 5s vẫn chưa detect"| N
 
-    J -->|"không bấm gì sau mỗi 10s"| JA["auto capture ngầm<br/>flashTick:false"]
-    JA --> J
+    J -->|"không bấm gì sau 5s"| JA["tự động xác nhận<br/>confirmDamage(flashTick:false)"]
+    JA --> K
     J -->|"Thiếu tổn thất"| G
     J -->|"Xác nhận"| K["capturePhoto(immediate:true)<br/>msg captureSuccess 3s"]
     K --> N
@@ -231,7 +231,7 @@ flowchart TD
 | `*Guide` (`frontLeftGuide`, `frontRightGuide`, ...) | guide | GĐ1: chưa thấy biển / điều hướng góc |
 | `moveBackGuide` | info | GĐ1: thấy biển, chưa thấy cửa |
 | `holdStillGuide` | loading | GĐ1: đủ bộ phận, đang đọc biển; giữ ≥3s mới chụp |
-| `movePlateClearGuide` | warning | GĐ1: quá 5s chưa đọc được biển; giữ warning ≥3s |
+| `movePlateClearGuide` | warning | GĐ1: quá 5s chưa đọc được biển; giữ warning ≥1s |
 | `plateValidCaptured` | success | Chụp toàn cảnh xong; giữ 3s |
 | `inspectDamageGuide` | info | Vào `panoramicGuide` |
 | `damageDetectedGuide` | info | `detectionReady`, có nút `Xác nhận` / `Thiếu tổn thất` |
@@ -250,7 +250,7 @@ flowchart TD
 | Toàn cảnh từ biển số | `capturePhoto(immediate:true)` | Có | Sau khi OCR readable và giữ khung đủ 3s |
 | Thủ công (nút shutter) | `capturePhoto(immediate:true)` | Có | Nếu đang ở `noDamageDetectedGuide`, capture xong chuyển `continueToNextDamage` |
 | Xác nhận tổn thất (bấm tay) | `capturePhoto(immediate:true, flashTick:true)` | Có | Sau ảnh tổng quan → `detailGuide`; sau ảnh chi tiết → `continueToNextDamage` |
-| Auto-chụp ngầm khi đang xác nhận tổn thất | `capturePhoto(immediate:true, flashTick:false)` | Không | Mỗi 10s khi user không bấm gì, vẫn giữ `damageDetectedGuide` |
+| Tự động xác nhận tổn thất | `confirmDamage(flashTick:false)` | Không | Sau 5s user không bấm gì; đi đúng flow như bấm `Xác nhận` |
 | Auto-chụp ảnh chi tiết | `capturePhoto(immediate:true, flashTick:false)` | Không | Một lần sau 10s ở `detailGuide` nếu chưa detect; sau đó chờ thêm 5s |
 
 Blink được vẽ ngay trước lệnh native capture (`notifyListeners()` sau khi tăng

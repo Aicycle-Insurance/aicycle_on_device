@@ -55,7 +55,7 @@ mixin _InspectionMixin on _CameraControllerBase {
     _enterDetectionReady();
   }
 
-  /// Chuyển sang detectionReady: hiện xác nhận tổn thất + mở timer 10 s chụp ngầm.
+  /// Chuyển sang detectionReady: hiện xác nhận tổn thất + mở timer 5 s tự xác nhận.
   /// Dùng cho cả ảnh tổng quan (từ scanning) và ảnh chi tiết (từ detailGuide).
   /// [_inDetailStage] do bên gọi quyết định.
   void _enterDetectionReady() {
@@ -161,7 +161,7 @@ mixin _InspectionMixin on _CameraControllerBase {
   // ── Detail-photo stage ─────────────────────────────────────────────────────
 
   /// Sau khi chụp ảnh tổng quan: nhắc user lại gần để chụp ảnh chi tiết. Sau
-  /// 5 s chưa nhận diện thì tự chụp một ảnh; sau thêm 5 s vẫn chưa nhận diện
+  /// 10 s chưa nhận diện thì tự chụp một ảnh; sau thêm 5 s vẫn chưa nhận diện
   /// thì chuyển sang hướng dẫn tiếp tục di chuyển.
   void _enterDetailGuide() {
     _cancelNoDetectionWarningTimer();
@@ -180,7 +180,7 @@ mixin _InspectionMixin on _CameraControllerBase {
     _detailTimer = Timer(_detailAutoCaptureDelay, _onDetailTimeout);
   }
 
-  /// Hết 5 s ở pha detailGuide:
+  /// Hết 10 s ở pha detailGuide:
   ///   - Nếu đang có tổn thất trong khung → mở xác nhận ảnh chi tiết.
   ///   - Nếu chưa thấy tổn thất → chụp ngầm 1 ảnh chi tiết rồi chờ thêm 5 s.
   Future<void> _onDetailTimeout() async {

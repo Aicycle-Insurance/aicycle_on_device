@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
   name: "aicycle_on_device",
   platforms: [
-    .iOS("13.0")
+    .iOS("15.0")
   ],
   products: [
     .library(name: "aicycle-on-device", targets: ["aicycle_on_device"])
