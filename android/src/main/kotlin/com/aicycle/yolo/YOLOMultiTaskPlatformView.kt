@@ -31,10 +31,6 @@ class YOLOMultiTaskPlatformView(
     private val eventChannel: EventChannel
     private val methodChannel: MethodChannel
 
-    // Two-phase burst state (mirrors iOS SwiftYOLOMultiTaskPlatformView).
-    @Volatile private var pendingPostRollResult: MethodChannel.Result? = null
-    @Volatile private var completedBurstAllFrames: List<Map<String, Any>>? = null
-
     init {
         val params = args as? Map<*, *>
         val idStr = params?.get("viewId") as? String ?: viewId.toString()
@@ -130,53 +126,6 @@ class YOLOMultiTaskPlatformView(
                             result.error("bad_args", "active (bool) required", null)
                         }
                     }
-                    "captureBurstAnchor" -> {
-                        val args = call.arguments as? Map<*, *>
-                        val dirPath = args?.get("dirPath") as? String
-                        if (dirPath == null) {
-                            result.error("bad_args", "dirPath (String) is required", null)
-                            return@setMethodCallHandler
-                        }
-                        val quality = (args["quality"] as? Number)?.toInt() ?: 80
-                        val l = (args["cropLeft"] as? Number)?.toFloat()
-                        val t = (args["cropTop"] as? Number)?.toFloat()
-                        val r = (args["cropRight"] as? Number)?.toFloat()
-                        val b = (args["cropBottom"] as? Number)?.toFloat()
-                        val crop = if (l != null && t != null && r != null && b != null)
-                            android.graphics.RectF(l, t, r, b) else null
-
-                        multiTaskView.startBurstForCapture(
-                            dirPath = dirPath,
-                            crop = crop,
-                            quality = quality,
-                            onAnchorReady = { anchorMap ->
-                                if (anchorMap != null) {
-                                    result.success(anchorMap)
-                                } else {
-                                    result.error("capture_failed", "Burst anchor capture failed", null)
-                                }
-                            },
-                            onAllFramesReady = { allFrames ->
-                                val pending = pendingPostRollResult
-                                if (pending != null) {
-                                    pendingPostRollResult = null
-                                    completedBurstAllFrames = null
-                                    pending.success(allFrames)
-                                } else {
-                                    completedBurstAllFrames = allFrames
-                                }
-                            }
-                        )
-                    }
-                    "captureBurstAwaitPostRoll" -> {
-                        val completed = completedBurstAllFrames
-                        if (completed != null) {
-                            completedBurstAllFrames = null
-                            result.success(completed)
-                        } else {
-                            pendingPostRollResult = result
-                        }
-                    }
                     else -> result.notImplemented()
                 }
             }
@@ -250,9 +199,6 @@ class YOLOMultiTaskPlatformView(
         methodChannel.setMethodCallHandler(null)
         eventChannel.setStreamHandler(null)
         eventSink = null
-        pendingPostRollResult?.error("disposed", "PlatformView was disposed", null)
-        pendingPostRollResult = null
-        completedBurstAllFrames = null
     }
 }
 
