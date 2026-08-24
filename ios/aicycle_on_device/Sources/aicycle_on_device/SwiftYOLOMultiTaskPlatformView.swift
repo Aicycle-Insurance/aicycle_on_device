@@ -80,6 +80,9 @@ public final class SwiftYOLOMultiTaskPlatformView: NSObject,
       guard let self, let sink = self.eventSink else { return }
       sink(data)
     }
+    view.onSurroundingFrame = { [weak self] frameMap in
+      self?.methodChannel.invokeMethod("onBurstSurroundingFrame", arguments: frameMap)
+    }
 
     view.loadModels(
       detectPath: detectPath,
@@ -241,24 +244,7 @@ public final class SwiftYOLOMultiTaskPlatformView: NSObject,
               }
             }
           },
-          onAllReady: { [weak self] allMaps in
-            DispatchQueue.main.async {
-              guard let self else { return }
-              if let pending = self.pendingBurstPostRollResult {
-                self.pendingBurstPostRollResult = nil
-                if let maps = allMaps {
-                  pending(maps)
-                } else {
-                  pending(
-                    FlutterError(
-                      code: "capture_failed", message: "Burst post-roll failed", details: nil))
-                }
-              } else {
-                // Dart hasn't called captureBurstAwaitPostRoll yet — store frames.
-                self.completedBurstAllFrames = allMaps
-              }
-            }
-          }
+          onAllReady: nil
         )
       case "captureBurstAwaitPostRoll":
         if let completed = self.completedBurstAllFrames {

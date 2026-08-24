@@ -156,16 +156,7 @@ class YOLOMultiTaskPlatformView(
                                     result.error("capture_failed", "Burst anchor capture failed", null)
                                 }
                             },
-                            onAllFramesReady = { allFrames ->
-                                val pending = pendingPostRollResult
-                                if (pending != null) {
-                                    pendingPostRollResult = null
-                                    completedBurstAllFrames = null
-                                    pending.success(allFrames)
-                                } else {
-                                    completedBurstAllFrames = allFrames
-                                }
-                            }
+                            onAllFramesReady = null,
                         )
                     }
                     "captureBurstAwaitPostRoll" -> {
@@ -187,6 +178,11 @@ class YOLOMultiTaskPlatformView(
                 try { eventSink?.success(data) } catch (e: Exception) {
                     Log.e(TAG, "EventSink error: ${e.message}")
                 }
+            }
+        }
+        multiTaskView.onSurroundingFrame = { frameMap ->
+            mainHandler.post {
+                methodChannel.invokeMethod("onBurstSurroundingFrame", frameMap)
             }
         }
 
@@ -246,6 +242,7 @@ class YOLOMultiTaskPlatformView(
 
     override fun dispose() {
         onDispose?.invoke(viewId)
+        multiTaskView.onSurroundingFrame = null
         multiTaskView.release()
         methodChannel.setMethodCallHandler(null)
         eventChannel.setStreamHandler(null)

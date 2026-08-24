@@ -34,11 +34,13 @@ class BurstFrameInfo {
     required this.filePath,
     required this.stepIndex,
     required this.isCallEngine,
+    this.isPostRoll = false,
   });
 
   final String filePath;
   final int stepIndex;
   final bool isCallEngine;
+  final bool isPostRoll;
 
   factory BurstFrameInfo.fromMap(Map<String, dynamic> map) {
     return BurstFrameInfo(
@@ -46,6 +48,7 @@ class BurstFrameInfo {
       stepIndex: map['stepIndex'] as int,
       isCallEngine:
           map['isCallEngine'] as bool? ?? map['isCapture'] as bool? ?? false,
+      isPostRoll: map['isPostRoll'] as bool? ?? false,
     );
   }
 }
@@ -56,8 +59,65 @@ class MultiTaskYOLOController {
   MethodChannel? _channel;
   bool _torchEnabled = false;
 
-  void _attach(MethodChannel channel) => _channel = channel;
-  void _detach() => _channel = null;
+  final _pendingSurrounding = <BurstFrameInfo>[];
+  StreamController<BurstFrameInfo>? _surroundingController;
+  bool _surroundingListening = false;
+  int surroundingListenEpoch = 0;
+
+  void _attach(MethodChannel channel) {
+    _channel = channel;
+    _pendingSurrounding.clear();
+    _surroundingListening = false;
+    _surroundingController?.close();
+    _surroundingController = StreamController<BurstFrameInfo>.broadcast();
+    channel.setMethodCallHandler(_onNativeMethodCall);
+  }
+
+  void _detach() {
+    _channel?.setMethodCallHandler(null);
+    _channel = null;
+    _surroundingListening = false;
+    _pendingSurrounding.clear();
+    _surroundingController?.close();
+    _surroundingController = null;
+  }
+
+  Future<dynamic> _onNativeMethodCall(MethodCall call) async {
+    if (call.method != 'onBurstSurroundingFrame') return;
+    final args = call.arguments;
+    if (args is! Map) return;
+    final frame = BurstFrameInfo.fromMap(Map<String, dynamic>.from(args));
+    final controller = _surroundingController;
+    if (controller != null && _surroundingListening && !controller.isClosed) {
+      controller.add(frame);
+    } else {
+      _pendingSurrounding.add(frame);
+    }
+  }
+
+  /// Subscribe **before** [captureBurstAnchor] so pre-roll events are not dropped.
+  Stream<BurstFrameInfo> listenSurroundingFrames() {
+    final controller = _surroundingController;
+    if (controller == null || controller.isClosed) {
+      return const Stream.empty();
+    }
+    surroundingListenEpoch++;
+    _surroundingListening = true;
+    final pending = List<BurstFrameInfo>.from(_pendingSurrounding);
+    _pendingSurrounding.clear();
+    if (pending.isEmpty) return controller.stream;
+    return Stream<BurstFrameInfo>.multi((emitter) {
+      for (final frame in pending) {
+        emitter.add(frame);
+      }
+      final sub = controller.stream.listen(
+        emitter.add,
+        onError: emitter.addError,
+        onDone: emitter.close,
+      );
+      emitter.onCancel = () => sub.cancel();
+    });
+  }
 
   bool get isTorchEnabled => _torchEnabled;
 
@@ -158,9 +218,8 @@ class MultiTaskYOLOController {
   /// Two-phase burst — phase 1.
   ///
   /// Triggers the burst capture and returns the **anchor frame** as soon as it
-  /// is written to disk (~200 ms). Post-roll collection continues in the
-  /// background. Call [captureBurstAwaitPostRoll] to receive all 11 frames once
-  /// post-roll is complete (~2.5 s after this call).
+  /// is written to disk (~200 ms). Subscribe to [listenSurroundingFrames]
+  /// **before** this call so pre-roll (and later post-roll) frames are not dropped.
   ///
   /// Returns `null` on failure (camera not ready, capture error).
   Future<BurstFrameInfo?> captureBurstAnchor({

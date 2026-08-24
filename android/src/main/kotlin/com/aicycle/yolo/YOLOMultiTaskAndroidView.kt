@@ -69,9 +69,9 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         private const val THIRD_INSPECTION_INTERVAL_MS = 150L
 
         // Burst capture ring buffer
-        private const val RING_CAPACITY = 5
-        private const val POST_ROLL_COUNT = 5
-        private const val RING_INTERVAL_MS = 500L
+        private const val RING_CAPACITY = 10
+        private const val POST_ROLL_COUNT = 10
+        private const val RING_INTERVAL_MS = 1000L
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -82,6 +82,7 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     private val classifyExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val thirdExecutor:    ExecutorService = Executors.newSingleThreadExecutor()
     private val cameraExecutor:   ExecutorService = Executors.newSingleThreadExecutor()
+    private val burstIoExecutor:  ExecutorService = Executors.newFixedThreadPool(4)
 
     private var detectPredictor:   Predictor? = null
     private var classifyPredictor: Predictor? = null
@@ -134,6 +135,8 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
 
     /** Fired on the main thread for every inference result from any task. */
     var onMultiTaskStream: ((Map<String, Any>) -> Unit)? = null
+    /** Pre-roll and post-roll frames written to disk. Called on the main thread. */
+    var onSurroundingFrame: ((Map<String, Any>) -> Unit)? = null
 
     // Per-task FPS (calculated from wall-clock interval between results)
     private var detectLastMs:   Long = 0
@@ -166,6 +169,7 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     private var pendingBurstPreviewW = 0
     private var pendingBurstPreviewH = 0
     private var pendingAllFramesCallback: ((List<Map<String, Any>>?) -> Unit)? = null
+    @Volatile private var burstEpoch = 0
 
     init {
         // COMPATIBLE forces a TextureView so Stack overlays stay visible inside a Flutter AndroidView.
@@ -306,6 +310,7 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     fun release() {
         isStopped = true
         onMultiTaskStream = null
+        onSurroundingFrame = null
         // Unbind camera phải chạy trên main thread (yêu cầu của CameraX).
         if (Looper.myLooper() == Looper.getMainLooper()) {
             stopCameraInternal()
@@ -318,7 +323,7 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
 
         // Snapshot rồi xoá tham chiếu ngay để onFrame (đã bị chặn bởi isStopped)
         // không còn dùng tới. Việc đóng model nặng làm ở luồng nền bên dưới.
-        val executors = listOf(detectExecutor, classifyExecutor, thirdExecutor, cameraExecutor, ocrExecutor)
+        val executors = listOf(detectExecutor, classifyExecutor, thirdExecutor, cameraExecutor, ocrExecutor, burstIoExecutor)
         val predictors = listOf(detectPredictor, classifyPredictor, thirdPredictor)
         val ocr = ocrModel
         detectPredictor = null
@@ -787,25 +792,26 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
      * Two-phase burst — phase 1.
      *
      * Queued on cameraExecutor so it runs serially with [onFrame].
-     * Snapshots pre-roll from the ring buffer, fires [ImageCapture.takePicture] for a
-     * full-resolution anchor, writes the anchor to [dirPath]/frame_{stepIndex}.jpg, and
-     * delivers [onAnchorReady] on the main thread. Then begins collecting post-roll frames
-     * at 0.5 s cadence. When [POST_ROLL_COUNT] post-roll frames are ready, [onAllFramesReady]
-     * fires on the main thread with all frames (pre-roll + anchor + post-roll).
+     * Snapshots pre-roll from the ring buffer and persists those JPEGs in parallel via
+     * [onSurroundingFrame]. Fires [ImageCapture.takePicture] for a full-resolution
+     * anchor, writes the anchor to [dirPath]/frame_{stepIndex}.jpg, and delivers
+     * [onAnchorReady] on the main thread (~200ms). Post-roll frames stream the same
+     * way. When [POST_ROLL_COUNT] post-roll frames are ready, [onAllFramesReady]
+     * fires if non-null (skip batch rewrite when null).
      */
     fun startBurstForCapture(
         dirPath: String,
         crop: android.graphics.RectF?,
         quality: Int,
         onAnchorReady: (Map<String, Any>?) -> Unit,
-        onAllFramesReady: ((List<Map<String, Any>>?) -> Unit)?,
+        onAllFramesReady: ((List<Map<String, Any>>?) -> Unit)? = null,
     ) {
         cameraExecutor.execute {
             if (burstState != BurstState.ROLLING) {
-                Log.w(TAG, "startBurstForCapture: burst already in progress, ignoring")
-                mainHandler.post { onAnchorReady(null) }
-                return@execute
+                cancelBurstIfActive()
             }
+            burstEpoch++
+            val epoch = burstEpoch
 
             burstPreRoll = ringBuffer.snapshot()
             burstState = BurstState.TRIGGERED
@@ -816,6 +822,8 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
             pendingBurstPreviewW = previewView.width
             pendingBurstPreviewH = previewView.height
             burstJpegQuality = quality
+
+            persistPreRollFrames(burstPreRoll, dirPath, crop, quality, epoch)
 
             val ic = imageCaptureUseCase
             if (ic == null) {
@@ -830,6 +838,10 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
 
             ic.takePicture(cameraExecutor, object : ImageCapture.OnImageCapturedCallback() {
                 override fun onCaptureSuccess(image: ImageProxy) {
+                    if (burstEpoch != epoch) {
+                        image.close()
+                        return
+                    }
                     try {
                         val stepIdx = ++burstStepIndex
                         val rotDeg = image.imageInfo.rotationDegrees
@@ -872,11 +884,51 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
                 }
 
                 override fun onError(exception: ImageCaptureException) {
+                    if (burstEpoch != epoch) return
                     Log.e(TAG, "burst anchor ImageCapture error: ${exception.message}")
                     burstState = BurstState.ROLLING
                     mainHandler.post { onAnchorReady(null) }
                 }
             })
+        }
+    }
+
+    private fun persistPreRollFrames(
+        preRoll: List<BurstFrame>,
+        dirPath: String,
+        crop: android.graphics.RectF?,
+        quality: Int,
+        epoch: Int,
+    ) {
+        for (frame in preRoll) {
+            burstIoExecutor.execute {
+                if (burstEpoch != epoch) return@execute
+                try {
+                    val finalBytes = processCaptured(
+                        frame.data,
+                        frame.rotationDegrees,
+                        crop,
+                        frame.previewWidth,
+                        frame.previewHeight,
+                        quality,
+                    )
+                    val file = java.io.File(dirPath, "frame_${frame.stepIndex}.jpg")
+                    file.parentFile?.mkdirs()
+                    file.writeBytes(finalBytes)
+                    val frameMap = mapOf(
+                        "filePath" to file.absolutePath,
+                        "stepIndex" to frame.stepIndex,
+                        "isCallEngine" to false,
+                        "isPostRoll" to false,
+                    )
+                    cameraExecutor.execute {
+                        if (burstEpoch != epoch) return@execute
+                        mainHandler.post { onSurroundingFrame?.invoke(frameMap) }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "failed to write pre-roll frame ${frame.stepIndex}: ${e.message}")
+                }
+            }
         }
     }
 
@@ -888,10 +940,46 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
 
     private fun collectPostRollFrame(bitmap: Bitmap, rotationDegrees: Int, previewW: Int, previewH: Int) {
         burstStepIndex++
+        val idx = burstStepIndex
+        val epoch = burstEpoch
         val jpegBytes = bitmapToJpeg(bitmap, burstJpegQuality) ?: return
-        burstPostRoll.add(BurstFrame(jpegBytes, burstStepIndex, isCallEngine = false, rotationDegrees, previewW, previewH))
-        if (burstPostRoll.size >= POST_ROLL_COUNT) {
-            finalizeBurst()
+        val rotDeg = rotationDegrees
+        val crop = pendingBurstCrop
+        val quality = pendingBurstQuality
+        val dirPath = pendingBurstDirPath
+        burstIoExecutor.execute {
+            if (burstEpoch != epoch) return@execute
+            try {
+                val finalBytes = processCaptured(jpegBytes, rotDeg, crop, previewW, previewH, quality)
+                val file = java.io.File(dirPath, "frame_${idx}.jpg")
+                file.parentFile?.mkdirs()
+                file.writeBytes(finalBytes)
+                val frameMap = mapOf(
+                    "filePath" to file.absolutePath,
+                    "stepIndex" to idx,
+                    "isCallEngine" to false,
+                    "isPostRoll" to true,
+                )
+                cameraExecutor.execute {
+                    if (burstEpoch != epoch || burstState != BurstState.COLLECTING) return@execute
+                    burstPostRoll.add(
+                        BurstFrame(
+                            jpegBytes,
+                            idx,
+                            isCallEngine = false,
+                            rotationDegrees = rotDeg,
+                            previewWidth = previewW,
+                            previewHeight = previewH,
+                        ),
+                    )
+                    mainHandler.post { onSurroundingFrame?.invoke(frameMap) }
+                    if (burstPostRoll.size >= POST_ROLL_COUNT) {
+                        finalizeBurst()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "failed to write post-roll frame $idx: ${e.message}")
+            }
         }
     }
 
@@ -911,8 +999,11 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         burstAnchorFrame = null
         pendingAllFramesCallback = null
 
-        if (anchor == null || callback == null) {
-            mainHandler.post { callback?.invoke(emptyList()) }
+        if (callback == null) {
+            return
+        }
+        if (anchor == null) {
+            mainHandler.post { callback.invoke(emptyList()) }
             return
         }
 
@@ -966,6 +1057,7 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     /** Cancels any in-progress burst, calling [pendingAllFramesCallback] with null.
      *  Must be called from cameraExecutor or before cameraExecutor is shut down. */
     private fun cancelBurstIfActive() {
+        burstEpoch++
         val cb = pendingAllFramesCallback
         pendingAllFramesCallback = null
         if (burstState != BurstState.ROLLING) {

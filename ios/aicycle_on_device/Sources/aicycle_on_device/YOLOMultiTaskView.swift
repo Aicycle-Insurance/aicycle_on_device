@@ -158,9 +158,9 @@ public class YOLOMultiTaskView: UIView {
 
   // MARK: Burst capture ring buffer (cameraQueue only)
 
-  private static let ringCapacity = 5
-  private static let postRollCount = 5
-  private static let ringInterval: CFTimeInterval = 0.5
+  private static let ringCapacity = 10
+  private static let postRollCount = 10
+  private static let ringInterval: CFTimeInterval = 1.0
   private static let jpegEncodeContext = CIContext()
 
   private let ringBuffer = FrameRingBuffer(capacity: ringCapacity)
@@ -183,12 +183,16 @@ public class YOLOMultiTaskView: UIView {
   private var pendingAnchorDirCompletion: (([String: Any]?) -> Void)?
   private var pendingAllFramesSplitCompletion: (([[String: Any]]?) -> Void)?
   private var burstSplitDirPath: String = ""
+  /// Invalidates in-flight pre/post disk callbacks when a new burst starts or resources are released.
+  private var burstEpoch: UInt64 = 0
 
   // MARK: Callback
 
   /// Called on the main thread with a stream-data dict. Keys: "type", "fps", "cameraFps",
   /// "processingTimeMs", plus task-specific keys ("detections", "classification", etc.).
   var onMultiTaskStream: (([String: Any]) -> Void)?
+  /// Pre-roll and post-roll frames written to disk. Called on the main thread.
+  var onSurroundingFrame: (([String: Any]) -> Void)?
 
   // MARK: Loading indicator
 
@@ -812,16 +816,15 @@ public class YOLOMultiTaskView: UIView {
   }
 
   /// Two-phase burst entry point. Triggers anchor capture and calls `onAnchorReady`
-  /// as soon as the anchor JPEG is written to disk (~200ms). Post-roll continues
-  /// collecting in the background; `onAllReady` fires when all 11 frames are on disk.
-  /// Use this instead of `captureBurstToFiles` when the caller needs to start a UI
-  /// freeze overlay immediately on anchor availability.
+  /// as soon as the single anchor JPEG is written to disk (~200ms). Pre-roll frames
+  /// are persisted in parallel from T=0 via `onSurroundingFrame`; post-roll streams
+  /// the same way. `onAllReady` is optional (nil = skip batch write in finalize).
   public func startBurstForCapture(
     dirPath: String,
     crop: CGRect?,
     quality: CGFloat,
     onAnchorReady: @escaping ([String: Any]?) -> Void,
-    onAllReady: @escaping ([[String: Any]]?) -> Void
+    onAllReady: (([[String: Any]]?) -> Void)? = nil
   ) {
     DispatchQueue.main.async { [weak self] in
       guard let self else {
@@ -835,6 +838,8 @@ public class YOLOMultiTaskView: UIView {
           return
         }
         self.deliverInFlightBurstIfNeeded()
+        self.burstEpoch += 1
+        let epoch = self.burstEpoch
 
         self.burstSplitDirPath = dirPath
         self.pendingBurstCrop = crop
@@ -843,6 +848,7 @@ public class YOLOMultiTaskView: UIView {
         self.burstJpegQuality = quality
 
         self.burstPreRoll = self.ringBuffer.snapshot()
+        self.persistPreRollFrames(self.burstPreRoll, dirPath: dirPath, epoch: epoch)
         self.burstPostRoll = []
         self.burstAnchorFrame = nil
         let anchorIdx = self.stepIndex
@@ -865,6 +871,7 @@ public class YOLOMultiTaskView: UIView {
     let hasPendingSingle = pendingBurstCompletion != nil
     let hasPendingSplit = pendingAnchorDirCompletion != nil || pendingAllFramesSplitCompletion != nil
     guard hasPendingSingle || hasPendingSplit else { return }
+    burstEpoch += 1
 
     let completion = pendingBurstCompletion
     pendingBurstCompletion = nil
@@ -1010,18 +1017,54 @@ public class YOLOMultiTaskView: UIView {
     }
   }
 
+  private func persistPreRollFrames(_ frames: [BurstFrame], dirPath: String, epoch: UInt64) {
+    guard !frames.isEmpty else { return }
+    DispatchQueue.global(qos: .utility).async { [weak self] in
+      try? FileManager.default.createDirectory(
+        atPath: dirPath, withIntermediateDirectories: true)
+      for frame in frames {
+        let path = (dirPath as NSString).appendingPathComponent("\(frame.stepIndex).jpg")
+        try? frame.data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        let frameMap: [String: Any] = [
+          "filePath": path,
+          "stepIndex": frame.stepIndex,
+          "isCallEngine": false,
+          "isPostRoll": false,
+        ]
+        self?.cameraQueue.async { [weak self] in
+          guard let self, self.burstEpoch == epoch else { return }
+          let cb = self.onSurroundingFrame
+          DispatchQueue.main.async { cb?(frameMap) }
+        }
+      }
+    }
+  }
+
   private func collectPostRollFrame(from sampleBuffer: CMSampleBuffer, quality: CGFloat) {
     let idx = stepIndex
     stepIndex += 1
     let buf = sampleBuffer
+    let dirPath = burstSplitDirPath
+    let epoch = burstEpoch
     DispatchQueue.global(qos: .utility).async { [weak self] in
       guard let pixelBuffer = CMSampleBufferGetImageBuffer(buf),
         let jpegData = Self.encodeJPEG(from: pixelBuffer, quality: quality)
       else { return }
+      let path = (dirPath as NSString).appendingPathComponent("\(idx).jpg")
+      try? jpegData.write(to: URL(fileURLWithPath: path), options: .atomic)
+      let frameMap: [String: Any] = [
+        "filePath": path,
+        "stepIndex": idx,
+        "isCallEngine": false,
+        "isPostRoll": true,
+      ]
       let frame = BurstFrame(data: jpegData, stepIndex: idx, isCallEngine: false)
       self?.cameraQueue.async { [weak self] in
         guard let self else { return }
+        guard self.burstEpoch == epoch, self.burstState == .collecting else { return }
         self.burstPostRoll.append(frame)
+        let cb = self.onSurroundingFrame
+        DispatchQueue.main.async { cb?(frameMap) }
         if self.burstPostRoll.count >= Self.postRollCount {
           self.finalizeBurst()
         }
@@ -1205,8 +1248,10 @@ public class YOLOMultiTaskView: UIView {
   /// even if deinit is delayed by a retain cycle in the Flutter EventChannel stream handler.
   public func releaseResources() {
     onMultiTaskStream = nil
+    onSurroundingFrame = nil
     cameraQueue.async { [weak self] in
       guard let self else { return }
+      self.burstEpoch += 1
       self.captureSession.stopRunning()
       self.pendingBurstCompletion = nil
       self.pendingAnchorDirCompletion = nil

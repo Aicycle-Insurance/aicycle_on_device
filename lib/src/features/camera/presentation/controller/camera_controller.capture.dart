@@ -61,48 +61,26 @@ mixin _CaptureMixin on _CameraControllerBase {
         },
       );
 
-      if (Platform.isIOS) {
-        final dir = await PhotoSessionCache.instance.createBurstDir(_sessionId);
-
-        // Phase 1: capture anchor photo only (~200ms).
-        // Freeze overlay starts immediately — same UX as before burst was added.
-        final anchor = await yoloController.captureBurstAnchor(
-          dirPath: dir,
-          cropTop: _cropTop,
-          cropBottom: _cropBottom,
-          quality: 80,
-        );
-        if (anchor == null) return null;
-
-        _capturedPhotos.putIfAbsent(seg, () => []).add(anchor.filePath);
-        if (!_require4Angles) _completedSegments.add(seg);
-        _startCaptureFreeze(anchor.filePath);
-
-        // Enqueue anchor immediately so it uploads first — Host App receives
-        // the onImageUploaded callback as fast as the old single-photo path.
-        await PhotoUploadQueue.instance.enqueuePhoto(
-          sessionId: _sessionId,
-          angleId: seg,
-          photoIndex: anchor.stepIndex,
-          filePath: anchor.filePath,
-          imageOrder: anchor.stepIndex,
-          isCallEngine: true,
-          latitude: latitude,
-          longitude: longitude,
-        );
-
-        // Phase 2: collect post-roll + enqueue surrounding burst frames in
-        // background (~2.5s). Anchor is excluded (already enqueued above).
-        unawaited(_awaitAndEnqueueBurstFrames(
-          angleId: seg,
-          anchorFilePath: anchor.filePath,
-        ));
-
-        return anchor.filePath;
-      }
-
-      // Android: two-phase burst (same as iOS).
       final dir = await PhotoSessionCache.instance.createBurstDir(_sessionId);
+
+      // Subscribe before shutter so native pre-roll events are not dropped.
+      final surroundingInbox = StreamController<BurstFrameInfo>();
+      final surroundingSub = yoloController.listenSurroundingFrames().listen(
+        surroundingInbox.add,
+        onError: surroundingInbox.addError,
+        onDone: () {
+          if (!surroundingInbox.isClosed) surroundingInbox.close();
+        },
+      );
+      final surroundingEpoch = yoloController.surroundingListenEpoch;
+      unawaited(_drainSurrounding(
+        surroundingInbox.stream,
+        angleId: seg,
+        epoch: surroundingEpoch,
+      ).whenComplete(() {
+        surroundingSub.cancel();
+        if (!surroundingInbox.isClosed) surroundingInbox.close();
+      }));
 
       // Phase 1: capture anchor photo only (~200ms).
       // Freeze overlay starts immediately — same UX as before burst was added.
@@ -118,7 +96,8 @@ mixin _CaptureMixin on _CameraControllerBase {
       if (!_require4Angles) _completedSegments.add(seg);
       _startCaptureFreeze(anchor.filePath);
 
-      // Enqueue anchor immediately so it uploads first.
+      // Enqueue anchor immediately so it uploads first — Host App receives
+      // the onImageUploaded callback as fast as the old single-photo path.
       await PhotoUploadQueue.instance.enqueuePhoto(
         sessionId: _sessionId,
         angleId: seg,
@@ -130,13 +109,6 @@ mixin _CaptureMixin on _CameraControllerBase {
         longitude: longitude,
       );
 
-      // Phase 2: collect post-roll + enqueue surrounding burst frames in
-      // background (~2.5s). Anchor is excluded (already enqueued above).
-      unawaited(_awaitAndEnqueueBurstFrames(
-        angleId: seg,
-        anchorFilePath: anchor.filePath,
-      ));
-
       return anchor.filePath;
     } catch (_) {
       return null;
@@ -147,48 +119,36 @@ mixin _CaptureMixin on _CameraControllerBase {
     }
   }
 
-  /// Awaits native post-roll completion then enqueues the surrounding burst
-  /// frames (pre-roll + post-roll) for background upload.  The anchor photo
-  /// identified by [anchorFilePath] is skipped because it was already enqueued
-  /// in Phase 1 of [capturePhoto].
-  /// Fire-and-forget from [capturePhoto]; errors are logged but not re-thrown.
-  Future<void> _awaitAndEnqueueBurstFrames({
-    required int angleId,
-    required String anchorFilePath,
-  }) async {
-    try {
-      final frames = await yoloController.captureBurstAwaitPostRoll();
-      if (frames.isEmpty) return;
-      // Anchor already enqueued in Phase 1 — only enqueue surrounding frames.
-      final burstOnly =
-          frames.where((f) => f.filePath != anchorFilePath).toList();
-      if (burstOnly.isEmpty) return;
-      await _enqueueBurstFrames(burstOnly, angleId: angleId);
-    } catch (error, stackTrace) {
-      debugPrint('AICycle burst post-roll enqueue failed: $error\n$stackTrace');
-    }
-  }
+  static const _burstPostRollCount = 10;
 
-  Future<void> _enqueueBurstFrames(
-    List<BurstFrameInfo> frames, {
+  /// Streams pre-roll + post-roll frames into the upload queue without blocking
+  /// freeze / [_isCapturing]. Stops after [_burstPostRollCount] post-roll
+  /// frames, or when a newer burst listen starts, or the native stream closes.
+  Future<void> _drainSurrounding(
+    Stream<BurstFrameInfo> stream, {
     required int angleId,
+    required int epoch,
   }) async {
     try {
-      final sorted = [...frames]
-        ..sort((a, b) => a.stepIndex.compareTo(b.stepIndex));
-      for (final frame in sorted) {
+      var postCount = 0;
+      await for (final frame in stream) {
+        if (epoch != yoloController.surroundingListenEpoch) break;
+        if (frame.isCallEngine) continue;
         await PhotoUploadQueue.instance.enqueuePhoto(
           sessionId: _sessionId,
           angleId: angleId,
           photoIndex: frame.stepIndex,
           filePath: frame.filePath,
           imageOrder: frame.stepIndex,
-          isCallEngine: frame.isCallEngine,
+          isCallEngine: false,
         );
+        if (frame.isPostRoll) {
+          postCount++;
+          if (postCount >= _burstPostRollCount) break;
+        }
       }
-      await PhotoUploadQueue.instance.schedulePendingUploads();
     } catch (error, stackTrace) {
-      debugPrint('AICycle burst enqueue failed: $error\n$stackTrace');
+      debugPrint('AICycle burst surrounding enqueue failed: $error\n$stackTrace');
     }
   }
 
