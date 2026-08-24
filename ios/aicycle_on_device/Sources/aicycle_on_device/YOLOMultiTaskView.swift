@@ -137,12 +137,16 @@ public class YOLOMultiTaskView: UIView {
   // (chạy mỗi frame khi predictor rảnh). Máy càng nóng, nhịp càng thưa → GPU/ANE
   // có thời gian nghỉ giữa các lần inference.
   //
-  // Ở bậc .normal các giá trị giữ nguyên hành vi cũ: classify ~6–7 fps, carPart
-  // tối đa ~10 fps khi căn toàn cảnh rồi hạ về ~6–7 fps khi soi tổn thất,
-  // carDamage/OCR không giới hạn.
+  // Ở bậc .normal: classify ~6–7 fps, carPart tối đa ~10 fps khi căn toàn cảnh
+  // rồi hạ về ~6–7 fps khi soi tổn thất, carDamage ~12.5 fps, OCR không giới hạn.
 
-  /// carDamage — model chính, tốn nhiều nhất vì chạy mỗi frame khi rảnh.
-  private static let detectMinInferenceIntervals: [CFTimeInterval] = [0, 0.10, 0.20, 0.40]
+  /// carDamage — model chính, tốn nhiều nhất. Trước đây chạy MỖI FRAME (~30 fps)
+  /// khi máy mát; nay chặn ở ~12.5 fps ngay từ bậc .normal.
+  ///
+  /// 12.5 fps là đủ: luồng nghiệp vụ chỉ cần 5 frame liên tiếp có tổn thất mới
+  /// mở xác nhận → 400 ms, người dùng không nhận ra khác biệt. Đổi lại GPU/ANE
+  /// có khoảng nghỉ giữa các lần inference thay vì chạy bão hoà.
+  private static let detectMinInferenceIntervals: [CFTimeInterval] = [0.08, 0.15, 0.25, 0.40]
 
   /// carCorner.
   private static let classifyMinInferenceIntervals: [CFTimeInterval] = [0.15, 0.25, 0.35, 0.50]

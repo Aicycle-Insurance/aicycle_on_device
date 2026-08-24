@@ -69,16 +69,24 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         // hạn (chạy mỗi frame khi predictor rảnh). Máy càng nóng, nhịp càng thưa
         // → GPU/NPU có thời gian nghỉ giữa các lần inference.
         //
-        // Ở bậc NORMAL các giá trị giữ nguyên hành vi cũ: classify ~6–7 fps,
-        // carPart tối đa ~10 fps khi căn toàn cảnh rồi hạ về ~6–7 fps khi soi
-        // tổn thất, carDamage/OCR không giới hạn.
+        // Ở bậc NORMAL: classify ~6–7 fps, carPart tối đa ~10 fps khi căn toàn
+        // cảnh rồi hạ về ~6–7 fps khi soi tổn thất, carDamage ~12.5 fps, OCR
+        // không giới hạn.
 
         // Context stream (inspection phase background upload)
         private const val STREAM_INTERVAL_MS = 1000L
         private const val STREAM_JPEG_QUALITY = 70
 
-        /** carDamage — model chính, tốn nhiều nhất vì chạy mỗi frame khi rảnh. */
-        private val DETECT_MIN_INTERVAL_MS = longArrayOf(0L, 100L, 200L, 400L)
+        /**
+         * carDamage — model chính, tốn nhiều nhất. Trước đây chạy MỖI FRAME
+         * (~30 fps) khi máy mát; nay chặn ở ~12.5 fps ngay từ bậc NORMAL.
+         *
+         * 12.5 fps là đủ: luồng nghiệp vụ chỉ cần [_damageConfirmFrameCount] = 5
+         * frame liên tiếp có tổn thất mới mở xác nhận → 400 ms, người dùng
+         * không nhận ra khác biệt. Đổi lại GPU có khoảng nghỉ giữa các lần
+         * inference thay vì chạy bão hoà.
+         */
+        private val DETECT_MIN_INTERVAL_MS = longArrayOf(80L, 150L, 250L, 400L)
 
         /** carCorner. */
         private val CLASSIFY_MIN_INTERVAL_MS = longArrayOf(150L, 250L, 350L, 500L)
@@ -93,6 +101,7 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         // OCR phải chạy nhanh hơn _plateReadFreshDuration (1200 ms) phía Dart,
         // nếu không cờ "đọc được biển" hết hạn trước khi đủ điều kiện chụp.
         private val OCR_MIN_INTERVAL_MS = longArrayOf(0L, 0L, 400L, 700L)
+
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())

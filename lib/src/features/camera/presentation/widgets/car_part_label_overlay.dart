@@ -44,6 +44,37 @@ class _CarPartLabelPainter extends CustomPainter {
 
   final List<DetectionResult> detections;
 
+  /// [TextPainter] đã layout sẵn cho từng nhãn, dùng lại giữa các lần vẽ.
+  ///
+  /// Painter này chạy lại theo TỪNG FRAME inference; tập nhãn thì cố định
+  /// ([CarPartLabelOverlay._partDisplayNames], 9 mục) và nội dung không đổi,
+  /// nên dựng + `layout()` lại mỗi lần vẽ là công thừa. Cache sống theo process
+  /// và bị xoá khi cỡ chữ đổi (ScreenUtil tính lại lúc đổi kích thước màn hình).
+  static final Map<String, TextPainter> _labelPainters = {};
+  static double? _cachedFontSize;
+
+  static TextPainter _painterFor(String label, double fontSize) {
+    if (_cachedFontSize != fontSize) {
+      _cachedFontSize = fontSize;
+      _labelPainters.clear();
+    }
+    return _labelPainters.putIfAbsent(
+      label,
+      () => TextPainter(
+        text: TextSpan(
+          text: label,
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: fontSize,
+            fontWeight: FontWeight.w500,
+            height: 1,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout(),
+    );
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
     // Camera frames là landscape; canvas Flutter là portrait (app khoá dọc),
@@ -53,6 +84,7 @@ class _CarPartLabelPainter extends CustomPainter {
     //   screen_x = (1 - centerY) * W,  screen_y = centerX * H
     final w = size.width;
     final h = size.height;
+    final fontSize = 12.sp;
 
     for (final d in detections) {
       final label = CarPartLabelOverlay._partDisplayNames[d.className];
@@ -63,18 +95,7 @@ class _CarPartLabelPainter extends CustomPainter {
       final dx = (1 - box.centerY) * w;
       final dy = box.centerX * h;
 
-      final tp = TextPainter(
-        text: TextSpan(
-          text: label,
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 12.sp,
-            fontWeight: FontWeight.w500,
-            height: 1,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
+      final tp = _painterFor(label, fontSize);
 
       const padH = 12.0;
       const padV = 6.0;

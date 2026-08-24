@@ -46,6 +46,9 @@ mixin _CaptureMixin on _CameraControllerBase {
       /// Chụp tự động quá nhanh, người dùng chưa kịp đọc message -> delay 3s.
       /// Chụp thủ công ([immediate]) thì chụp ngay.
       if (!immediate) await Future.delayed(const Duration(seconds: 3));
+      // 3 s là đủ để user bấm thoát; _flashCornerSuccess bên dưới notify và mở
+      // Timer nên phải dừng ở đây.
+      if (_stopped) return null;
       // Paint the white shutter-blink NGAY trước khi gọi native capture (có thể
       // chiếm thời gian) để blink hiện đồng bộ với khoảnh khắc chụp, thay vì chỉ
       // hiện sau khi capture xong.

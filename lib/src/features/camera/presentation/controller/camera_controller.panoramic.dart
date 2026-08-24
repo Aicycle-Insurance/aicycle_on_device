@@ -117,6 +117,8 @@ mixin _PanoramicMixin on _CameraControllerBase {
     // Nhịp chờ 3s đã nằm ở [_holdStillCaptureTimer] rồi ⇒ chụp NGAY (immediate,
     // bỏ delay 3s trong capturePhoto), tránh cộng dồn thành 6s.
     await capturePhoto(immediate: true);
+    // Chụp mất vài trăm ms; mọi thứ dưới đây đều notify hoặc đổi state.
+    if (_stopped) return;
     if (_activeSegmentIndex != null) {
       _panoramicCapturedSegments.add(_activeSegmentIndex!);
       // Chụp toàn cảnh xong là góc đó đã được tính hoàn thành.

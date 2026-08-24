@@ -1,15 +1,6 @@
-## Unreleased
+## 0.1.12
 
-* Add a thermal governor: native watches the device thermal state and throttles
-  each model's inference rate as the device heats up (carDamage 10/5/2.5 fps,
-  carCorner, carPart and license-plate OCR scaled alongside). Behaviour at the
-  normal tier is unchanged. The current tier is streamed to Dart as a
-  `type == "thermal"` event and exposed via `CameraController.thermalStatus`.
-* Split the camera overlay rebuilds: damage boxes and car-part labels now ride
-  their own `ValueNotifier`s, so a per-frame inference result no longer rebuilds
-  the top bar, bottom bar, progress ring, tooltip and capture overlays.
-* Resolve the bottom-bar thumbnail path once per capture instead of running two
-  `File.existsSync()` calls on every rebuild.
+- Improve performance and stability
 
 ## 0.1.11
 
