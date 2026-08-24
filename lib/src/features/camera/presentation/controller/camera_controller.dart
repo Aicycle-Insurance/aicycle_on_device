@@ -55,7 +55,7 @@ const _licensePlateClass = 'Biển số xe';
 /// Giữ message holdStill tối thiểu khoảng này trước khi auto-capture ảnh toàn
 /// cảnh — user cần thời gian đọc "Hãy giữ yên điện thoại…" và giữ máy ổn định,
 /// thay vì bị chụp ngay khi OCR vừa đọc được biển.
-const _holdStillMinDuration = Duration(seconds: 3);
+const _holdStillMinDuration = Duration(seconds: 7);
 
 /// OCR đọc được biển số chỉ có hiệu lực rất ngắn. Nếu user lia máy làm biển
 /// lệch/lẹm sau frame OCR đó thì controller phải chờ OCR đọc lại ở frame mới,
@@ -75,8 +75,8 @@ const _plateClearPromptMinDuration = Duration(seconds: 1);
 /// Khi đã căn đủ thân xe nhưng OCR chưa đọc được biển, nhắc điều chỉnh thay vì
 /// để user giữ máy chờ mà không biết nguyên nhân. Phải dài hơn
 /// [_holdStillMinDuration] để nhắc này không chen ngang nhịp giữ yên bình
-/// thường (OCR đọc được biển trong lúc đang chờ đủ 3s).
-const _plateReadPromptDelay = Duration(seconds: 5);
+/// thường (OCR đọc được biển trong lúc đang chờ đủ 7s).
+const _plateReadPromptDelay = Duration(seconds: 9);
 
 /// Giữ thông báo chụp thành công đủ lâu để user kịp đọc trước khi chuyển sang
 /// hướng dẫn tiếp theo.
@@ -267,11 +267,11 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// hiện, rồi CHẮC CHẮN chụp ảnh toàn cảnh.
   ///
   /// Timer (không phải kiểm tra theo frame) vì lời hứa với user là tuyệt đối:
-  /// đã hiện "Hãy giữ yên…" thì đúng 3s sau phải có ảnh, kể cả khi bộ phận rời
+  /// đã hiện "Hãy giữ yên…" thì đúng 7s sau phải có ảnh, kể cả khi bộ phận rời
   /// khung, OCR không đọc được biển, hay stream ngừng bắn frame.
   Timer? _holdStillCaptureTimer;
 
-  /// Đang trong nhịp 3s đã hứa chụp → message bị "đóng băng" ở "Hãy giữ yên…"
+  /// Đang trong nhịp 7s đã hứa chụp → message bị "đóng băng" ở "Hãy giữ yên…"
   /// để user không thấy tooltip khác nhảy vào giữa lúc chờ.
   bool get _holdStillCapturePending => _holdStillCaptureTimer != null;
 

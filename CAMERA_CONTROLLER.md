@@ -228,7 +228,7 @@ flowchart TD
 |---|---|---|
 | `*Guide` (`frontLeftGuide`, `frontRightGuide`, ...) | guide | GĐ1: chưa thấy biển / điều hướng góc |
 | `moveBackGuide` | info | GĐ1: thấy biển, chưa thấy cửa |
-| `holdStillGuide` | loading | GĐ1: đủ bộ phận; hiện xong là hẹn giờ 3s rồi CHẮC CHẮN chụp |
+| `holdStillGuide` | loading | GĐ1: đủ bộ phận; hiện xong là hẹn giờ 7s rồi CHẮC CHẮN chụp |
 | `movePlateClearGuide` | warning | **Hiện không còn tới lượt** — lời hứa chụp 3s luôn xảy ra trước `_plateReadPromptDelay` (5s) |
 | `plateValidCaptured` | success | Chụp toàn cảnh xong; giữ 3s |
 | `inspectDamageGuide` | info | Vào `panoramicGuide` |
