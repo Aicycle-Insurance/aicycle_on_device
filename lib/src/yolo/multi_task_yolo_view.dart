@@ -139,6 +139,33 @@ class MultiTaskYOLOController {
     return true;
   }
 
+  /// Starts sampling preview frames every [intervalMs] and writing JPEGs under
+  /// [dirPath]. Native emits `type == "streamFrame"` events on the stream channel.
+  Future<void> startContextStream({
+    required String dirPath,
+    int intervalMs = 1000,
+  }) async {
+    final ch = _channel;
+    if (ch == null) return;
+    await ch.invokeMethod<void>('startContextStream', {
+      'dirPath': dirPath,
+      'intervalMs': intervalMs,
+    });
+  }
+
+  Future<void> stopContextStream() async {
+    final ch = _channel;
+    if (ch == null) return;
+    await ch.invokeMethod<void>('stopContextStream');
+  }
+
+  /// When true, native skips the next context-stream sample tick (anchor capture).
+  Future<void> setCapturingAnchor(bool active) async {
+    final ch = _channel;
+    if (ch == null) return;
+    await ch.invokeMethod<void>('setCapturingAnchor', {'active': active});
+  }
+
   /// Stops the camera and releases all CoreML model predictors from memory.
   /// Call this before removing [MultiTaskYOLOView] from the tree so GPU/ANE
   /// memory is freed immediately rather than waiting for a potentially-delayed deinit.

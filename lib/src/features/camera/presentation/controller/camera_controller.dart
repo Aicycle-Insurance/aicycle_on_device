@@ -14,6 +14,7 @@ import '../../data/model/detection_output.dart';
 
 part 'camera_controller.stream.dart';
 part 'camera_controller.capture.dart';
+part 'camera_controller.context_stream.dart';
 part 'camera_controller.panoramic.dart';
 part 'camera_controller.inspection.dart';
 
@@ -135,7 +136,7 @@ const _segmentConfigs = {
 ///   * [_InspectionMixin] — máy trạng thái soi tổn thất (scanning → detail → …).
 // ignore: library_private_types_in_public_api
 class CameraController = _CameraControllerBase
-    with _StreamMixin, _CaptureMixin, _PanoramicMixin, _InspectionMixin;
+    with _StreamMixin, _CaptureMixin, _ContextStreamMixin, _PanoramicMixin, _InspectionMixin;
 
 /// State dùng chung cho mọi mixin + các helper cốt lõi (message, viewport, phase,
 /// lifecycle). Các entry-point gọi chéo giữa mixin được khai báo abstract ở đây.
@@ -602,6 +603,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   ///   inspection (phase != null) → carDamage ON,  OCR OFF
   /// carCorner/carPart luôn chạy. Chỉ gửi xuống native khi trạng thái đổi.
   void _setInspectionPhase(InspectionPhase? phase) {
+    final wasInspection = _inspectionPhase != null;
     // Rời hẳn inspection (đổi góc) → xoá bộ đếm frame liên tục để góc kế tiếp
     // bắt đầu đếm lại từ đầu.
     if (phase == null) _resetDamageStreak();
@@ -611,6 +613,12 @@ abstract class _CameraControllerBase extends ChangeNotifier {
       if (yoloController.setInspectionActive(active)) {
         _sentInspectionActive = active;
       }
+    }
+    final isInspection = phase != null;
+    if (!wasInspection && isInspection) {
+      unawaited(_startContextStream());
+    } else if (wasInspection && !isInspection) {
+      unawaited(_stopContextStream());
     }
   }
 
@@ -623,6 +631,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
     if (_stopped) return;
     _stopped = true;
     _captureStarted = false;
+    unawaited(_stopContextStream());
     _cancelFlowTimers();
     _latestDetections = [];
     _latestCarPartDetections = [];
@@ -684,4 +693,13 @@ abstract class _CameraControllerBase extends ChangeNotifier {
     int? segment,
     bool flashTick = true,
   });
+
+  /// [_ContextStreamMixin] — bật upload ngầm 1 frame/giây trong inspection.
+  Future<void> _startContextStream();
+
+  /// [_ContextStreamMixin] — tắt context stream.
+  Future<void> _stopContextStream();
+
+  /// [_ContextStreamMixin] — native gửi frame preview đã ghi disk.
+  void _onContextStreamFrame(String filePath);
 }

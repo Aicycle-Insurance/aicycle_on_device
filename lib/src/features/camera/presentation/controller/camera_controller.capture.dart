@@ -7,6 +7,8 @@ mixin _CaptureMixin on _CameraControllerBase {
 
   /// Restores previously captured photos from disk cache.
   /// Call once after construction; notifies listeners when done.
+  /// Restores previously captured photos from disk cache.
+  /// Call once after construction; notifies listeners when done.
   Future<void> loadCachedPhotos() async {
     // Pre-fetch GPS position in background when camera session initializes
     unawaited(LocationService().getFastCurrentPosition());
@@ -73,13 +75,18 @@ mixin _CaptureMixin on _CameraControllerBase {
           _sessionId,
           seg,
         );
-        await yoloController.capturePhotoToFile(
-          filePath: path,
-          thumbnailPath: PhotoSessionCache.thumbnailPathForPhotoPath(path),
-          cropTop: _cropTop,
-          cropBottom: _cropBottom,
-          quality: 80,
-        );
+        await yoloController.setCapturingAnchor(true);
+        try {
+          await yoloController.capturePhotoToFile(
+            filePath: path,
+            thumbnailPath: PhotoSessionCache.thumbnailPathForPhotoPath(path),
+            cropTop: _cropTop,
+            cropBottom: _cropBottom,
+            quality: 80,
+          );
+        } finally {
+          await yoloController.setCapturingAnchor(false);
+        }
         _capturedPhotos.putIfAbsent(seg, () => []).add(path);
         // Config 4 góc TẮT: góc nào đã có ảnh là hiện màu xanh trên vòng tròn.
         if (!_require4Angles) _completedSegments.add(seg);
@@ -100,6 +107,7 @@ mixin _CaptureMixin on _CameraControllerBase {
           photoIndex: photoIndex,
           filePath: path,
           imageOrder: imageOrder,
+          isCallEngine: true,
           latitude: latitude,
           longitude: longitude,
         );

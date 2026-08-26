@@ -67,6 +67,10 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         private const val CLASSIFY_MIN_INTERVAL_MS = 150L
         private const val THIRD_PANORAMIC_INTERVAL_MS = 100L
         private const val THIRD_INSPECTION_INTERVAL_MS = 150L
+
+        // Context stream (inspection phase background upload)
+        private const val STREAM_INTERVAL_MS = 1000L
+        private const val STREAM_JPEG_QUALITY = 70
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -142,6 +146,12 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     private var camFrameCount = 0
     private var camFpsWindowStart = System.currentTimeMillis()
     private var camFps = 0.0
+
+    // Context stream sampling (cameraExecutor only)
+    @Volatile private var streamEnabled = false
+    @Volatile private var streamDirPath = ""
+    @Volatile private var isCapturingAnchor = false
+    private var lastStreamSampleMs = 0L
 
     init {
         // COMPATIBLE forces a TextureView so Stack overlays stay visible inside a Flutter AndroidView.
@@ -262,6 +272,7 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
 
     fun stopCamera() {
         isStopped = true
+        cameraExecutor.execute { stopContextStreamInternal() }
         if (Looper.myLooper() == Looper.getMainLooper()) {
             stopCameraInternal()
         } else {
@@ -281,6 +292,7 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     fun release() {
         isStopped = true
         onMultiTaskStream = null
+        cameraExecutor.execute { stopContextStreamInternal() }
         // Unbind camera phải chạy trên main thread (yêu cầu của CameraX).
         if (Looper.myLooper() == Looper.getMainLooper()) {
             stopCameraInternal()
@@ -524,6 +536,8 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
 
         if (isStopped) { bitmap.recycle(); return }
 
+        maybeSampleContextStream(bitmap, now)
+
         val w = bitmap.width
         val h = bitmap.height
         val camFpsNow = camFps
@@ -734,6 +748,60 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     fun setInspectionActive(active: Boolean) {
         detectEnabled = active
         ocrEnabled = !active
+    }
+
+    fun startContextStream(dirPath: String) {
+        cameraExecutor.execute {
+            streamDirPath = dirPath
+            streamEnabled = true
+            lastStreamSampleMs = 0L
+        }
+    }
+
+    fun stopContextStream() {
+        cameraExecutor.execute { stopContextStreamInternal() }
+    }
+
+    fun setCapturingAnchor(active: Boolean) {
+        isCapturingAnchor = active
+    }
+
+    private fun stopContextStreamInternal() {
+        streamEnabled = false
+        streamDirPath = ""
+        lastStreamSampleMs = 0L
+        isCapturingAnchor = false
+    }
+
+    private fun maybeSampleContextStream(bitmap: Bitmap, now: Long) {
+        if (!streamEnabled || isCapturingAnchor) return
+        if (now - lastStreamSampleMs < STREAM_INTERVAL_MS) return
+        val dir = streamDirPath
+        if (dir.isEmpty()) return
+        lastStreamSampleMs = now
+
+        val jpeg = bitmapToJpeg(bitmap, STREAM_JPEG_QUALITY) ?: return
+        val path = "$dir/stream_$now.jpg"
+        try {
+            val file = File(path)
+            file.parentFile?.mkdirs()
+            file.writeBytes(jpeg)
+            val payload = mapOf("type" to "streamFrame", "filePath" to file.absolutePath)
+            mainHandler.post { onMultiTaskStream?.invoke(payload) }
+        } catch (e: Exception) {
+            Log.e(TAG, "context stream sample failed: ${e.message}")
+        }
+    }
+
+    private fun bitmapToJpeg(bitmap: Bitmap, quality: Int): ByteArray? {
+        return try {
+            ByteArrayOutputStream().also { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
+            }.toByteArray()
+        } catch (e: Exception) {
+            Log.e(TAG, "bitmapToJpeg failed: ${e.message}")
+            null
+        }
     }
 
     // endregion
