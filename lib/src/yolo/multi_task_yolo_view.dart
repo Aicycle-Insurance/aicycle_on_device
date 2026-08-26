@@ -28,28 +28,6 @@ import 'core/yolo_model_resolver.dart';
 ///   license-plate box was found in a carPart frame.
 typedef MultiTaskStreamCallback = void Function(Map<String, dynamic> data);
 
-/// Metadata for one frame in a burst capture returned from native.
-class BurstFrameInfo {
-  const BurstFrameInfo({
-    required this.filePath,
-    required this.stepIndex,
-    required this.isCallEngine,
-  });
-
-  final String filePath;
-  final int stepIndex;
-  final bool isCallEngine;
-
-  factory BurstFrameInfo.fromMap(Map<String, dynamic> map) {
-    return BurstFrameInfo(
-      filePath: map['filePath'] as String,
-      stepIndex: map['stepIndex'] as int,
-      isCallEngine:
-          map['isCallEngine'] as bool? ?? map['isCapture'] as bool? ?? false,
-    );
-  }
-}
-
 /// Controller for [MultiTaskYOLOView]. Pass to the widget and call [capturePhoto]
 /// to take a still JPEG from the live camera stream.
 class MultiTaskYOLOController {
@@ -124,84 +102,6 @@ class MultiTaskYOLOController {
     );
     if (result == null) throw StateError('capturePhotoToFile returned null');
     return result;
-  }
-
-  /// Capture a burst of JPEG stills (pre-roll + anchor + post-roll) and write
-  /// each frame to [dirPath]. Returns metadata for every frame in the burst.
-  Future<List<BurstFrameInfo>> captureBurst({
-    required String dirPath,
-    double cropLeft = 0,
-    double cropTop = 0,
-    double cropRight = 1,
-    double cropBottom = 1,
-    int quality = 80,
-  }) async {
-    final ch = _channel;
-    if (ch == null) throw StateError('MultiTaskYOLOView is not attached');
-    final result = await ch.invokeMethod<List<dynamic>>(
-      'captureBurst',
-      {
-        'dirPath': dirPath,
-        'quality': quality,
-        'cropLeft': cropLeft,
-        'cropTop': cropTop,
-        'cropRight': cropRight,
-        'cropBottom': cropBottom,
-      },
-    );
-    return (result ?? [])
-        .whereType<Map>()
-        .map((m) => BurstFrameInfo.fromMap(Map<String, dynamic>.from(m)))
-        .toList();
-  }
-
-  /// Two-phase burst — phase 1.
-  ///
-  /// Triggers the burst capture and returns the **anchor frame** as soon as it
-  /// is written to disk (~200 ms). Post-roll collection continues in the
-  /// background. Call [captureBurstAwaitPostRoll] to receive all 11 frames once
-  /// post-roll is complete (~2.5 s after this call).
-  ///
-  /// Returns `null` on failure (camera not ready, capture error).
-  Future<BurstFrameInfo?> captureBurstAnchor({
-    required String dirPath,
-    double cropLeft = 0,
-    double cropTop = 0,
-    double cropRight = 1,
-    double cropBottom = 1,
-    int quality = 80,
-  }) async {
-    final ch = _channel;
-    if (ch == null) throw StateError('MultiTaskYOLOView is not attached');
-    final result = await ch.invokeMethod<Map>(
-      'captureBurstAnchor',
-      {
-        'dirPath': dirPath,
-        'quality': quality,
-        'cropLeft': cropLeft,
-        'cropTop': cropTop,
-        'cropRight': cropRight,
-        'cropBottom': cropBottom,
-      },
-    );
-    if (result == null) return null;
-    return BurstFrameInfo.fromMap(Map<String, dynamic>.from(result));
-  }
-
-  /// Two-phase burst — phase 2.
-  ///
-  /// Awaits completion of the post-roll collection started by
-  /// [captureBurstAnchor] and returns **all frames** (pre-roll + anchor +
-  /// post-roll) once they are written to disk. Must be called after
-  /// [captureBurstAnchor]; throws if no burst is in progress.
-  Future<List<BurstFrameInfo>> captureBurstAwaitPostRoll() async {
-    final ch = _channel;
-    if (ch == null) throw StateError('MultiTaskYOLOView is not attached');
-    final result = await ch.invokeMethod<List>('captureBurstAwaitPostRoll');
-    return (result ?? [])
-        .whereType<Map>()
-        .map((m) => BurstFrameInfo.fromMap(Map<String, dynamic>.from(m)))
-        .toList();
   }
 
   /// Turn the camera torch on ([enable] = true) or off ([enable] = false).

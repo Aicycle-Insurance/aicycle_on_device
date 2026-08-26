@@ -67,11 +67,6 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         private const val CLASSIFY_MIN_INTERVAL_MS = 150L
         private const val THIRD_PANORAMIC_INTERVAL_MS = 100L
         private const val THIRD_INSPECTION_INTERVAL_MS = 150L
-
-        // Burst capture ring buffer
-        private const val RING_CAPACITY = 5
-        private const val POST_ROLL_COUNT = 5
-        private const val RING_INTERVAL_MS = 500L
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -147,25 +142,6 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     private var camFrameCount = 0
     private var camFpsWindowStart = System.currentTimeMillis()
     private var camFps = 0.0
-
-    // MARK: Burst capture ring buffer (cameraExecutor only)
-
-    private val ringBuffer = FrameRingBuffer(RING_CAPACITY)
-    private var burstStepIndex = 0
-    private var lastRingWriteMs = 0L
-    private var burstJpegQuality = 80
-
-    private enum class BurstState { ROLLING, TRIGGERED, COLLECTING }
-    private var burstState = BurstState.ROLLING
-    private var burstPreRoll: List<BurstFrame> = emptyList()
-    private val burstPostRoll = mutableListOf<BurstFrame>()
-    private var burstAnchorFrame: BurstFrame? = null
-    private var pendingBurstDirPath = ""
-    private var pendingBurstCrop: android.graphics.RectF? = null
-    private var pendingBurstQuality = 80
-    private var pendingBurstPreviewW = 0
-    private var pendingBurstPreviewH = 0
-    private var pendingAllFramesCallback: ((List<Map<String, Any>>?) -> Unit)? = null
 
     init {
         // COMPATIBLE forces a TextureView so Stack overlays stay visible inside a Flutter AndroidView.
@@ -286,7 +262,6 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
 
     fun stopCamera() {
         isStopped = true
-        cameraExecutor.execute { cancelBurstIfActive() }
         if (Looper.myLooper() == Looper.getMainLooper()) {
             stopCameraInternal()
         } else {
@@ -312,9 +287,6 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         } else {
             mainHandler.post { stopCameraInternal() }
         }
-
-        // Cancel any in-progress burst before shutting down cameraExecutor.
-        cameraExecutor.execute { cancelBurstIfActive() }
 
         // Snapshot rồi xoá tham chiếu ngay để onFrame (đã bị chặn bởi isStopped)
         // không còn dùng tới. Việc đóng model nặng làm ở luồng nền bên dưới.
@@ -547,25 +519,10 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
             camFpsWindowStart = now
         }
 
-        val rotationDegrees = imageProxy.imageInfo.rotationDegrees
-        val previewW = previewView.width
-        val previewH = previewView.height
         val bitmap = ImageUtils.toBitmap(imageProxy) ?: run { imageProxy.close(); return }
         imageProxy.close()
 
         if (isStopped) { bitmap.recycle(); return }
-
-        // Burst ring buffer (0.5s cadence) and post-roll collection.
-        when {
-            burstState == BurstState.ROLLING && now - lastRingWriteMs >= RING_INTERVAL_MS -> {
-                lastRingWriteMs = now
-                sampleRingBuffer(bitmap, rotationDegrees, previewW, previewH)
-            }
-            burstState == BurstState.COLLECTING && now - lastRingWriteMs >= RING_INTERVAL_MS -> {
-                lastRingWriteMs = now
-                collectPostRollFrame(bitmap, rotationDegrees, previewW, previewH)
-            }
-        }
 
         val w = bitmap.width
         val h = bitmap.height
@@ -777,204 +734,6 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     fun setInspectionActive(active: Boolean) {
         detectEnabled = active
         ocrEnabled = !active
-    }
-
-    // endregion
-
-    // region Burst capture ring buffer
-
-    /**
-     * Two-phase burst — phase 1.
-     *
-     * Queued on cameraExecutor so it runs serially with [onFrame].
-     * Snapshots pre-roll from the ring buffer, fires [ImageCapture.takePicture] for a
-     * full-resolution anchor, writes the anchor to [dirPath]/frame_{stepIndex}.jpg, and
-     * delivers [onAnchorReady] on the main thread. Then begins collecting post-roll frames
-     * at 0.5 s cadence. When [POST_ROLL_COUNT] post-roll frames are ready, [onAllFramesReady]
-     * fires on the main thread with all frames (pre-roll + anchor + post-roll).
-     */
-    fun startBurstForCapture(
-        dirPath: String,
-        crop: android.graphics.RectF?,
-        quality: Int,
-        onAnchorReady: (Map<String, Any>?) -> Unit,
-        onAllFramesReady: ((List<Map<String, Any>>?) -> Unit)?,
-    ) {
-        cameraExecutor.execute {
-            if (burstState != BurstState.ROLLING) {
-                Log.w(TAG, "startBurstForCapture: burst already in progress, ignoring")
-                mainHandler.post { onAnchorReady(null) }
-                return@execute
-            }
-
-            burstPreRoll = ringBuffer.snapshot()
-            burstState = BurstState.TRIGGERED
-            pendingBurstDirPath = dirPath
-            pendingBurstCrop = crop
-            pendingBurstQuality = quality
-            pendingAllFramesCallback = onAllFramesReady
-            pendingBurstPreviewW = previewView.width
-            pendingBurstPreviewH = previewView.height
-            burstJpegQuality = quality
-
-            val ic = imageCaptureUseCase
-            if (ic == null) {
-                Log.w(TAG, "startBurstForCapture: no imageCaptureUseCase")
-                burstState = BurstState.ROLLING
-                mainHandler.post { onAnchorReady(null) }
-                return@execute
-            }
-
-            val savedPreviewW = pendingBurstPreviewW
-            val savedPreviewH = pendingBurstPreviewH
-
-            ic.takePicture(cameraExecutor, object : ImageCapture.OnImageCapturedCallback() {
-                override fun onCaptureSuccess(image: ImageProxy) {
-                    try {
-                        val stepIdx = ++burstStepIndex
-                        val rotDeg = image.imageInfo.rotationDegrees
-                        val plane = image.planes[0]
-                        val buf = plane.buffer
-                        val raw = ByteArray(buf.remaining()).also { buf.get(it) }
-                        val jpeg = if (image.format == android.graphics.ImageFormat.JPEG) raw else {
-                            val bmp = BitmapFactory.decodeByteArray(raw, 0, raw.size)
-                            ByteArrayOutputStream().also { out ->
-                                bmp?.compress(Bitmap.CompressFormat.JPEG, quality, out)
-                                bmp?.recycle()
-                            }.toByteArray()
-                        }
-                        image.close()
-
-                        val processed = processCaptured(jpeg, rotDeg, crop, savedPreviewW, savedPreviewH, quality)
-                        val file = java.io.File(dirPath, "frame_${stepIdx}.jpg")
-                        file.parentFile?.mkdirs()
-                        file.writeBytes(processed)
-
-                        burstAnchorFrame = BurstFrame(processed, stepIdx, isCallEngine = true)
-
-                        val anchorMap: Map<String, Any> = mapOf(
-                            "filePath" to file.absolutePath,
-                            "stepIndex" to stepIdx,
-                            "isCallEngine" to true,
-                        )
-
-                        burstPostRoll.clear()
-                        burstState = BurstState.COLLECTING
-                        lastRingWriteMs = System.currentTimeMillis()
-
-                        mainHandler.post { onAnchorReady(anchorMap) }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "burst anchor capture failed: ${e.message}")
-                        try { image.close() } catch (_: Exception) {}
-                        burstState = BurstState.ROLLING
-                        mainHandler.post { onAnchorReady(null) }
-                    }
-                }
-
-                override fun onError(exception: ImageCaptureException) {
-                    Log.e(TAG, "burst anchor ImageCapture error: ${exception.message}")
-                    burstState = BurstState.ROLLING
-                    mainHandler.post { onAnchorReady(null) }
-                }
-            })
-        }
-    }
-
-    private fun sampleRingBuffer(bitmap: Bitmap, rotationDegrees: Int, previewW: Int, previewH: Int) {
-        burstStepIndex++
-        val jpegBytes = bitmapToJpeg(bitmap, burstJpegQuality) ?: return
-        ringBuffer.write(BurstFrame(jpegBytes, burstStepIndex, isCallEngine = false, rotationDegrees, previewW, previewH))
-    }
-
-    private fun collectPostRollFrame(bitmap: Bitmap, rotationDegrees: Int, previewW: Int, previewH: Int) {
-        burstStepIndex++
-        val jpegBytes = bitmapToJpeg(bitmap, burstJpegQuality) ?: return
-        burstPostRoll.add(BurstFrame(jpegBytes, burstStepIndex, isCallEngine = false, rotationDegrees, previewW, previewH))
-        if (burstPostRoll.size >= POST_ROLL_COUNT) {
-            finalizeBurst()
-        }
-    }
-
-    private fun finalizeBurst() {
-        // Called on cameraExecutor.
-        val preRoll = burstPreRoll.toList()
-        val anchor = burstAnchorFrame
-        val postRoll = burstPostRoll.toList()
-        val dirPath = pendingBurstDirPath
-        val crop = pendingBurstCrop
-        val quality = pendingBurstQuality
-        val callback = pendingAllFramesCallback
-
-        burstState = BurstState.ROLLING
-        burstPreRoll = emptyList()
-        burstPostRoll.clear()
-        burstAnchorFrame = null
-        pendingAllFramesCallback = null
-
-        if (anchor == null || callback == null) {
-            mainHandler.post { callback?.invoke(emptyList()) }
-            return
-        }
-
-        val allFrames = mutableListOf<Map<String, Any>>()
-
-        for (frame in preRoll) {
-            try {
-                val finalBytes = processCaptured(frame.data, frame.rotationDegrees, crop, frame.previewWidth, frame.previewHeight, quality)
-                val file = java.io.File(dirPath, "frame_${frame.stepIndex}.jpg")
-                file.parentFile?.mkdirs()
-                file.writeBytes(finalBytes)
-                allFrames.add(mapOf("filePath" to file.absolutePath, "stepIndex" to frame.stepIndex, "isCallEngine" to false))
-            } catch (e: Exception) {
-                Log.e(TAG, "failed to write pre-roll frame ${frame.stepIndex}: ${e.message}")
-            }
-        }
-
-        val anchorFile = java.io.File(dirPath, "frame_${anchor.stepIndex}.jpg")
-        if (anchorFile.exists()) {
-            allFrames.add(mapOf("filePath" to anchorFile.absolutePath, "stepIndex" to anchor.stepIndex, "isCallEngine" to true))
-        }
-
-        for (frame in postRoll) {
-            try {
-                val finalBytes = processCaptured(frame.data, frame.rotationDegrees, crop, frame.previewWidth, frame.previewHeight, quality)
-                val file = java.io.File(dirPath, "frame_${frame.stepIndex}.jpg")
-                file.parentFile?.mkdirs()
-                file.writeBytes(finalBytes)
-                allFrames.add(mapOf("filePath" to file.absolutePath, "stepIndex" to frame.stepIndex, "isCallEngine" to false))
-            } catch (e: Exception) {
-                Log.e(TAG, "failed to write post-roll frame ${frame.stepIndex}: ${e.message}")
-            }
-        }
-
-        allFrames.sortBy { it["stepIndex"] as Int }
-
-        mainHandler.post { callback(allFrames) }
-    }
-
-    private fun bitmapToJpeg(bitmap: Bitmap, quality: Int): ByteArray? {
-        return try {
-            ByteArrayOutputStream().also { out ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
-            }.toByteArray()
-        } catch (e: Exception) {
-            Log.e(TAG, "bitmapToJpeg failed: ${e.message}")
-            null
-        }
-    }
-
-    /** Cancels any in-progress burst, calling [pendingAllFramesCallback] with null.
-     *  Must be called from cameraExecutor or before cameraExecutor is shut down. */
-    private fun cancelBurstIfActive() {
-        val cb = pendingAllFramesCallback
-        pendingAllFramesCallback = null
-        if (burstState != BurstState.ROLLING) {
-            burstState = BurstState.ROLLING
-            burstPreRoll = emptyList()
-            burstPostRoll.clear()
-            burstAnchorFrame = null
-            if (cb != null) mainHandler.post { cb(null) }
-        }
     }
 
     // endregion

@@ -7,8 +7,6 @@ mixin _CaptureMixin on _CameraControllerBase {
 
   /// Restores previously captured photos from disk cache.
   /// Call once after construction; notifies listeners when done.
-  /// Restores previously captured photos from disk cache.
-  /// Call once after construction; notifies listeners when done.
   Future<void> loadCachedPhotos() async {
     // Pre-fetch GPS position in background when camera session initializes
     unawaited(LocationService().getFastCurrentPosition());
@@ -17,6 +15,8 @@ mixin _CaptureMixin on _CameraControllerBase {
         await PhotoSessionCache.instance.loadSessionPhotoPaths(_sessionId);
     if (cached.isEmpty) return;
     _capturedPhotos = cached;
+    _imageOrderCounter =
+        cached.values.fold<int>(0, (sum, list) => sum + list.length);
     // Angles with cached photos are shown as completed in the progress ring.
     _completedSegments.addAll(cached.keys);
     _panoramicCapturedSegments.addAll(cached.keys);
@@ -26,8 +26,8 @@ mixin _CaptureMixin on _CameraControllerBase {
 
   // ── Photo capture ─────────────────────────────────────────────────────────
 
-  /// Captures a burst (pre-roll + anchor + post-roll on iOS), writes frames to
-  /// disk and enqueues them for background upload.
+  /// Captures a JPEG frame, writes it to disk and enqueues it for background
+  /// upload.
   /// Does NOT modify [_completedSegments] in 4-angle mode — completion happens
   /// when the classifier detects that the user moved to another car angle.
   @override
@@ -43,152 +43,80 @@ mixin _CaptureMixin on _CameraControllerBase {
       /// Chụp tự động quá nhanh, người dùng chưa kịp đọc message -> delay 3s.
       /// Chụp thủ công ([immediate]) thì chụp ngay.
       if (!immediate) await Future.delayed(const Duration(seconds: 3));
+      // Paint the white shutter-blink NGAY trước khi gọi native capture (có thể
+      // chiếm thời gian) để blink hiện đồng bộ với khoảnh khắc chụp, thay vì chỉ
+      // hiện sau khi capture xong.
       if (flashTick) _captureFlashTick++;
+      // Khung góc nháy success ở MỌI lần chụp — kể cả chụp ngầm không blink —
+      // cùng thời điểm với blink (tự notify). Giữ đúng bằng hiệu ứng dừng hình:
+      // ảnh đóng băng che khung góc, nên khung xanh phải còn sống khi ảnh co về
+      // thumbnail và để lộ khung ra lại.
       _flashCornerSuccess(_captureFreezeDuration);
 
       final seg = segment ?? _activeSegmentIndex;
-      if (seg == null) return null;
+      if (seg != null) {
+        // Lấy vị trí GPS nhanh tại thời điểm chụp ảnh
+        double? latitude;
+        double? longitude;
+        final posResult = await LocationService().getFastCurrentPosition();
+        posResult.fold(
+          (_) {},
+          (pos) {
+            latitude = pos.latitude;
+            longitude = pos.longitude;
+          },
+        );
 
-      // Lấy vị trí GPS nhanh tại thời điểm chụp ảnh Anchor
-      double? latitude;
-      double? longitude;
-      final posResult = await LocationService().getFastCurrentPosition();
-      posResult.fold(
-        (_) {},
-        (pos) {
-          latitude = pos.latitude;
-          longitude = pos.longitude;
-        },
-      );
-
-      if (Platform.isIOS) {
-        final dir = await PhotoSessionCache.instance.createBurstDir(_sessionId);
-
-        // Phase 1: capture anchor photo only (~200ms).
-        // Freeze overlay starts immediately — same UX as before burst was added.
-        final anchor = await yoloController.captureBurstAnchor(
-          dirPath: dir,
+        final photoIndex = _capturedPhotos[seg]?.length ?? 0;
+        final imageOrder = ++_imageOrderCounter;
+        final path = await PhotoSessionCache.instance.createPhotoPath(
+          _sessionId,
+          seg,
+        );
+        await yoloController.capturePhotoToFile(
+          filePath: path,
+          thumbnailPath: PhotoSessionCache.thumbnailPathForPhotoPath(path),
           cropTop: _cropTop,
           cropBottom: _cropBottom,
           quality: 80,
         );
-        if (anchor == null) return null;
-
-        _capturedPhotos.putIfAbsent(seg, () => []).add(anchor.filePath);
+        _capturedPhotos.putIfAbsent(seg, () => []).add(path);
+        // Config 4 góc TẮT: góc nào đã có ảnh là hiện màu xanh trên vòng tròn.
         if (!_require4Angles) _completedSegments.add(seg);
-        _startCaptureFreeze(anchor.filePath);
-
-        // Enqueue anchor immediately so it uploads first — Host App receives
-        // the onImageUploaded callback as fast as the old single-photo path.
+        // Dừng hình ảnh vừa chụp rồi co về thumbnail — áp dụng cho MỌI lần chụp
+        // (mọi lần khung góc nháy xanh success), kể cả chụp ngầm không blink.
+        // Bật NGAY khi ảnh đã nằm trên disk, TRƯỚC khi enqueue upload: enqueue
+        // ghi queue + quét cache + gọi platform channel (chậm, và có thể lỗi) —
+        // phản hồi thị giác cho user không được phụ thuộc vào đường upload.
+        // (tự notifyListeners)
+        _startCaptureFreeze(path);
+        // Persist the queue entry and hand it to WorkManager/background
+        // URLSession before reporting capture completion. This closes the small
+        // window where a user could terminate the app immediately after the
+        // shutter and leave the photo on disk but not scheduled.
         await PhotoUploadQueue.instance.enqueuePhoto(
           sessionId: _sessionId,
           angleId: seg,
-          photoIndex: anchor.stepIndex,
-          filePath: anchor.filePath,
-          imageOrder: anchor.stepIndex,
-          isCallEngine: true,
+          photoIndex: photoIndex,
+          filePath: path,
+          imageOrder: imageOrder,
           latitude: latitude,
           longitude: longitude,
         );
-
-        // Phase 2: collect post-roll + enqueue surrounding burst frames in
-        // background (~2.5s). Anchor is excluded (already enqueued above).
-        unawaited(_awaitAndEnqueueBurstFrames(
-          angleId: seg,
-          anchorFilePath: anchor.filePath,
-        ));
-
-        return anchor.filePath;
+        return path;
       }
-
-      // Android: two-phase burst (same as iOS).
-      final dir = await PhotoSessionCache.instance.createBurstDir(_sessionId);
-
-      // Phase 1: capture anchor photo only (~200ms).
-      // Freeze overlay starts immediately — same UX as before burst was added.
-      final anchor = await yoloController.captureBurstAnchor(
-        dirPath: dir,
-        cropTop: _cropTop,
-        cropBottom: _cropBottom,
-        quality: 80,
-      );
-      if (anchor == null) return null;
-
-      _capturedPhotos.putIfAbsent(seg, () => []).add(anchor.filePath);
-      if (!_require4Angles) _completedSegments.add(seg);
-      _startCaptureFreeze(anchor.filePath);
-
-      // Enqueue anchor immediately so it uploads first.
-      await PhotoUploadQueue.instance.enqueuePhoto(
-        sessionId: _sessionId,
-        angleId: seg,
-        photoIndex: anchor.stepIndex,
-        filePath: anchor.filePath,
-        imageOrder: anchor.stepIndex,
-        isCallEngine: true,
-        latitude: latitude,
-        longitude: longitude,
-      );
-
-      // Phase 2: collect post-roll + enqueue surrounding burst frames in
-      // background (~2.5s). Anchor is excluded (already enqueued above).
-      unawaited(_awaitAndEnqueueBurstFrames(
-        angleId: seg,
-        anchorFilePath: anchor.filePath,
-      ));
-
-      return anchor.filePath;
+      return null;
     } catch (_) {
       return null;
     } finally {
+      // Chờ hết hiệu ứng ở MỌI đường ra (kể cả khi enqueue upload lỗi) và chờ
+      // TRƯỚC khi mở lại cổng chụp, để frame kế tiếp không kích hoạt chụp lần
+      // nữa ngay giữa animation.
       await _awaitCaptureFreeze();
       _isCapturing = false;
+      // Nhịp chờ (delay auto-capture / hiệu ứng dừng hình) có thể kéo dài qua
+      // lúc user đóng màn camera → controller đã dispose, không notify nữa.
       if (!_stopped) notifyListeners();
-    }
-  }
-
-  /// Awaits native post-roll completion then enqueues the surrounding burst
-  /// frames (pre-roll + post-roll) for background upload.  The anchor photo
-  /// identified by [anchorFilePath] is skipped because it was already enqueued
-  /// in Phase 1 of [capturePhoto].
-  /// Fire-and-forget from [capturePhoto]; errors are logged but not re-thrown.
-  Future<void> _awaitAndEnqueueBurstFrames({
-    required int angleId,
-    required String anchorFilePath,
-  }) async {
-    try {
-      final frames = await yoloController.captureBurstAwaitPostRoll();
-      if (frames.isEmpty) return;
-      // Anchor already enqueued in Phase 1 — only enqueue surrounding frames.
-      final burstOnly =
-          frames.where((f) => f.filePath != anchorFilePath).toList();
-      if (burstOnly.isEmpty) return;
-      await _enqueueBurstFrames(burstOnly, angleId: angleId);
-    } catch (error, stackTrace) {
-      debugPrint('AICycle burst post-roll enqueue failed: $error\n$stackTrace');
-    }
-  }
-
-  Future<void> _enqueueBurstFrames(
-    List<BurstFrameInfo> frames, {
-    required int angleId,
-  }) async {
-    try {
-      final sorted = [...frames]
-        ..sort((a, b) => a.stepIndex.compareTo(b.stepIndex));
-      for (final frame in sorted) {
-        await PhotoUploadQueue.instance.enqueuePhoto(
-          sessionId: _sessionId,
-          angleId: angleId,
-          photoIndex: frame.stepIndex,
-          filePath: frame.filePath,
-          imageOrder: frame.stepIndex,
-          isCallEngine: frame.isCallEngine,
-        );
-      }
-      await PhotoUploadQueue.instance.schedulePendingUploads();
-    } catch (error, stackTrace) {
-      debugPrint('AICycle burst enqueue failed: $error\n$stackTrace');
     }
   }
 
