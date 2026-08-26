@@ -5,6 +5,7 @@
 //  run concurrently via Apple's CoreML async scheduling.
 
 import AVFoundation
+import CoreImage
 import CoreML
 import CoreVideo
 import UIKit
@@ -136,6 +137,15 @@ public class YOLOMultiTaskView: UIView {
   private static let thirdInspectionMinInferenceInterval: CFTimeInterval = 0.15
   private var lastClassifyTime: CFTimeInterval = 0
   private var lastThirdTime: CFTimeInterval = 0
+
+  // Context stream sampling (cameraQueue only)
+  private static let streamInterval: CFTimeInterval = 1.0
+  private static let streamJpegQuality: CGFloat = 0.70
+  private static let jpegEncodeContext = CIContext()
+  private var streamEnabled = false
+  private var streamDirPath = ""
+  private var isCapturingAnchor = false
+  private var lastStreamSampleTime: CFTimeInterval = 0
 
   private lazy var detectAdapter   = MultiTaskPredictorAdapter(taskName: "detect",   cameraQueue: cameraQueue)
   private lazy var classifyAdapter = MultiTaskPredictorAdapter(taskName: "classify", cameraQueue: cameraQueue)
@@ -374,6 +384,73 @@ public class YOLOMultiTaskView: UIView {
       self?.detectEnabled = active
       self?.ocrEnabled = !active
     }
+  }
+
+  func startContextStream(dirPath: String) {
+    cameraQueue.async { [weak self] in
+      self?.streamDirPath = dirPath
+      self?.streamEnabled = true
+      self?.lastStreamSampleTime = 0
+    }
+  }
+
+  func stopContextStream() {
+    cameraQueue.async { [weak self] in
+      self?.stopContextStreamInternal()
+    }
+  }
+
+  func setCapturingAnchor(_ active: Bool) {
+    cameraQueue.async { [weak self] in
+      self?.isCapturingAnchor = active
+    }
+  }
+
+  private func stopContextStreamInternal() {
+    streamEnabled = false
+    streamDirPath = ""
+    lastStreamSampleTime = 0
+    isCapturingAnchor = false
+  }
+
+  private func maybeSampleContextStream(from sampleBuffer: CMSampleBuffer, now: CFTimeInterval) {
+    guard streamEnabled, !isCapturingAnchor else { return }
+    guard now - lastStreamSampleTime >= Self.streamInterval else { return }
+    let dir = streamDirPath
+    guard !dir.isEmpty else { return }
+    lastStreamSampleTime = now
+
+    let buf = sampleBuffer
+    let callback = onMultiTaskStream
+    DispatchQueue.global(qos: .utility).async {
+      guard let pixelBuffer = CMSampleBufferGetImageBuffer(buf),
+        let jpegData = Self.encodeJPEG(from: pixelBuffer, quality: Self.streamJpegQuality)
+      else { return }
+      let fileName = "stream_\(Int(now * 1000)).jpg"
+      let path = (dir as NSString).appendingPathComponent(fileName)
+      do {
+        try FileManager.default.createDirectory(
+          atPath: dir,
+          withIntermediateDirectories: true
+        )
+        try jpegData.write(to: URL(fileURLWithPath: path), options: .atomic)
+        let payload: [String: Any] = ["type": "streamFrame", "filePath": path]
+        DispatchQueue.main.async { callback?(payload) }
+      } catch {
+        NSLog("YOLOMultiTaskView: context stream sample failed: %@", error.localizedDescription)
+      }
+    }
+  }
+
+  private nonisolated static func encodeJPEG(
+    from pixelBuffer: CVPixelBuffer,
+    quality: CGFloat
+  ) -> Data? {
+    let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+    guard let cgImage = jpegEncodeContext.createCGImage(ciImage, from: ciImage.extent) else {
+      return nil
+    }
+    return UIImage(cgImage: cgImage).jpegData(compressionQuality: quality)
   }
 
   // MARK: - Stream data builder
@@ -777,6 +854,7 @@ public class YOLOMultiTaskView: UIView {
 
   public func stopCamera() {
     cameraQueue.async { [weak self] in
+      self?.stopContextStreamInternal()
       self?.captureSession.stopRunning()
     }
   }
@@ -787,6 +865,7 @@ public class YOLOMultiTaskView: UIView {
   public func releaseResources() {
     onMultiTaskStream = nil
     cameraQueue.async { [weak self] in
+      self?.stopContextStreamInternal()
       self?.captureSession.stopRunning()
     }
     DispatchQueue.main.async { [weak self] in
@@ -835,6 +914,8 @@ extension YOLOMultiTaskView: AVCaptureVideoDataOutputSampleBufferDelegate, @unch
       camFrameCount = 0
       camFpsWindowStart = now
     }
+
+    maybeSampleContextStream(from: sampleBuffer, now: now)
 
     // Dispatch each predictor to its own queue so all run concurrently.
     // carDamage is skipped (input blocked) during the framing/panorama phase.

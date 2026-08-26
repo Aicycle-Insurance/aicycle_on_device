@@ -79,19 +79,27 @@ class PhotoUploadQueue {
       for (final item in items) {
         if (!item.hasPendingResponse) continue;
         final listener = _lastMatchingListener(item.sessionId);
-        if (listener == null) continue;
-
         final data = _decodeResponseMap(item);
-        debugPrint(
-          'AICycle upload completed: session=${item.sessionId} '
-          'angle=${item.angleId} photo=${item.photoIndex} '
-          'status=${item.responseStatusCode}',
-        );
-        try {
-          listener.onData(data);
-        } catch (_) {
-          // Host callback errors must not block queue cleanup or replay.
+
+        if (item.isCallEngine) {
+          if (listener == null) continue;
+          debugPrint(
+            'AICycle upload completed: session=${item.sessionId} '
+            'angle=${item.angleId} photo=${item.photoIndex} '
+            'status=${item.responseStatusCode}',
+          );
+          try {
+            listener.onData(data);
+          } catch (_) {
+            // Host callback errors must not block queue cleanup or replay.
+          }
+        } else {
+          debugPrint(
+            'AICycle context stream ok: imageOrder=${item.imageOrder} '
+            'httpCode=${item.responseStatusCode}',
+          );
         }
+        _deleteStreamFileIfNeeded(item);
         deliveredIds.add(item.id);
       }
 
@@ -127,16 +135,24 @@ class PhotoUploadQueue {
       for (final item in items) {
         if (!item.hasPendingResponse) continue;
         final data = _decodeResponseMap(item);
-        debugPrint(
-          'AICycle upload completed: session=${item.sessionId} '
-          'angle=${item.angleId} photo=${item.photoIndex} '
-          'status=${item.responseStatusCode}',
-        );
-        try {
-          onImageUploaded(data);
-        } catch (_) {
-          // Host callback errors must not block queue cleanup or replay.
+        if (item.isCallEngine) {
+          debugPrint(
+            'AICycle upload completed: session=${item.sessionId} '
+            'angle=${item.angleId} photo=${item.photoIndex} '
+            'status=${item.responseStatusCode}',
+          );
+          try {
+            onImageUploaded(data);
+          } catch (_) {
+            // Host callback errors must not block queue cleanup or replay.
+          }
+        } else {
+          debugPrint(
+            'AICycle context stream ok: imageOrder=${item.imageOrder} '
+            'httpCode=${item.responseStatusCode}',
+          );
         }
+        _deleteStreamFileIfNeeded(item);
         deliveredIds.add(item.id);
       }
 
@@ -187,6 +203,7 @@ class PhotoUploadQueue {
     required int photoIndex,
     required String filePath,
     int? imageOrder,
+    bool isCallEngine = false,
     double? latitude,
     double? longitude,
   }) =>
@@ -196,6 +213,7 @@ class PhotoUploadQueue {
         photoIndex: photoIndex,
         filePath: filePath,
         imageOrder: imageOrder,
+        isCallEngine: isCallEngine,
         latitude: latitude,
         longitude: longitude,
         schedule: true,
@@ -207,6 +225,7 @@ class PhotoUploadQueue {
     required int photoIndex,
     required String filePath,
     int? imageOrder,
+    bool isCallEngine = false,
     double? latitude,
     double? longitude,
     required bool schedule,
@@ -217,6 +236,7 @@ class PhotoUploadQueue {
       if (latitude != null) 'latitude': latitude.toString(),
       if (longitude != null) 'longitude': longitude.toString(),
       if (imageOrder != null) 'imageOrder': imageOrder.toString(),
+      'isCallEngine': isCallEngine ? 'true' : 'false',
     };
     final item = PhotoUploadItem(
       id: _stableId('$sessionId|$angleId|$filePath'),
@@ -224,6 +244,7 @@ class PhotoUploadQueue {
       angleId: angleId,
       photoIndex: photoIndex,
       imageOrder: imageOrder,
+      isCallEngine: isCallEngine,
       filePath: filePath,
       fileName: '${angleId}_$photoIndex.jpg',
       fileField: request.fileField,
@@ -241,7 +262,8 @@ class PhotoUploadQueue {
         ]);
     debugPrint(
       'AICycle upload queued: session=$sessionId angle=$angleId '
-      'photo=$photoIndex imageOrder=$imageOrder file=${item.fileName}',
+      'photo=$photoIndex imageOrder=$imageOrder isCallEngine=$isCallEngine '
+      'file=${item.fileName}',
     );
     await enforceCacheLimit();
     if (schedule) await _schedulePendingUploadsBestEffort();
@@ -561,6 +583,17 @@ class PhotoUploadQueue {
       if (rawBody != null && rawBody.isNotEmpty) 'rawBody': rawBody,
     };
   }
+
+  void _deleteStreamFileIfNeeded(PhotoUploadItem item) {
+    if (item.isCallEngine) return;
+    if (!item.filePath.contains('/_stream/')) return;
+    try {
+      final file = File(item.filePath);
+      if (file.existsSync()) file.deleteSync();
+    } catch (_) {
+      // Best-effort cleanup after upload.
+    }
+  }
 }
 
 class PhotoUploadItem {
@@ -570,6 +603,7 @@ class PhotoUploadItem {
     required this.angleId,
     required this.photoIndex,
     this.imageOrder,
+    this.isCallEngine = false,
     required this.filePath,
     required this.fileName,
     required this.fileField,
@@ -591,6 +625,7 @@ class PhotoUploadItem {
   final int angleId;
   final int photoIndex;
   final int? imageOrder;
+  final bool isCallEngine;
   final String filePath;
   final String fileName;
   final String fileField;
@@ -618,6 +653,8 @@ class PhotoUploadItem {
       angleId: json['angleId'] as int,
       photoIndex: json['photoIndex'] as int,
       imageOrder: json['imageOrder'] as int?,
+      isCallEngine:
+          json['isCallEngine'] as bool? ?? json['isCapture'] as bool? ?? false,
       filePath: json['filePath'] as String,
       fileName: json['fileName'] as String,
       fileField: json['fileField'] as String,
@@ -644,6 +681,7 @@ class PhotoUploadItem {
         'angleId': angleId,
         'photoIndex': photoIndex,
         if (imageOrder != null) 'imageOrder': imageOrder,
+        'isCallEngine': isCallEngine,
         'filePath': filePath,
         'fileName': fileName,
         'fileField': fileField,

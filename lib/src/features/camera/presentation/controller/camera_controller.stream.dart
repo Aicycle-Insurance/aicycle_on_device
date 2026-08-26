@@ -18,6 +18,14 @@ mixin _StreamMixin on _CameraControllerBase {
     // User chưa bấm "Bắt đầu chụp ảnh xe" → bỏ qua toàn bộ frame streaming.
     if (!_captureStarted || _stopped) return;
 
+    if (data['type'] == 'streamFrame') {
+      final path = data['filePath'];
+      if (path is String && path.isNotEmpty) {
+        _onContextStreamFrame(path);
+      }
+      return;
+    }
+
     final type = data['type'];
     // Hai model detect đều trả type=='detect'; phân biệt bằng modelId:
     //   'detect'  -> car damage (model chính)

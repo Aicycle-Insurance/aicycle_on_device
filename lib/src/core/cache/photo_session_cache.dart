@@ -22,6 +22,7 @@ class PhotoSessionCache {
   static const _rootDirName = 'aicycle_photo_cache';
   static const _uploadPendingFileName = '.upload_pending';
   static const _thumbnailDirName = '.thumbs';
+  static const _streamDirName = '_stream';
 
   static String thumbnailPathForPhotoPath(String photoPath) {
     final file = File(photoPath);
@@ -50,6 +51,21 @@ class PhotoSessionCache {
     final dir = Directory('${sessionDir.path}/$angleId');
     if (!dir.existsSync()) dir.createSync(recursive: true);
     return dir;
+  }
+
+  /// Directory for background context-stream JPEG files.
+  Future<String> streamDirPath(String sessionId) async {
+    final sessionDir = await _sessionDir(sessionId, create: true);
+    final dir = Directory('${sessionDir.path}/$_streamDirName');
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    return dir.path;
+  }
+
+  /// Creates a unique JPEG path for a background context-stream frame.
+  Future<String> createStreamFramePath(String sessionId) async {
+    final dir = await streamDirPath(sessionId);
+    final micros = DateTime.now().microsecondsSinceEpoch;
+    return '$dir/$micros.jpg';
   }
 
   /// Creates a unique JPEG path for a captured photo.
