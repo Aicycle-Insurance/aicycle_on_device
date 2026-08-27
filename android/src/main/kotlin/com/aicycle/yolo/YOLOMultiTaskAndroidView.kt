@@ -113,6 +113,12 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     private val thirdExecutor:    ExecutorService = Executors.newSingleThreadExecutor()
     private val cameraExecutor:   ExecutorService = Executors.newSingleThreadExecutor()
 
+    // Chuẩn hoá ảnh still (decode → xoay → crop → encode → ghi file) tốn hàng
+    // trăm ms. Phải nằm ngoài [cameraExecutor]: đó là analyzer của ImageAnalysis,
+    // chạy ở đây thì vừa treo luồng frame vừa phải chờ frame đang xử lý xong mới
+    // tới lượt — đúng lúc user đang chờ ảnh "dừng hình" hiện ra.
+    private val captureExecutor:  ExecutorService = Executors.newSingleThreadExecutor()
+
     private var detectPredictor:   Predictor? = null
     private var classifyPredictor: Predictor? = null
     private var thirdPredictor:    Predictor? = null
@@ -349,7 +355,9 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
 
         // Snapshot rồi xoá tham chiếu ngay để onFrame (đã bị chặn bởi isStopped)
         // không còn dùng tới. Việc đóng model nặng làm ở luồng nền bên dưới.
-        val executors = listOf(detectExecutor, classifyExecutor, thirdExecutor, cameraExecutor, ocrExecutor)
+        val executors = listOf(
+            detectExecutor, classifyExecutor, thirdExecutor, cameraExecutor, captureExecutor, ocrExecutor
+        )
         val predictors = listOf(detectPredictor, classifyPredictor, thirdPredictor)
         val ocr = ocrModel
         detectPredictor = null
@@ -406,16 +414,34 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         return enable
     }
 
+    /**
+     * Ảnh still đã chuẩn hoá. [bitmap] là bản upright + đã crop, chỉ có khi
+     * đường xử lý đã phải decode — giữ lại để tạo thumbnail mà không decode lại
+     * JPEG FullHD lần nữa. Bên nhận sở hữu [bitmap] và phải recycle.
+     */
+    private class CapturedStill(val jpeg: ByteArray, val bitmap: Bitmap?)
+
     fun capturePhoto(
         crop: android.graphics.RectF? = null,
         jpegQuality: Int = 80,
         callback: (ByteArray?) -> Unit
     ) {
+        captureStill(crop, jpegQuality) { still ->
+            still?.bitmap?.recycle()
+            callback(still?.jpeg)
+        }
+    }
+
+    private fun captureStill(
+        crop: android.graphics.RectF?,
+        jpegQuality: Int,
+        callback: (CapturedStill?) -> Unit
+    ) {
         val ic = imageCaptureUseCase ?: run { callback(null); return }
         // Snapshot preview size on the main thread for the aspect-fill crop mapping.
         val previewW = previewView.width
         val previewH = previewView.height
-        ic.takePicture(cameraExecutor, object : ImageCapture.OnImageCapturedCallback() {
+        ic.takePicture(captureExecutor, object : ImageCapture.OnImageCapturedCallback() {
             override fun onCaptureSuccess(image: ImageProxy) {
                 try {
                     val rotationDegrees = image.imageInfo.rotationDegrees
@@ -453,36 +479,45 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         thumbnailMaxSize: Int = 160,
         callback: (String?) -> Unit
     ) {
-        capturePhoto(crop, jpegQuality) { bytes ->
-            if (bytes == null) {
+        captureStill(crop, jpegQuality) { still ->
+            if (still == null) {
                 callback(null)
-                return@capturePhoto
+                return@captureStill
             }
             try {
                 val file = File(path)
                 file.parentFile?.mkdirs()
-                file.writeBytes(bytes)
+                file.writeBytes(still.jpeg)
                 if (thumbnailPath != null) {
                     runCatching {
-                        writeThumbnail(bytes, thumbnailPath, thumbnailMaxSize)
+                        writeThumbnail(still.jpeg, still.bitmap, thumbnailPath, thumbnailMaxSize)
                     }
                 }
                 callback(file.absolutePath)
             } catch (e: Exception) {
                 Log.e(TAG, "capturePhotoToFile failed: ${e.message}")
                 callback(null)
+            } finally {
+                still.bitmap?.recycle()
             }
         }
     }
 
-    private fun writeThumbnail(bytes: ByteArray, path: String, maxSize: Int) {
-        val source = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return
+    /**
+     * Ghi thumbnail [maxSize]px. Ưu tiên [source] (bitmap upright đã có sẵn từ
+     * bước crop) — decode lại [jpeg] FullHD chỉ để thu nhỏ là tốn thêm một lần
+     * decode toàn khung. Khi buộc phải decode (ảnh không qua bước crop) thì
+     * decode ở mức lấy mẫu thấp nhất còn đủ kích thước.
+     */
+    private fun writeThumbnail(jpeg: ByteArray, source: Bitmap?, path: String, maxSize: Int) {
+        val decoded = if (source != null) null else decodeSampled(jpeg, maxSize)
+        val base = source ?: decoded ?: return
         try {
-            val longest = maxOf(source.width, source.height).coerceAtLeast(1)
+            val longest = maxOf(base.width, base.height).coerceAtLeast(1)
             val scale = maxSize.toFloat() / longest.toFloat()
-            val width = maxOf(1, (source.width * scale).toInt())
-            val height = maxOf(1, (source.height * scale).toInt())
-            val thumb = Bitmap.createScaledBitmap(source, width, height, true)
+            val width = maxOf(1, (base.width * scale).toInt())
+            val height = maxOf(1, (base.height * scale).toInt())
+            val thumb = Bitmap.createScaledBitmap(base, width, height, true)
             try {
                 val file = File(path)
                 file.parentFile?.mkdirs()
@@ -490,11 +525,21 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
                     thumb.compress(Bitmap.CompressFormat.JPEG, 65, out)
                 }
             } finally {
-                if (thumb !== source) thumb.recycle()
+                if (thumb !== base) thumb.recycle()
             }
         } finally {
-            source.recycle()
+            decoded?.recycle()
         }
+    }
+
+    private fun decodeSampled(jpeg: ByteArray, maxSize: Int): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, bounds)
+        val longest = maxOf(bounds.outWidth, bounds.outHeight)
+        var sample = 1
+        while (longest / (sample * 2) >= maxSize) sample *= 2
+        val options = BitmapFactory.Options().apply { inSampleSize = sample }
+        return BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, options)
     }
 
     // endregion
@@ -974,32 +1019,92 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         previewW: Int,
         previewH: Int,
         jpegQuality: Int,
-    ): ByteArray {
-        if (rotationDegrees == 0 && crop == null) return bytes
-        var bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return bytes
-        if (rotationDegrees != 0) {
-            val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
-            val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
-            if (rotated !== bmp) { bmp.recycle(); bmp = rotated }
+    ): CapturedStill {
+        if (rotationDegrees == 0 && crop == null) return CapturedStill(bytes, null)
+        val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            ?: return CapturedStill(bytes, null)
+
+        // Xoay và crop trong MỘT phép createBitmap: hai phép rời nhau phải cấp
+        // phát (và ghi) thêm một bitmap FullHD trung gian.
+        var bmp = decoded
+        val cropRect = if (crop != null && previewW > 0 && previewH > 0) {
+            viewportRectInSource(decoded, crop, previewW, previewH, rotationDegrees)
+        } else {
+            null
         }
-        if (crop != null && previewW > 0 && previewH > 0) {
-            val cropped = cropToViewport(bmp, crop, previewW, previewH)
-            if (cropped !== bmp) { bmp.recycle(); bmp = cropped }
+        val matrix = if (rotationDegrees != 0) {
+            Matrix().apply { postRotate(rotationDegrees.toFloat()) }
+        } else {
+            null
         }
-        return ByteArrayOutputStream().also { out ->
+        if (cropRect != null || matrix != null) {
+            val x = cropRect?.left ?: 0
+            val y = cropRect?.top ?: 0
+            val w = cropRect?.width() ?: decoded.width
+            val h = cropRect?.height() ?: decoded.height
+            val out = if (matrix != null) {
+                Bitmap.createBitmap(decoded, x, y, w, h, matrix, true)
+            } else {
+                Bitmap.createBitmap(decoded, x, y, w, h)
+            }
+            if (out !== decoded) { decoded.recycle(); bmp = out }
+        }
+
+        val jpeg = ByteArrayOutputStream().also { out ->
             bmp.compress(Bitmap.CompressFormat.JPEG, jpegQuality, out)
-            bmp.recycle()
         }.toByteArray()
+        return CapturedStill(jpeg, bmp)
     }
 
-    private fun cropToViewport(
-        bmp: Bitmap,
+    /**
+     * Khung nhìn thấy, tính bằng pixel của ảnh **chưa xoay**. Khung được tính
+     * trên ảnh đã upright rồi xoay ngược về hệ toạ độ gốc, để crop và xoay gộp
+     * được vào một phép [Bitmap.createBitmap].
+     */
+    private fun viewportRectInSource(
+        src: Bitmap,
         crop: android.graphics.RectF,
         previewW: Int,
         previewH: Int,
-    ): Bitmap {
-        val wp = bmp.width.toFloat()
-        val hp = bmp.height.toFloat()
+        rotationDegrees: Int,
+    ): android.graphics.Rect {
+        val swap = (rotationDegrees / 90) % 2 != 0
+        val uprightW = if (swap) src.height else src.width
+        val uprightH = if (swap) src.width else src.height
+        val upright = viewportRectUpright(uprightW, uprightH, crop, previewW, previewH)
+        return when (((rotationDegrees % 360) + 360) % 360) {
+            90 -> android.graphics.Rect(
+                upright.top,
+                uprightW - upright.right,
+                upright.bottom,
+                uprightW - upright.left,
+            )
+            180 -> android.graphics.Rect(
+                uprightW - upright.right,
+                uprightH - upright.bottom,
+                uprightW - upright.left,
+                uprightH - upright.top,
+            )
+            270 -> android.graphics.Rect(
+                uprightH - upright.bottom,
+                upright.left,
+                uprightH - upright.top,
+                upright.right,
+            )
+            else -> upright
+        }
+    }
+
+    /** Khung nhìn thấy, tính bằng pixel của ảnh đã upright ([srcW] × [srcH]). */
+    private fun viewportRectUpright(
+        srcW: Int,
+        srcH: Int,
+        crop: android.graphics.RectF,
+        previewW: Int,
+        previewH: Int,
+    ): android.graphics.Rect {
+        val wp = srcW.toFloat()
+        val hp = srcH.toFloat()
         val wv = previewW.toFloat()
         val hv = previewH.toFloat()
 
@@ -1032,9 +1137,9 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
 
         val x = left.coerceIn(0f, wp).toInt()
         val y = top.coerceIn(0f, hp).toInt()
-        val w = (right.coerceIn(0f, wp).toInt() - x).coerceIn(1, bmp.width - x)
-        val h = (bottom.coerceIn(0f, hp).toInt() - y).coerceIn(1, bmp.height - y)
-        return Bitmap.createBitmap(bmp, x, y, w, h)
+        val w = (right.coerceIn(0f, wp).toInt() - x).coerceIn(1, srcW - x)
+        val h = (bottom.coerceIn(0f, hp).toInt() - y).coerceIn(1, srcH - y)
+        return android.graphics.Rect(x, y, x + w, y + h)
     }
 
     // endregion

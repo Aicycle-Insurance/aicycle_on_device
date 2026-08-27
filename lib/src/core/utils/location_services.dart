@@ -99,19 +99,67 @@ class LocationService {
   }
 
   static Position? _lastKnownPosition;
+  static DateTime? _lastKnownAt;
+
+  /// Request đang bay. Hai chỗ gọi cùng lúc (prefetch lúc mở camera và lần chụp
+  /// đầu) phải dùng chung một lần xin fix GPS, thay vì mở hai request song song.
+  static Future<Result<Position, LocationFailure>>? _inFlight;
+
+  /// Coi toạ độ còn dùng được trong khoảng này. Ảnh của một phiên chụp xe đều
+  /// chụp tại cùng một chỗ nên không cần fix mới cho từng ảnh.
+  static const _positionMaxAge = Duration(minutes: 2);
 
   /// Vị trí GPS vừa lấy thành công gần đây nhất trong phiên làm việc.
   static Position? get lastKnownPosition => _lastKnownPosition;
 
+  /// Toạ độ đã lấy được và vẫn còn "tươi" (trong [maxAge]), hoặc null nếu chưa
+  /// có. **Đồng bộ** — dùng ở đường tới hạn (khoảnh khắc chụp ảnh) để không bao
+  /// giờ phải chờ GPS.
+  static Position? freshPosition({Duration maxAge = _positionMaxAge}) {
+    final at = _lastKnownAt;
+    if (_lastKnownPosition == null || at == null) return null;
+    return DateTime.now().difference(at) <= maxAge ? _lastKnownPosition : null;
+  }
+
+  static void _cachePosition(Position position) {
+    _lastKnownPosition = position;
+    _lastKnownAt = DateTime.now();
+  }
+
   /// Lấy vị trí GPS hiện tại với [timeLimit] ngắn (mặc định 3s).
+  ///
+  /// Trả về ngay toạ độ đã cache nếu còn trong [maxAge] — trên Android
+  /// `getCurrentPosition` xin một fix MỚI (requestLocationUpdates rồi chờ
+  /// callback đầu tiên), tốn từ vài trăm ms tới trọn [timeLimit] khi máy chưa có
+  /// fix; iOS thì trả fix đã warm gần như tức thì. Không cache thì mỗi lần gọi
+  /// đều phải trả giá đó.
+  ///
   /// Nếu bị timeout hoặc có lỗi, tự động fallback về [_lastKnownPosition]
   /// hoặc vị trí gần nhất từ Geolocator để không làm chậm UX.
   Future<Result<Position, LocationFailure>> getFastCurrentPosition({
     Duration timeLimit = const Duration(seconds: 3),
-  }) async {
+    Duration maxAge = _positionMaxAge,
+  }) {
+    final cached = freshPosition(maxAge: maxAge);
+    if (cached != null) return Future.value(Success(cached));
+
+    final pending = _inFlight;
+    if (pending != null) return pending;
+
+    final started = _fetchFastPosition(timeLimit);
+    _inFlight = started;
+    started.whenComplete(() {
+      if (_inFlight == started) _inFlight = null;
+    });
+    return started;
+  }
+
+  Future<Result<Position, LocationFailure>> _fetchFastPosition(
+    Duration timeLimit,
+  ) async {
     try {
       final position = await _determinePosition(timeLimit: timeLimit);
-      _lastKnownPosition = position;
+      _cachePosition(position);
       _logger.i(
           '$_tag: Fast toạ độ → lat=${position.latitude}, lng=${position.longitude}');
       return Success(position);
@@ -125,7 +173,7 @@ class LocationService {
       try {
         final lastKnown = await Geolocator.getLastKnownPosition();
         if (lastKnown != null) {
-          _lastKnownPosition = lastKnown;
+          _cachePosition(lastKnown);
           _logger.i(
               '$_tag: Dùng Geolocator.getLastKnownPosition() → lat=${lastKnown.latitude}, lng=${lastKnown.longitude}');
           return Success(lastKnown);
@@ -229,7 +277,7 @@ class LocationService {
           timeLimit: timeLimit,
         ),
       );
-      _lastKnownPosition = pos;
+      _cachePosition(pos);
       return pos;
     } catch (e) {
       throw LocationException('Không thể lấy vị trí GPS: $e');

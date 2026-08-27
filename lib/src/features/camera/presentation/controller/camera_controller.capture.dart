@@ -61,17 +61,10 @@ mixin _CaptureMixin on _CameraControllerBase {
 
       final seg = segment ?? _activeSegmentIndex;
       if (seg != null) {
-        // Lấy vị trí GPS nhanh tại thời điểm chụp ảnh
-        double? latitude;
-        double? longitude;
-        final posResult = await LocationService().getFastCurrentPosition();
-        posResult.fold(
-          (_) {},
-          (pos) {
-            latitude = pos.latitude;
-            longitude = pos.longitude;
-          },
-        );
+        final cachedPosition = LocationService.freshPosition();
+        final latitude = cachedPosition?.latitude;
+        final longitude = cachedPosition?.longitude;
+        unawaited(LocationService().getFastCurrentPosition());
 
         final photoIndex = _capturedPhotos[seg]?.length ?? 0;
         final imageOrder = ++_imageOrderCounter;
