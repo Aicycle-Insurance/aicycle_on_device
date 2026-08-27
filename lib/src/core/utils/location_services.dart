@@ -99,48 +99,37 @@ class LocationService {
   }
 
   static Position? _lastKnownPosition;
-  static DateTime? _lastKnownAt;
 
   /// Request đang bay. Hai chỗ gọi cùng lúc (prefetch lúc mở camera và lần chụp
   /// đầu) phải dùng chung một lần xin fix GPS, thay vì mở hai request song song.
   static Future<Result<Position, LocationFailure>>? _inFlight;
 
-  /// Coi toạ độ còn dùng được trong khoảng này. Ảnh của một phiên chụp xe đều
-  /// chụp tại cùng một chỗ nên không cần fix mới cho từng ảnh.
-  static const _positionMaxAge = Duration(minutes: 2);
-
   /// Vị trí GPS vừa lấy thành công gần đây nhất trong phiên làm việc.
   static Position? get lastKnownPosition => _lastKnownPosition;
 
-  /// Toạ độ đã lấy được và vẫn còn "tươi" (trong [maxAge]), hoặc null nếu chưa
-  /// có. **Đồng bộ** — dùng ở đường tới hạn (khoảnh khắc chụp ảnh) để không bao
-  /// giờ phải chờ GPS.
-  static Position? freshPosition({Duration maxAge = _positionMaxAge}) {
-    final at = _lastKnownAt;
-    if (_lastKnownPosition == null || at == null) return null;
-    return DateTime.now().difference(at) <= maxAge ? _lastKnownPosition : null;
-  }
+  /// Toạ độ đã lấy được, hoặc null nếu chưa có. **Đồng bộ** — dùng ở đường tới
+  /// hạn (khoảnh khắc chụp ảnh) để không bao giờ phải chờ GPS. Một phiên chụp
+  /// xe đều tại cùng một chỗ nên dùng lại toạ độ đã lấy, không hết hạn theo thời
+  /// gian.
+  static Position? freshPosition() => _lastKnownPosition;
 
   static void _cachePosition(Position position) {
     _lastKnownPosition = position;
-    _lastKnownAt = DateTime.now();
   }
 
   /// Lấy vị trí GPS hiện tại với [timeLimit] ngắn (mặc định 3s).
   ///
-  /// Trả về ngay toạ độ đã cache nếu còn trong [maxAge] — trên Android
-  /// `getCurrentPosition` xin một fix MỚI (requestLocationUpdates rồi chờ
-  /// callback đầu tiên), tốn từ vài trăm ms tới trọn [timeLimit] khi máy chưa có
-  /// fix; iOS thì trả fix đã warm gần như tức thì. Không cache thì mỗi lần gọi
-  /// đều phải trả giá đó.
+  /// Trả về ngay toạ độ đã cache nếu có — trên Android `getCurrentPosition` xin
+  /// một fix MỚI (requestLocationUpdates rồi chờ callback đầu tiên), tốn từ vài
+  /// trăm ms tới trọn [timeLimit] khi máy chưa có fix; iOS thì trả fix đã warm
+  /// gần như tức thì.
   ///
   /// Nếu bị timeout hoặc có lỗi, tự động fallback về [_lastKnownPosition]
   /// hoặc vị trí gần nhất từ Geolocator để không làm chậm UX.
   Future<Result<Position, LocationFailure>> getFastCurrentPosition({
     Duration timeLimit = const Duration(seconds: 3),
-    Duration maxAge = _positionMaxAge,
   }) {
-    final cached = freshPosition(maxAge: maxAge);
+    final cached = _lastKnownPosition;
     if (cached != null) return Future.value(Success(cached));
 
     final pending = _inFlight;

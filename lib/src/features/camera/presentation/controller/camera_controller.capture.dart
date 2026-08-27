@@ -64,7 +64,6 @@ mixin _CaptureMixin on _CameraControllerBase {
         final cachedPosition = LocationService.freshPosition();
         final latitude = cachedPosition?.latitude;
         final longitude = cachedPosition?.longitude;
-        unawaited(LocationService().getFastCurrentPosition());
 
         final photoIndex = _capturedPhotos[seg]?.length ?? 0;
         final imageOrder = ++_imageOrderCounter;
