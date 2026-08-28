@@ -406,6 +406,8 @@ class _CameraScreenState extends State<CameraScreen>
                               _cameraController.completedTakesPriority,
                           onShowProgress: _showCarProgressDialog,
                           onCapture: _cameraController.manualCapture,
+                          isCaptureCoolingDown:
+                              _cameraController.isManualCaptureCoolingDown,
                         ),
                         if (_showManualCaptureHint)
                           Positioned(

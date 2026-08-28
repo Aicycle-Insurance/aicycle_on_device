@@ -129,14 +129,24 @@ mixin _CaptureMixin on _CameraControllerBase {
 
   /// Chụp thủ công bằng nút shutter: chụp ngay, lưu vào góc đang active (mặc
   /// định góc 0 nếu chưa phân loại được góc).
+  ///
+  /// Có cooldown [_manualCaptureCooldown] giữa các lần chụp tay để tránh spam.
+  /// Cooldown chỉ áp dụng cho nút thủ công, không ảnh hưởng auto-capture.
   Future<void> manualCapture() async {
+    if (isManualCaptureCoolingDown) return;
     final shouldContinueAfterCapture =
         _message?.message == StringSheet.noDamageDetectedGuide;
     final captured = await capturePhoto(
       immediate: true,
       segment: _activeSegmentIndex ?? 0,
     );
-    if (captured == null || !shouldContinueAfterCapture || _stopped) return;
+    if (captured == null) return;
+    _lastManualCaptureTime = DateTime.now();
+    // Sau đúng cooldown, rebuild để un-grey nút shutter — không phụ thuộc vào
+    // stream YOLO có bắn event hay không.
+    Timer(_manualCaptureCooldown, notifyListeners);
+    notifyListeners();
+    if (!shouldContinueAfterCapture || _stopped) return;
     await _showManualCaptureContinueGuide();
   }
 

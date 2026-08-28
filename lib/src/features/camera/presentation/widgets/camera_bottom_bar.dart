@@ -15,6 +15,7 @@ class CameraBottomBar extends StatelessWidget {
     required this.onShowProgress,
     this.onCapture,
     this.completedTakesPriority = false,
+    this.isCaptureCoolingDown = false,
   });
 
   /// Chiều cao bar — dùng chung với overlay/animation cần biết vị trí thumbnail.
@@ -39,6 +40,10 @@ class CameraBottomBar extends StatelessWidget {
 
   /// Chụp ảnh thủ công (nút shutter).
   final VoidCallback? onCapture;
+
+  /// True khi đang trong cooldown sau lần chụp tay gần nhất — nút shutter
+  /// hiển thị mờ và không nhận tap.
+  final bool isCaptureCoolingDown;
 
   @override
   Widget build(BuildContext context) {
@@ -69,23 +74,27 @@ class CameraBottomBar extends StatelessWidget {
   }
 
   /// Nút chụp thủ công kiểu shutter: vòng trắng ngoài + tròn trắng trong.
+  /// Khi [isCaptureCoolingDown] = true: mờ đi và không nhận tap.
   Widget _buildShutterButton() {
-    return GestureDetector(
-      onTap: onCapture,
-      child: Container(
-        width: 66.w,
-        height: 66.w,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(color: AppColors.white, width: 3),
-        ),
-        child: Center(
-          child: Container(
-            width: 52.w,
-            height: 52.w,
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              color: AppColors.white,
+    return Opacity(
+      opacity: isCaptureCoolingDown ? 0.35 : 1.0,
+      child: GestureDetector(
+        onTap: isCaptureCoolingDown ? null : onCapture,
+        child: Container(
+          width: 66.w,
+          height: 66.w,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: AppColors.white, width: 3),
+          ),
+          child: Center(
+            child: Container(
+              width: 52.w,
+              height: 52.w,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.white,
+              ),
             ),
           ),
         ),

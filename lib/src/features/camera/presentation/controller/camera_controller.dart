@@ -62,7 +62,7 @@ const List<DetectionResult> _noBoxes = [];
 /// Giữ message holdStill tối thiểu khoảng này trước khi auto-capture ảnh toàn
 /// cảnh — user cần thời gian đọc "Hãy giữ yên điện thoại…" và giữ máy ổn định,
 /// thay vì bị chụp ngay khi OCR vừa đọc được biển.
-const _holdStillMinDuration = Duration(seconds: 7);
+const _holdStillMinDuration = Duration(seconds: 3);
 
 /// OCR đọc được biển số chỉ có hiệu lực rất ngắn. Nếu user lia máy làm biển
 /// lệch/lẹm sau frame OCR đó thì controller phải chờ OCR đọc lại ở frame mới,
@@ -117,6 +117,9 @@ const _detailGuideMinVisibleDuration = Duration(seconds: 5);
 /// Sau ảnh chi tiết tự động, nếu vẫn không nhận diện thì chuyển hướng user.
 const _detailPostCaptureNoDetectionDelay = Duration(seconds: 5);
 
+/// Cooldown giữa các lần chụp tay (nút shutter) để tránh spam.
+const _manualCaptureCooldown = Duration(seconds: 5);
+
 /// Khi vào pha soi tổn thất: phải có tổn thất xuất hiện liên tục qua đủ số frame
 /// này (model chính) mới coi là tổn thất thật và mở màn xác nhận. Tránh một
 /// frame nhiễu (false positive 1 frame) làm bật xác nhận sai.
@@ -166,6 +169,9 @@ abstract class _CameraControllerBase extends ChangeNotifier {
 
   bool _torchEnabled = false;
   bool _isCapturing = false;
+
+  /// Thời điểm chụp tay cuối cùng — dùng để tính cooldown chống spam.
+  DateTime? _lastManualCaptureTime;
 
   /// User chưa bấm "Bắt đầu chụp ảnh xe" (guide sheet) → tạm bỏ qua mọi output
   /// streaming từ YOLO. Bật lên qua [_StreamMixin.startCapture].
@@ -377,6 +383,14 @@ abstract class _CameraControllerBase extends ChangeNotifier {
 
   bool get isTorchEnabled => _torchEnabled;
   bool get isCapturing => _isCapturing;
+
+  /// True khi đang trong thời gian cooldown sau lần chụp tay gần nhất.
+  /// UI dùng getter này để disable nút shutter tránh spam.
+  bool get isManualCaptureCoolingDown {
+    if (_lastManualCaptureTime == null) return false;
+    return DateTime.now().difference(_lastManualCaptureTime!) <
+        _manualCaptureCooldown;
+  }
   Map<int, List<String>> get capturedPhotos => _capturedPhotos;
   int? get activeSegmentIndex => _detectedSegmentIndex ?? _activeSegmentIndex;
   Set<int> get completedSegments => Set.unmodifiable(_completedSegments);

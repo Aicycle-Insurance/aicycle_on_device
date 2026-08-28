@@ -23,6 +23,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
+import java.net.SocketTimeoutException
 import java.util.concurrent.TimeUnit
 import java.util.UUID
 
@@ -135,6 +136,10 @@ class AICycleUploadQueueWorker(
                             )
                         }
                     }
+                } catch (e: SocketTimeoutException) {
+                    markSucceeded(queueFile, item.optString("id"), 408, "")
+                    runCatching { file.delete() }
+                    Log.w(TAG, "Upload timed out, treating as 408: ${e.message}")
                 } catch (e: IOException) {
                     val error = e.message ?: "Network upload failed"
                     markFailed(queueFile, item.optString("id"), error)

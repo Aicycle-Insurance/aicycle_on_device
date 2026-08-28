@@ -1,3 +1,8 @@
+## 0.1.14
+
+- add throttle logic for manual capture.
+- remove retry logic for timeout request.
+
 ## 0.1.13
 
 - Improve performance and stability

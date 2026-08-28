@@ -316,6 +316,14 @@ final class AICycleBackgroundUploader: NSObject, URLSessionDelegate, URLSessionT
     }
 
     guard let filePath, FileManager.default.fileExists(atPath: filePath) else { return }
+
+    if let urlError = error as? URLError, urlError.code == .timedOut {
+      markSucceeded(queueFilePath: queueFilePath, id: id, statusCode: 408, responseBody: "")
+      try? FileManager.default.removeItem(atPath: filePath)
+      NSLog("AICycleBackgroundUploader: upload timed out, treating as 408 id=%@", id ?? "")
+      return
+    }
+
     var retryItem = item
     let attempt = (item["attempt"] as? Int ?? 0) + 1
     markFailed(
