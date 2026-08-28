@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
-import '../../../../core/cache/photo_session_cache.dart';
 import '../../../../core/themes/app_colors.dart';
 import '../../../../core/utils/screen_utils.dart';
 import 'car_progress_ring.dart';
@@ -10,7 +9,7 @@ import 'car_progress_ring.dart';
 class CameraBottomBar extends StatelessWidget {
   const CameraBottomBar({
     super.key,
-    required this.capturedPhotos,
+    required this.previewPath,
     required this.activeSegmentIndex,
     required this.completedSegments,
     required this.onShowProgress,
@@ -28,7 +27,11 @@ class CameraBottomBar extends StatelessWidget {
   static const thumbnailRadius = 8.0;
   static const thumbnailBorderWidth = 2.0;
 
-  final Map<int, List<String>> capturedPhotos;
+  /// Ảnh hiển thị ở ô thumbnail, đã được controller giải sẵn (thumbnail 160px
+  /// hoặc ảnh gốc). Null = chưa có ảnh nào. Bar không tự dò file: việc đó chỉ
+  /// cần làm lại khi danh sách ảnh đổi, không phải mỗi lần build.
+  final String? previewPath;
+
   final int? activeSegmentIndex;
   final Set<int> completedSegments;
   final VoidCallback onShowProgress;
@@ -91,9 +94,8 @@ class CameraBottomBar extends StatelessWidget {
   }
 
   Widget _buildThumbnail() {
-    final lastPhotoPath = capturedPhotos.values.expand((l) => l).lastOrNull;
-    final previewPath = _previewPath(lastPhotoPath);
-    if (previewPath != null) {
+    final path = previewPath;
+    if (path != null) {
       return RotatedBox(
         quarterTurns: 1,
         child: Container(
@@ -104,7 +106,7 @@ class CameraBottomBar extends StatelessWidget {
             border:
                 Border.all(color: AppColors.white, width: thumbnailBorderWidth),
             image: DecorationImage(
-              image: FileImage(File(previewPath)),
+              image: FileImage(File(path)),
               fit: BoxFit.cover,
             ),
           ),
@@ -121,13 +123,5 @@ class CameraBottomBar extends StatelessWidget {
       child: Icon(Icons.photo_library_outlined,
           size: 24.r, color: AppColors.white),
     );
-  }
-
-  String? _previewPath(String? photoPath) {
-    if (photoPath == null) return null;
-    final thumbPath = PhotoSessionCache.thumbnailPathForPhotoPath(photoPath);
-    if (File(thumbPath).existsSync()) return thumbPath;
-    if (File(photoPath).existsSync()) return photoPath;
-    return null;
   }
 }

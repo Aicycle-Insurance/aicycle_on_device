@@ -32,7 +32,9 @@ Mỗi frame YOLO được phân loại theo `type` / `modelId`:
 
 ```mermaid
 flowchart TD
-    F["frame đến"] --> G{"_captureStarted?"}
+    F["frame đến"] --> TH{"type == thermal?"}
+    TH -->|"có"| THM["_handleThermal()<br/>lưu bậc nhiệt (thermalStatus)<br/>native đã tự hạ nhịp model"]
+    TH -->|"không"| G{"_captureStarted?"}
     G -->|"chưa bấm 'Bắt đầu chụp ảnh xe'"| SKIP["BỎ QUA"]
     G -->|rồi| T{"type / modelId?"}
 

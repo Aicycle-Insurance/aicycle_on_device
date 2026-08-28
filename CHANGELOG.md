@@ -1,3 +1,10 @@
+## 0.1.13
+
+- Improve performance and stability
+## 0.1.12
+
+- Improve performance and stability
+
 ## 0.1.11
 
 - Slow down auto-capture pacing so users have time to prepare

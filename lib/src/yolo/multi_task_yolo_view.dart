@@ -13,7 +13,7 @@ import 'core/yolo_model_resolver.dart';
 /// active YOLO tasks.
 ///
 /// [data] contains:
-/// - `"type"`: `"detect"` | `"classify"` | `"ocr"` — the task kind
+/// - `"type"`: `"detect"` | `"classify"` | `"ocr"` | `"thermal"` — the task kind
 /// - `"modelId"`: which configured model produced this result. Use this (not `"type"`)
 ///   to route results, since two detection models both report `"type": "detect"`:
 ///   `"detect"` (primary detect model), `"detect2"` (second detect model),
@@ -26,6 +26,11 @@ import 'core/yolo_model_resolver.dart';
 /// - `"readable"` (bool), `"plate"` (String), `"score"` (double): OCR result
 ///   (`type == "ocr"`) — emitted only when an OCR model is configured and a
 ///   license-plate box was found in a carPart frame.
+/// - `"level"` (int 0–3), `"state"` (String), `"throttled"` (bool): device
+///   thermal tier (`type == "thermal"`) — emitted once when the camera starts
+///   and again whenever the tier changes. Native throttles each model's
+///   inference rate as the tier rises; this event only reports that it is
+///   happening.
 typedef MultiTaskStreamCallback = void Function(Map<String, dynamic> data);
 
 /// Controller for [MultiTaskYOLOView]. Pass to the widget and call [capturePhoto]

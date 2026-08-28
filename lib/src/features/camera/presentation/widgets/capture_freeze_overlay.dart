@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -71,7 +72,7 @@ class _CaptureFreezeOverlayState extends State<CaptureFreezeOverlay>
     _controller.addStatusListener((status) {
       if (status == AnimationStatus.completed && mounted) {
         // Ảnh đã trùng khít thumbnail thật ở bottom bar → ẩn overlay là liền mạch.
-        setState(() => _path = null);
+        setState(() => _showPhoto(null));
       }
     });
     // Widget có thể được dựng lại ngay giữa một lượt hiệu ứng (cây widget đổi
@@ -81,7 +82,7 @@ class _CaptureFreezeOverlayState extends State<CaptureFreezeOverlay>
     if (startedAt != null && widget.photoPath != null) {
       final elapsed = DateTime.now().difference(startedAt);
       if (elapsed < total) {
-        _path = widget.photoPath;
+        _showPhoto(widget.photoPath);
         _controller.forward(
           from: elapsed.inMicroseconds / total.inMicroseconds,
         );
@@ -93,15 +94,35 @@ class _CaptureFreezeOverlayState extends State<CaptureFreezeOverlay>
   void didUpdateWidget(CaptureFreezeOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.tick != oldWidget.tick && widget.photoPath != null) {
-      setState(() => _path = widget.photoPath);
+      setState(() => _showPhoto(widget.photoPath));
       _controller.forward(from: 0);
     }
   }
 
   @override
   void dispose() {
+    _showPhoto(null);
     _controller.dispose();
     super.dispose();
+  }
+
+  /// Đổi ảnh đang vẽ và **đẩy ảnh cũ ra khỏi image cache của Flutter**.
+  ///
+  /// Ảnh chụp là JPEG cỡ FullHD; decode ra bitmap ~6–8 MB. Mỗi tấm chỉ được
+  /// hiển thị đúng một lượt (~1.15 s) rồi không bao giờ dùng lại — thanh dưới
+  /// đã có thumbnail 160px riêng. Nếu không evict, chúng nằm lại trong
+  /// `PaintingBinding.imageCache` tới trần 100 MB; cộng với 3 model GPU và
+  /// buffer camera là nguyên nhân OOM sau phiên chụp dài.
+  ///
+  /// Không dùng `cacheWidth`: ở pha "dừng hình" ảnh phủ gần kín màn hình nên
+  /// vẫn cần gần đúng độ phân giải gốc — giảm kích thước decode sẽ làm mờ mà
+  /// tiết kiệm không đáng kể. Vấn đề là TÍCH LUỸ, và evict giải quyết đúng nó.
+  void _showPhoto(String? path) {
+    final previous = _path;
+    if (previous != null && previous != path) {
+      unawaited(FileImage(File(previous)).evict());
+    }
+    _path = path;
   }
 
   @override

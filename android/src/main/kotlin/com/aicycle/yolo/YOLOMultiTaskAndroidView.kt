@@ -62,15 +62,46 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         private const val REQUEST_CODE_PERMISSIONS = 1001
         private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
 
-        // Classify giữ ~6–7 fps. CarPart tăng lên tối đa ~10 fps khi đang căn
-        // toàn cảnh để tạo thêm cơ hội OCR, rồi hạ về ~6–7 fps khi soi tổn thất.
-        private const val CLASSIFY_MIN_INTERVAL_MS = 150L
-        private const val THIRD_PANORAMIC_INTERVAL_MS = 100L
-        private const val THIRD_INSPECTION_INTERVAL_MS = 150L
+        // ── Nhịp chạy model theo bậc nhiệt ───────────────────────────────────
+        // Mỗi bảng có 4 cột, index theo ThermalTier.ordinal:
+        //   [NORMAL, WARM, HOT, CRITICAL]
+        // Giá trị là khoảng cách tối thiểu (ms) giữa 2 lần chạy; 0 = không giới
+        // hạn (chạy mỗi frame khi predictor rảnh). Máy càng nóng, nhịp càng thưa
+        // → GPU/NPU có thời gian nghỉ giữa các lần inference.
+        //
+        // Ở bậc NORMAL: classify ~6–7 fps, carPart tối đa ~10 fps khi căn toàn
+        // cảnh rồi hạ về ~6–7 fps khi soi tổn thất, carDamage ~12.5 fps, OCR
+        // không giới hạn.
 
         // Context stream (inspection phase background upload)
         private const val STREAM_INTERVAL_MS = 1000L
         private const val STREAM_JPEG_QUALITY = 70
+
+        /**
+         * carDamage — model chính, tốn nhiều nhất. Trước đây chạy MỖI FRAME
+         * (~30 fps) khi máy mát; nay chặn ở ~12.5 fps ngay từ bậc NORMAL.
+         *
+         * 12.5 fps là đủ: luồng nghiệp vụ chỉ cần [_damageConfirmFrameCount] = 5
+         * frame liên tiếp có tổn thất mới mở xác nhận → 400 ms, người dùng
+         * không nhận ra khác biệt. Đổi lại GPU có khoảng nghỉ giữa các lần
+         * inference thay vì chạy bão hoà.
+         */
+        private val DETECT_MIN_INTERVAL_MS = longArrayOf(80L, 150L, 250L, 400L)
+
+        /** carCorner. */
+        private val CLASSIFY_MIN_INTERVAL_MS = longArrayOf(150L, 250L, 350L, 500L)
+
+        // carPart phải chạy nhanh hơn _carPartFlickerGrace (600 ms) phía Dart —
+        // nếu thưa hơn thì `_seenRecently` không bao giờ đúng và luồng canh
+        // khung ảnh toàn cảnh đứng hẳn. Vì vậy trần ở đây là 450 ms, kể cả bậc
+        // CRITICAL.
+        private val THIRD_PANORAMIC_INTERVAL_MS = longArrayOf(100L, 200L, 300L, 400L)
+        private val THIRD_INSPECTION_INTERVAL_MS = longArrayOf(150L, 250L, 350L, 450L)
+
+        // OCR phải chạy nhanh hơn _plateReadFreshDuration (1200 ms) phía Dart,
+        // nếu không cờ "đọc được biển" hết hạn trước khi đủ điều kiện chụp.
+        private val OCR_MIN_INTERVAL_MS = longArrayOf(0L, 0L, 400L, 700L)
+
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -81,6 +112,12 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     private val classifyExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val thirdExecutor:    ExecutorService = Executors.newSingleThreadExecutor()
     private val cameraExecutor:   ExecutorService = Executors.newSingleThreadExecutor()
+
+    // Chuẩn hoá ảnh still (decode → xoay → crop → encode → ghi file) tốn hàng
+    // trăm ms. Phải nằm ngoài [cameraExecutor]: đó là analyzer của ImageAnalysis,
+    // chạy ở đây thì vừa treo luồng frame vừa phải chờ frame đang xử lý xong mới
+    // tới lượt — đúng lúc user đang chờ ảnh "dừng hình" hiện ra.
+    private val captureExecutor:  ExecutorService = Executors.newSingleThreadExecutor()
 
     private var detectPredictor:   Predictor? = null
     private var classifyPredictor: Predictor? = null
@@ -119,9 +156,23 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     private val thirdBusy    = AtomicBoolean(false)
 
     // Mốc thời gian lần chạy gần nhất (chỉ truy cập trên cameraExecutor) — dùng
-    // để giới hạn nhịp chạy của classify/third theo *_MIN_INTERVAL_MS.
+    // để giới hạn nhịp chạy của từng model theo *_MIN_INTERVAL_MS.
+    private var lastDetectMs = 0L
     private var lastClassifyMs = 0L
     private var lastThirdMs = 0L
+
+    /** Mốc lần OCR gần nhất — chỉ ghi sau khi giành được [ocrBusy], trên thirdExecutor. */
+    @Volatile private var lastOcrMs = 0L
+
+    // ── Hạ nhiệt ──────────────────────────────────────────────────────────────
+    // Bậc nhiệt hiện tại, dùng để tra các bảng *_MIN_INTERVAL_MS. Ghi trên main
+    // thread (callback của governor), đọc trên cameraExecutor/thirdExecutor.
+    @Volatile private var thermalTier = ThermalTier.NORMAL
+
+    private val thermalGovernor = ThermalGovernor(context) { tier ->
+        thermalTier = tier
+        emitThermalState(tier)
+    }
 
     private var lifecycleOwner: LifecycleOwner? = null
     private var imageCaptureUseCase: ImageCapture? = null
@@ -157,6 +208,7 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         // COMPATIBLE forces a TextureView so Stack overlays stay visible inside a Flutter AndroidView.
         previewView.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         addView(previewView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        thermalGovernor.start()
     }
 
     // region Public API
@@ -293,6 +345,7 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         isStopped = true
         onMultiTaskStream = null
         cameraExecutor.execute { stopContextStreamInternal() }
+        thermalGovernor.stop()
         // Unbind camera phải chạy trên main thread (yêu cầu của CameraX).
         if (Looper.myLooper() == Looper.getMainLooper()) {
             stopCameraInternal()
@@ -302,7 +355,9 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
 
         // Snapshot rồi xoá tham chiếu ngay để onFrame (đã bị chặn bởi isStopped)
         // không còn dùng tới. Việc đóng model nặng làm ở luồng nền bên dưới.
-        val executors = listOf(detectExecutor, classifyExecutor, thirdExecutor, cameraExecutor, ocrExecutor)
+        val executors = listOf(
+            detectExecutor, classifyExecutor, thirdExecutor, cameraExecutor, captureExecutor, ocrExecutor
+        )
         val predictors = listOf(detectPredictor, classifyPredictor, thirdPredictor)
         val ocr = ocrModel
         detectPredictor = null
@@ -359,16 +414,34 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         return enable
     }
 
+    /**
+     * Ảnh still đã chuẩn hoá. [bitmap] là bản upright + đã crop, chỉ có khi
+     * đường xử lý đã phải decode — giữ lại để tạo thumbnail mà không decode lại
+     * JPEG FullHD lần nữa. Bên nhận sở hữu [bitmap] và phải recycle.
+     */
+    private class CapturedStill(val jpeg: ByteArray, val bitmap: Bitmap?)
+
     fun capturePhoto(
         crop: android.graphics.RectF? = null,
         jpegQuality: Int = 80,
         callback: (ByteArray?) -> Unit
     ) {
+        captureStill(crop, jpegQuality) { still ->
+            still?.bitmap?.recycle()
+            callback(still?.jpeg)
+        }
+    }
+
+    private fun captureStill(
+        crop: android.graphics.RectF?,
+        jpegQuality: Int,
+        callback: (CapturedStill?) -> Unit
+    ) {
         val ic = imageCaptureUseCase ?: run { callback(null); return }
         // Snapshot preview size on the main thread for the aspect-fill crop mapping.
         val previewW = previewView.width
         val previewH = previewView.height
-        ic.takePicture(cameraExecutor, object : ImageCapture.OnImageCapturedCallback() {
+        ic.takePicture(captureExecutor, object : ImageCapture.OnImageCapturedCallback() {
             override fun onCaptureSuccess(image: ImageProxy) {
                 try {
                     val rotationDegrees = image.imageInfo.rotationDegrees
@@ -406,36 +479,45 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         thumbnailMaxSize: Int = 160,
         callback: (String?) -> Unit
     ) {
-        capturePhoto(crop, jpegQuality) { bytes ->
-            if (bytes == null) {
+        captureStill(crop, jpegQuality) { still ->
+            if (still == null) {
                 callback(null)
-                return@capturePhoto
+                return@captureStill
             }
             try {
                 val file = File(path)
                 file.parentFile?.mkdirs()
-                file.writeBytes(bytes)
+                file.writeBytes(still.jpeg)
                 if (thumbnailPath != null) {
                     runCatching {
-                        writeThumbnail(bytes, thumbnailPath, thumbnailMaxSize)
+                        writeThumbnail(still.jpeg, still.bitmap, thumbnailPath, thumbnailMaxSize)
                     }
                 }
                 callback(file.absolutePath)
             } catch (e: Exception) {
                 Log.e(TAG, "capturePhotoToFile failed: ${e.message}")
                 callback(null)
+            } finally {
+                still.bitmap?.recycle()
             }
         }
     }
 
-    private fun writeThumbnail(bytes: ByteArray, path: String, maxSize: Int) {
-        val source = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return
+    /**
+     * Ghi thumbnail [maxSize]px. Ưu tiên [source] (bitmap upright đã có sẵn từ
+     * bước crop) — decode lại [jpeg] FullHD chỉ để thu nhỏ là tốn thêm một lần
+     * decode toàn khung. Khi buộc phải decode (ảnh không qua bước crop) thì
+     * decode ở mức lấy mẫu thấp nhất còn đủ kích thước.
+     */
+    private fun writeThumbnail(jpeg: ByteArray, source: Bitmap?, path: String, maxSize: Int) {
+        val decoded = if (source != null) null else decodeSampled(jpeg, maxSize)
+        val base = source ?: decoded ?: return
         try {
-            val longest = maxOf(source.width, source.height).coerceAtLeast(1)
+            val longest = maxOf(base.width, base.height).coerceAtLeast(1)
             val scale = maxSize.toFloat() / longest.toFloat()
-            val width = maxOf(1, (source.width * scale).toInt())
-            val height = maxOf(1, (source.height * scale).toInt())
-            val thumb = Bitmap.createScaledBitmap(source, width, height, true)
+            val width = maxOf(1, (base.width * scale).toInt())
+            val height = maxOf(1, (base.height * scale).toInt())
+            val thumb = Bitmap.createScaledBitmap(base, width, height, true)
             try {
                 val file = File(path)
                 file.parentFile?.mkdirs()
@@ -443,11 +525,21 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
                     thumb.compress(Bitmap.CompressFormat.JPEG, 65, out)
                 }
             } finally {
-                if (thumb !== source) thumb.recycle()
+                if (thumb !== base) thumb.recycle()
             }
         } finally {
-            source.recycle()
+            decoded?.recycle()
         }
+    }
+
+    private fun decodeSampled(jpeg: ByteArray, maxSize: Int): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, bounds)
+        val longest = maxOf(bounds.outWidth, bounds.outHeight)
+        var sample = 1
+        while (longest / (sample * 2) >= maxSize) sample *= 2
+        val options = BitmapFactory.Options().apply { inSampleSize = sample }
+        return BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, options)
     }
 
     // endregion
@@ -512,6 +604,9 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
                 }
             }
             preview.setSurfaceProvider(previewView.surfaceProvider)
+            // Sink phía Flutter đã gắn xong ở thời điểm này — báo bậc nhiệt khởi
+            // điểm (máy có thể đã nóng sẵn từ trước khi mở màn camera).
+            emitThermalState(thermalTier)
         }, ContextCompat.getMainExecutor(context))
     }
 
@@ -544,9 +639,12 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
 
         // Phase 1 — claim slots ngay trên cameraExecutor (đơn luồng): áp giới hạn
         // nhịp theo model + back-pressure. Chưa chạy inference ở đây.
-        val runDetect = claimDetect()
-        val runClassify = claimClassify(now)
-        val runThird = claimThird(now)
+        // Snapshot một lần cho cả frame: bậc nhiệt có thể đổi giữa 3 lệnh claim,
+        // và ba model nên cùng chạy theo một bậc để nhịp không lệch nhau.
+        val tier = thermalTier.ordinal
+        val runDetect = claimDetect(now, tier)
+        val runClassify = claimClassify(now, tier)
+        val runThird = claimThird(now, tier)
 
         val count = (if (runDetect) 1 else 0) +
             (if (runClassify) 1 else 0) +
@@ -569,26 +667,33 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         }
     }
 
-    /** carDamage: chạy mỗi frame khi rảnh — trừ pha panorama (input bị chặn). */
-    private fun claimDetect(): Boolean {
+    /**
+     * carDamage: chạy mỗi frame khi rảnh — trừ pha panorama (input bị chặn) và
+     * trừ khi máy đã nóng (bậc nhiệt > NORMAL áp thêm nhịp tối thiểu).
+     */
+    private fun claimDetect(now: Long, tier: Int): Boolean {
         if (detectPredictor == null || !detectEnabled) return false
-        return detectBusy.compareAndSet(false, true)
+        val minInterval = DETECT_MIN_INTERVAL_MS[tier]
+        if (minInterval > 0 && now - lastDetectMs < minInterval) return false
+        if (!detectBusy.compareAndSet(false, true)) return false
+        lastDetectMs = now
+        return true
     }
 
-    private fun claimClassify(now: Long): Boolean {
+    private fun claimClassify(now: Long, tier: Int): Boolean {
         if (classifyPredictor == null) return false
-        if (now - lastClassifyMs < CLASSIFY_MIN_INTERVAL_MS) return false
+        if (now - lastClassifyMs < CLASSIFY_MIN_INTERVAL_MS[tier]) return false
         if (!classifyBusy.compareAndSet(false, true)) return false
         lastClassifyMs = now
         return true
     }
 
-    private fun claimThird(now: Long): Boolean {
+    private fun claimThird(now: Long, tier: Int): Boolean {
         if (thirdPredictor == null) return false
         val minInterval = if (ocrEnabled) {
-            THIRD_PANORAMIC_INTERVAL_MS
+            THIRD_PANORAMIC_INTERVAL_MS[tier]
         } else {
-            THIRD_INSPECTION_INTERVAL_MS
+            THIRD_INSPECTION_INTERVAL_MS[tier]
         }
         if (now - lastThirdMs < minInterval) return false
         if (!thirdBusy.compareAndSet(false, true)) return false
@@ -635,6 +740,12 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         if (!ocrEnabled) return // gated off during inspection
         if (!ocrBusy.compareAndSet(false, true)) return
 
+        // Nhịp tối thiểu theo bậc nhiệt — kiểm tra SAU khi đã giành được cờ bận
+        // để chỉ một luồng đọc/ghi lastOcrMs tại một thời điểm.
+        val now = System.currentTimeMillis()
+        val ocrMinInterval = OCR_MIN_INTERVAL_MS[thermalTier.ordinal]
+        if (ocrMinInterval > 0 && now - lastOcrMs < ocrMinInterval) { ocrBusy.set(false); return }
+
         // Only the highest-confidence plate box that sits FULLY inside the exact
         // aspect-fill crop rect used by capturePhoto. Comparing directly with
         // ocrViewportTop/bottom is not enough because capturePhoto applies
@@ -673,6 +784,7 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
             return
         }
 
+        lastOcrMs = now
         ocrExecutor.execute {
             try {
                 val read = ocr.read(crop)
@@ -808,6 +920,21 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
 
     // region Stream data builder
 
+    /**
+     * Báo bậc nhiệt hiện tại lên Dart (`type == "thermal"`). Bắn khi bậc đổi và
+     * một lần lúc camera khởi động, để host biết SDK đang tự hạ nhịp.
+     */
+    private fun emitThermalState(tier: ThermalTier) {
+        val event = mapOf(
+            "type" to "thermal",
+            "modelId" to "thermal",
+            "level" to tier.ordinal,
+            "state" to tier.label,
+            "throttled" to (tier != ThermalTier.NORMAL),
+        )
+        mainHandler.post { onMultiTaskStream?.invoke(event) }
+    }
+
     private fun buildTaskData(result: YOLOResult, slot: Slot, camFpsNow: Double): Map<String, Any> {
         val now = System.currentTimeMillis()
         val fps: Double
@@ -892,32 +1019,92 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         previewW: Int,
         previewH: Int,
         jpegQuality: Int,
-    ): ByteArray {
-        if (rotationDegrees == 0 && crop == null) return bytes
-        var bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return bytes
-        if (rotationDegrees != 0) {
-            val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
-            val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
-            if (rotated !== bmp) { bmp.recycle(); bmp = rotated }
+    ): CapturedStill {
+        if (rotationDegrees == 0 && crop == null) return CapturedStill(bytes, null)
+        val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            ?: return CapturedStill(bytes, null)
+
+        // Xoay và crop trong MỘT phép createBitmap: hai phép rời nhau phải cấp
+        // phát (và ghi) thêm một bitmap FullHD trung gian.
+        var bmp = decoded
+        val cropRect = if (crop != null && previewW > 0 && previewH > 0) {
+            viewportRectInSource(decoded, crop, previewW, previewH, rotationDegrees)
+        } else {
+            null
         }
-        if (crop != null && previewW > 0 && previewH > 0) {
-            val cropped = cropToViewport(bmp, crop, previewW, previewH)
-            if (cropped !== bmp) { bmp.recycle(); bmp = cropped }
+        val matrix = if (rotationDegrees != 0) {
+            Matrix().apply { postRotate(rotationDegrees.toFloat()) }
+        } else {
+            null
         }
-        return ByteArrayOutputStream().also { out ->
+        if (cropRect != null || matrix != null) {
+            val x = cropRect?.left ?: 0
+            val y = cropRect?.top ?: 0
+            val w = cropRect?.width() ?: decoded.width
+            val h = cropRect?.height() ?: decoded.height
+            val out = if (matrix != null) {
+                Bitmap.createBitmap(decoded, x, y, w, h, matrix, true)
+            } else {
+                Bitmap.createBitmap(decoded, x, y, w, h)
+            }
+            if (out !== decoded) { decoded.recycle(); bmp = out }
+        }
+
+        val jpeg = ByteArrayOutputStream().also { out ->
             bmp.compress(Bitmap.CompressFormat.JPEG, jpegQuality, out)
-            bmp.recycle()
         }.toByteArray()
+        return CapturedStill(jpeg, bmp)
     }
 
-    private fun cropToViewport(
-        bmp: Bitmap,
+    /**
+     * Khung nhìn thấy, tính bằng pixel của ảnh **chưa xoay**. Khung được tính
+     * trên ảnh đã upright rồi xoay ngược về hệ toạ độ gốc, để crop và xoay gộp
+     * được vào một phép [Bitmap.createBitmap].
+     */
+    private fun viewportRectInSource(
+        src: Bitmap,
         crop: android.graphics.RectF,
         previewW: Int,
         previewH: Int,
-    ): Bitmap {
-        val wp = bmp.width.toFloat()
-        val hp = bmp.height.toFloat()
+        rotationDegrees: Int,
+    ): android.graphics.Rect {
+        val swap = (rotationDegrees / 90) % 2 != 0
+        val uprightW = if (swap) src.height else src.width
+        val uprightH = if (swap) src.width else src.height
+        val upright = viewportRectUpright(uprightW, uprightH, crop, previewW, previewH)
+        return when (((rotationDegrees % 360) + 360) % 360) {
+            90 -> android.graphics.Rect(
+                upright.top,
+                uprightW - upright.right,
+                upright.bottom,
+                uprightW - upright.left,
+            )
+            180 -> android.graphics.Rect(
+                uprightW - upright.right,
+                uprightH - upright.bottom,
+                uprightW - upright.left,
+                uprightH - upright.top,
+            )
+            270 -> android.graphics.Rect(
+                uprightH - upright.bottom,
+                upright.left,
+                uprightH - upright.top,
+                upright.right,
+            )
+            else -> upright
+        }
+    }
+
+    /** Khung nhìn thấy, tính bằng pixel của ảnh đã upright ([srcW] × [srcH]). */
+    private fun viewportRectUpright(
+        srcW: Int,
+        srcH: Int,
+        crop: android.graphics.RectF,
+        previewW: Int,
+        previewH: Int,
+    ): android.graphics.Rect {
+        val wp = srcW.toFloat()
+        val hp = srcH.toFloat()
         val wv = previewW.toFloat()
         val hv = previewH.toFloat()
 
@@ -950,9 +1137,9 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
 
         val x = left.coerceIn(0f, wp).toInt()
         val y = top.coerceIn(0f, hp).toInt()
-        val w = (right.coerceIn(0f, wp).toInt() - x).coerceIn(1, bmp.width - x)
-        val h = (bottom.coerceIn(0f, hp).toInt() - y).coerceIn(1, bmp.height - y)
-        return Bitmap.createBitmap(bmp, x, y, w, h)
+        val w = (right.coerceIn(0f, wp).toInt() - x).coerceIn(1, srcW - x)
+        val h = (bottom.coerceIn(0f, hp).toInt() - y).coerceIn(1, srcH - y)
+        return android.graphics.Rect(x, y, x + w, y + h)
     }
 
     // endregion

@@ -129,14 +129,58 @@ public class YOLOMultiTaskView: UIView {
   var classifyBusy = false
   var thirdBusy    = false
 
-  /// Classify giữ ~6–7 fps. CarPart tăng lên tối đa ~10 fps khi đang căn toàn
-  /// cảnh để tạo thêm cơ hội OCR, rồi hạ về ~6–7 fps khi soi tổn thất.
-  /// Accessed only on cameraQueue.
-  private static let classifyMinInferenceInterval: CFTimeInterval = 0.15
-  private static let thirdPanoramicMinInferenceInterval: CFTimeInterval = 0.10
-  private static let thirdInspectionMinInferenceInterval: CFTimeInterval = 0.15
+  // MARK: Nhịp chạy model theo bậc nhiệt (cameraQueue)
+
+  // Mỗi bảng có 4 phần tử, index theo ThermalTier.rawValue:
+  //   [normal, warm, hot, critical]
+  // Giá trị là khoảng cách tối thiểu (giây) giữa 2 lần chạy; 0 = không giới hạn
+  // (chạy mỗi frame khi predictor rảnh). Máy càng nóng, nhịp càng thưa → GPU/ANE
+  // có thời gian nghỉ giữa các lần inference.
+  //
+  // Ở bậc .normal: classify ~6–7 fps, carPart tối đa ~10 fps khi căn toàn cảnh
+  // rồi hạ về ~6–7 fps khi soi tổn thất, carDamage ~12.5 fps, OCR không giới hạn.
+
+  /// carDamage — model chính, tốn nhiều nhất. Trước đây chạy MỖI FRAME (~30 fps)
+  /// khi máy mát; nay chặn ở ~12.5 fps ngay từ bậc .normal.
+  ///
+  /// 12.5 fps là đủ: luồng nghiệp vụ chỉ cần 5 frame liên tiếp có tổn thất mới
+  /// mở xác nhận → 400 ms, người dùng không nhận ra khác biệt. Đổi lại GPU/ANE
+  /// có khoảng nghỉ giữa các lần inference thay vì chạy bão hoà.
+  private static let detectMinInferenceIntervals: [CFTimeInterval] = [0.08, 0.15, 0.25, 0.40]
+
+  /// carCorner.
+  private static let classifyMinInferenceIntervals: [CFTimeInterval] = [0.15, 0.25, 0.35, 0.50]
+
+  // carPart phải chạy nhanh hơn `_carPartFlickerGrace` (600 ms) phía Dart — nếu
+  // thưa hơn thì `_seenRecently` không bao giờ đúng và luồng canh khung ảnh toàn
+  // cảnh đứng hẳn. Vì vậy trần ở đây là 450 ms, kể cả bậc .critical.
+  private static let thirdPanoramicMinInferenceIntervals: [CFTimeInterval] = [0.10, 0.20, 0.30, 0.40]
+  private static let thirdInspectionMinInferenceIntervals: [CFTimeInterval] = [0.15, 0.25, 0.35, 0.45]
+
+  // OCR phải chạy nhanh hơn `_plateReadFreshDuration` (1200 ms) phía Dart, nếu
+  // không cờ "đọc được biển" hết hạn trước khi đủ điều kiện chụp.
+  private static let ocrMinInferenceIntervals: [CFTimeInterval] = [0, 0, 0.40, 0.70]
+
+  private var lastDetectTime: CFTimeInterval = 0
   private var lastClassifyTime: CFTimeInterval = 0
   private var lastThirdTime: CFTimeInterval = 0
+  private var lastOcrTime: CFTimeInterval = 0
+
+  // MARK: Hạ nhiệt
+
+  /// Bậc nhiệt hiện tại, dùng để tra các bảng nhịp ở trên. Owned by cameraQueue
+  /// giống mọi state khác trong đường xử lý frame.
+  private var thermalTier: ThermalTier = .normal
+
+  private lazy var thermalGovernor = ThermalGovernor { [weak self] tier in
+    // Callback chạy trên main queue; hop sang cameraQueue vì `thermalTier` thuộc
+    // về queue đó.
+    guard let self else { return }
+    self.cameraQueue.async { [weak self] in self?.thermalTier = tier }
+    DispatchQueue.main.async { [weak self] in
+      self?.onMultiTaskStream?(YOLOMultiTaskView.thermalEvent(tier))
+    }
+  }
 
   // Context stream sampling (cameraQueue only)
   private static let streamInterval: CFTimeInterval = 1.0
@@ -283,6 +327,12 @@ public class YOLOMultiTaskView: UIView {
     guard let ocr = ocrModel, ocrEnabled, !ocrBusy, let buffer = thirdInFlightBuffer else { return }
     thirdInFlightBuffer = nil
 
+    // Nhịp tối thiểu theo bậc nhiệt. Mốc chỉ được cập nhật khi thực sự chạy OCR
+    // bên dưới, để một frame không tìm thấy biển không "ăn" mất lượt kế tiếp.
+    let ocrMinInterval = Self.ocrMinInferenceIntervals[thermalTier.rawValue]
+    let nowOcr = CACurrentMediaTime()
+    guard ocrMinInterval == 0 || nowOcr - lastOcrTime >= ocrMinInterval else { return }
+
     // Only the highest-confidence plate box that sits FULLY inside the exact
     // aspect-fill crop rect used by capturePhoto. Comparing directly with
     // ocrViewportTop/bottom is not enough because capturePhoto applies
@@ -306,6 +356,7 @@ public class YOLOMultiTaskView: UIView {
 
     let rect = box.xywhn  // normalized, top-left origin in the (landscape) buffer
     ocrBusy = true
+    lastOcrTime = nowOcr
     ocrQueue.async { [weak self] in
       guard let self else { return }
       let read = ocr.read(pixelBuffer: buffer, region: rect)
@@ -454,6 +505,18 @@ public class YOLOMultiTaskView: UIView {
   }
 
   // MARK: - Stream data builder
+
+  /// Sự kiện báo bậc nhiệt hiện tại lên Dart (`type == "thermal"`). Bắn khi bậc
+  /// đổi và một lần lúc camera khởi động, để host biết SDK đang tự hạ nhịp.
+  nonisolated static func thermalEvent(_ tier: ThermalTier) -> [String: Any] {
+    [
+      "type": "thermal",
+      "modelId": "thermal",
+      "level": tier.rawValue,
+      "state": tier.label,
+      "throttled": tier != .normal,
+    ]
+  }
 
   private func buildStreamData(
     result: YOLOResult, task: String, modelId: String, fps: Double, cameraFps: Double
@@ -751,6 +814,13 @@ public class YOLOMultiTaskView: UIView {
       preview.frame = self.bounds
       self.layer.insertSublayer(preview, at: 0)
       self.previewLayer = preview
+
+      // Bắt đầu theo dõi nhiệt cùng lúc camera lên hình, và báo bậc nhiệt khởi
+      // điểm — máy có thể đã nóng sẵn từ trước khi mở màn camera.
+      self.thermalGovernor.start()
+      let tier = self.thermalGovernor.tier
+      self.cameraQueue.async { [weak self] in self?.thermalTier = tier }
+      self.onMultiTaskStream?(YOLOMultiTaskView.thermalEvent(tier))
     }
 
     captureSession.startRunning()
@@ -864,6 +934,7 @@ public class YOLOMultiTaskView: UIView {
   /// even if deinit is delayed by a retain cycle in the Flutter EventChannel stream handler.
   public func releaseResources() {
     onMultiTaskStream = nil
+    thermalGovernor.stop()
     cameraQueue.async { [weak self] in
       self?.stopContextStreamInternal()
       self?.captureSession.stopRunning()
@@ -917,9 +988,18 @@ extension YOLOMultiTaskView: AVCaptureVideoDataOutputSampleBufferDelegate, @unch
 
     maybeSampleContextStream(from: sampleBuffer, now: now)
 
+    // Snapshot một lần cho cả frame: bậc nhiệt có thể đổi giữa các nhánh dưới,
+    // và ba model nên cùng chạy theo một bậc để nhịp không lệch nhau.
+    let tier = thermalTier.rawValue
+
     // Dispatch each predictor to its own queue so all run concurrently.
-    // carDamage is skipped (input blocked) during the framing/panorama phase.
-    if let p = detectPredictor, detectEnabled, !detectBusy, !p.isUpdating {
+    // carDamage is skipped (input blocked) during the framing/panorama phase, and
+    // rate-limited on top of that once the device gets hot.
+    let detectMinInterval = Self.detectMinInferenceIntervals[tier]
+    if let p = detectPredictor, detectEnabled, !detectBusy, !p.isUpdating,
+      detectMinInterval == 0 || now - lastDetectTime >= detectMinInterval
+    {
+      lastDetectTime = now
       detectBusy = true
       p.isUpdating = true
       let buf = sampleBuffer
@@ -927,7 +1007,7 @@ extension YOLOMultiTaskView: AVCaptureVideoDataOutputSampleBufferDelegate, @unch
       detectQueue.async { p.predict(sampleBuffer: buf, onResultsListener: adapter, onInferenceTime: adapter) }
     }
     if let p = classifyPredictor, !classifyBusy, !p.isUpdating,
-      now - lastClassifyTime >= Self.classifyMinInferenceInterval
+      now - lastClassifyTime >= Self.classifyMinInferenceIntervals[tier]
     {
       lastClassifyTime = now
       classifyBusy = true
@@ -937,8 +1017,8 @@ extension YOLOMultiTaskView: AVCaptureVideoDataOutputSampleBufferDelegate, @unch
       classifyQueue.async { p.predict(sampleBuffer: buf, onResultsListener: adapter, onInferenceTime: adapter) }
     }
     let thirdMinInterval = ocrEnabled
-      ? Self.thirdPanoramicMinInferenceInterval
-      : Self.thirdInspectionMinInferenceInterval
+      ? Self.thirdPanoramicMinInferenceIntervals[tier]
+      : Self.thirdInspectionMinInferenceIntervals[tier]
     if let p = thirdPredictor, !thirdBusy, !p.isUpdating,
       now - lastThirdTime >= thirdMinInterval
     {

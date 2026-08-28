@@ -23,6 +23,7 @@ mixin _CaptureMixin on _CameraControllerBase {
     _completedSegments.addAll(cached.keys);
     _panoramicCapturedSegments.addAll(cached.keys);
     _firstPanoramicCaptured = cached.isNotEmpty;
+    _refreshPreviewPath();
     notifyListeners();
   }
 
@@ -45,6 +46,9 @@ mixin _CaptureMixin on _CameraControllerBase {
       /// Chụp tự động quá nhanh, người dùng chưa kịp đọc message -> delay 3s.
       /// Chụp thủ công ([immediate]) thì chụp ngay.
       if (!immediate) await Future.delayed(const Duration(seconds: 3));
+      // 3 s là đủ để user bấm thoát; _flashCornerSuccess bên dưới notify và mở
+      // Timer nên phải dừng ở đây.
+      if (_stopped) return null;
       // Paint the white shutter-blink NGAY trước khi gọi native capture (có thể
       // chiếm thời gian) để blink hiện đồng bộ với khoảnh khắc chụp, thay vì chỉ
       // hiện sau khi capture xong.
@@ -57,17 +61,9 @@ mixin _CaptureMixin on _CameraControllerBase {
 
       final seg = segment ?? _activeSegmentIndex;
       if (seg != null) {
-        // Lấy vị trí GPS nhanh tại thời điểm chụp ảnh
-        double? latitude;
-        double? longitude;
-        final posResult = await LocationService().getFastCurrentPosition();
-        posResult.fold(
-          (_) {},
-          (pos) {
-            latitude = pos.latitude;
-            longitude = pos.longitude;
-          },
-        );
+        final cachedPosition = LocationService.freshPosition();
+        final latitude = cachedPosition?.latitude;
+        final longitude = cachedPosition?.longitude;
 
         final photoIndex = _capturedPhotos[seg]?.length ?? 0;
         final imageOrder = ++_imageOrderCounter;
@@ -88,6 +84,9 @@ mixin _CaptureMixin on _CameraControllerBase {
           await yoloController.setCapturingAnchor(false);
         }
         _capturedPhotos.putIfAbsent(seg, () => []).add(path);
+        // Ảnh mới nhất đổi → giải lại đường dẫn thumbnail (native đã ghi xong
+        // thumbnail trước khi capturePhotoToFile trả về).
+        _refreshPreviewPath();
         // Config 4 góc TẮT: góc nào đã có ảnh là hiện màu xanh trên vòng tròn.
         if (!_require4Angles) _completedSegments.add(seg);
         // Dừng hình ảnh vừa chụp rồi co về thumbnail — áp dụng cho MỌI lần chụp
@@ -148,6 +147,7 @@ mixin _CaptureMixin on _CameraControllerBase {
     _capturedPhotos.remove(angleId);
     _completedSegments.add(angleId);
     _panoramicCapturedSegments.remove(angleId);
+    _refreshPreviewPath();
     notifyListeners();
   }
 }

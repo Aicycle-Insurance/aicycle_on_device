@@ -136,6 +136,8 @@ mixin _InspectionMixin on _CameraControllerBase {
     _setInspectionPhase(InspectionPhase.capturingDamage);
 
     final captured = await capturePhoto(immediate: true, flashTick: flashTick);
+    // Chụp mất vài trăm ms; user có thể đã rời màn camera trong lúc đó.
+    if (_stopped) return;
     if (captured != null) {
       _setMessage(
         CameraMessage(
@@ -194,7 +196,9 @@ mixin _InspectionMixin on _CameraControllerBase {
     }
 
     await capturePhoto(immediate: true, flashTick: false);
-    // Trong lúc chụp, frame mới có thể đã đổi pha (vd phát hiện tổn thất).
+    // Trong lúc chụp, frame mới có thể đã đổi pha (vd phát hiện tổn thất) —
+    // hoặc user đã rời màn camera, khi đó không được mở timer mới.
+    if (_stopped) return;
     if (_inspectionPhase != InspectionPhase.detailGuide) return;
     _startDetailPostCaptureTimer();
   }
@@ -209,6 +213,7 @@ mixin _InspectionMixin on _CameraControllerBase {
 
   Future<void> _onDetailPostCaptureTimeout() async {
     _detailTimer = null;
+    if (_stopped) return;
     if (_inspectionPhase != InspectionPhase.detailGuide) return;
 
     if (_latestDetections.isNotEmpty) {
@@ -236,6 +241,11 @@ mixin _InspectionMixin on _CameraControllerBase {
     );
 
     await Future.delayed(duration);
+    // [duration] mặc định là 10 s và Future.delayed KHÔNG huỷ được — user có
+    // thừa thời gian rời màn camera. Không có guard này thì _enterScanning()
+    // gọi notifyListeners() VÀ mở Timer mới trên controller đã dispose
+    // (_cancelFlowTimers ở dispose không chặn được vì timer sinh ra sau đó).
+    if (_stopped) return;
     // Guard: flow có thể đã tự chuyển góc trong lúc chờ.
     if (_inspectionPhase != InspectionPhase.continueOrChange) return;
     _enterScanning();

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import '../../../../yolo/multi_task_yolo_view.dart';
 import 'package:flutter/foundation.dart';
@@ -11,6 +12,7 @@ import '../../data/model/camera_message.dart';
 import '../../data/model/car_angle.dart';
 import '../../data/model/classify_output.dart';
 import '../../data/model/detection_output.dart';
+import '../../data/model/thermal_status.dart';
 
 part 'camera_controller.stream.dart';
 part 'camera_controller.capture.dart';
@@ -51,6 +53,11 @@ enum InspectionPhase {
 
 /// Tên class biển số xe trong model car-part (khớp với logic native OCR).
 const _licensePlateClass = 'Biển số xe';
+
+/// Danh sách rỗng dùng chung cho [_CameraControllerBase.damageBoxes] /
+/// [_CameraControllerBase.carPartBoxes]. Vì là hằng nên hai lần gán liên tiếp
+/// "không có box nào" so sánh bằng nhau → ValueNotifier không bắn sự kiện thừa.
+const List<DetectionResult> _noBoxes = [];
 
 /// Giữ message holdStill tối thiểu khoảng này trước khi auto-capture ảnh toàn
 /// cảnh — user cần thời gian đọc "Hãy giữ yên điện thoại…" và giữ máy ổn định,
@@ -166,6 +173,11 @@ abstract class _CameraControllerBase extends ChangeNotifier {
 
   Map<int, List<String>> _capturedPhotos = {};
   int _imageOrderCounter = 0;
+
+  /// Đường dẫn ảnh cho ô thumbnail, giải sẵn bởi [_refreshPreviewPath]. Chỉ đổi
+  /// khi chụp thêm ảnh / khôi phục cache / xoá ảnh đã upload — nên giải một lần
+  /// ở những mốc đó thay vì `existsSync()` mỗi lần dựng thanh dưới.
+  String? _lastPhotoPreviewPath;
 
   /// Vùng camera user thực sự nhìn thấy (giữa top bar và bottom bar), dạng tỉ lệ
   /// [0,1] theo chiều dọc của preview. Dùng để native crop ảnh chụp về đúng
@@ -298,12 +310,27 @@ abstract class _CameraControllerBase extends ChangeNotifier {
     _holdStillCaptureTimer = null;
   }
 
-  /// Chi tiết bộ phận (kèm bounding box) từ frame car-part detect mới nhất —
-  /// dùng để vẽ nhãn tên bộ phận lên màn hình.
-  List<DetectionResult> _latestCarPartDetections = [];
-
-  /// Detections từ frame detect mới nhất.
+  /// Detections từ frame detect mới nhất, CHƯA áp quy tắc hiển thị — máy trạng
+  /// thái inspection đọc trực tiếp để biết khung hình có tổn thất hay không.
+  /// Danh sách dùng để VẼ là [damageBoxes].
   List<DetectionResult> _latestDetections = [];
+
+  // ── Overlay tần số cao ────────────────────────────────────────────────────
+  // Hai danh sách dưới đây đổi theo TỪNG FRAME inference (~10–30 lần/giây).
+  // Chúng đi qua ValueNotifier riêng thay vì [notifyListeners] để chỉ lớp vẽ
+  // box/nhãn rebuild — thanh trên, thanh dưới, vòng tròn góc và tooltip vốn chỉ
+  // đổi vài lần mỗi phút nên không phải dựng lại theo nhịp inference.
+  //
+  // Đây là danh sách ĐÃ ÁP QUY TẮC HIỂN THỊ (rỗng khi không được vẽ), khác với
+  // [_latestDetections] là dữ liệu thô cho máy trạng thái inspection.
+
+  /// Box tổn thất đang được vẽ. Rỗng khi ngoài pha inspection.
+  final ValueNotifier<List<DetectionResult>> damageBoxes =
+      ValueNotifier(_noBoxes);
+
+  /// Nhãn bộ phận đang được vẽ.
+  final ValueNotifier<List<DetectionResult>> carPartBoxes =
+      ValueNotifier(_noBoxes);
 
   /// Số frame LIÊN TỤC gần đây có tổn thất trong khung nhìn. Phải đạt
   /// [_damageConfirmFrameCount] mới mở màn xác nhận (xem [_updateDamageStreak]).
@@ -315,6 +342,11 @@ abstract class _CameraControllerBase extends ChangeNotifier {
 
   /// Current phase of the damage inspection sub-flow. null = not in inspection.
   InspectionPhase? _inspectionPhase;
+
+  /// Bậc nhiệt gần nhất native báo lên. Native tự hạ nhịp chạy model khi máy
+  /// nóng (xem `ThermalGovernor` bên Kotlin/Swift); giá trị này chỉ để UI/host
+  /// biết SDK đang chạy chậm hơn bình thường.
+  ThermalStatus _thermalStatus = ThermalStatus.normal;
 
   /// Timer chạy ở detectionReady: sau 5s tự động xác nhận (chụp ngầm) ảnh tổn
   /// thất cho tới khi user bấm "Xác nhận" hoặc "Thiếu tổn thất".
@@ -366,9 +398,17 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   DateTime? get captureFreezeStartedAt => _captureFreezeStartedAt;
   Duration get captureFreezeHoldDuration => _captureFreezeHoldDuration;
   Duration get captureFreezeShrinkDuration => _captureFreezeShrinkDuration;
-  List<DetectionResult> get latestDetections => _latestDetections;
-  List<DetectionResult> get latestCarPartDetections => _latestCarPartDetections;
   InspectionPhase? get inspectionPhase => _inspectionPhase;
+
+  /// Đường dẫn ảnh cho ô thumbnail góc dưới trái, đã giải sẵn (ưu tiên thumbnail
+  /// 160px native ghi kèm, thiếu thì dùng ảnh gốc). Null khi chưa có ảnh nào.
+  String? get lastPhotoPreviewPath => _lastPhotoPreviewPath;
+
+  /// Bậc nhiệt hiện tại của thiết bị theo native.
+  ThermalStatus get thermalStatus => _thermalStatus;
+
+  /// True khi native đang chủ động giảm nhịp chạy model để hạ nhiệt.
+  bool get isThermalThrottled => _thermalStatus.throttled;
 
   /// True when actively inspecting for damage (panoramic already taken).
   bool get isInspectionMode => _inspectionPhase != null;
@@ -431,6 +471,42 @@ abstract class _CameraControllerBase extends ChangeNotifier {
         DateTime.now().difference(seenAt) <= _carPartFlickerGrace;
   }
 
+  // ── Overlay tần số cao ────────────────────────────────────────────────────
+
+  /// Đẩy box tổn thất sang lớp vẽ. Danh sách rỗng được quy về [_noBoxes] để hai
+  /// frame "không có box" liên tiếp không bắn sự kiện thừa.
+  void _setDamageBoxes(List<DetectionResult> boxes) {
+    if (_stopped) return;
+    damageBoxes.value = boxes.isEmpty ? _noBoxes : boxes;
+  }
+
+  /// Đẩy nhãn bộ phận sang lớp vẽ. Xem [_setDamageBoxes].
+  void _setCarPartBoxes(List<DetectionResult> boxes) {
+    if (_stopped) return;
+    carPartBoxes.value = boxes.isEmpty ? _noBoxes : boxes;
+  }
+
+  // ── Thumbnail ─────────────────────────────────────────────────────────────
+
+  /// Giải lại đường dẫn ảnh cho ô thumbnail. Gọi ở đúng 3 mốc danh sách ảnh đổi:
+  /// chụp xong, khôi phục cache, và xoá ảnh đã upload. Native ghi thumbnail
+  /// xong mới trả callback nên gọi ngay sau khi chụp là an toàn.
+  void _refreshPreviewPath() {
+    final photoPath = _capturedPhotos.values.expand((l) => l).lastOrNull;
+    if (photoPath == null) {
+      _lastPhotoPreviewPath = null;
+      return;
+    }
+    final thumbPath = PhotoSessionCache.thumbnailPathForPhotoPath(photoPath);
+    if (File(thumbPath).existsSync()) {
+      _lastPhotoPreviewPath = thumbPath;
+    } else if (File(photoPath).existsSync()) {
+      _lastPhotoPreviewPath = photoPath;
+    } else {
+      _lastPhotoPreviewPath = null;
+    }
+  }
+
   // ── Damage streak (5 frame liên tục) ───────────────────────────────────────
 
   /// Cập nhật bộ đếm số frame LIÊN TỤC có tổn thất trong khung nhìn. Gọi mỗi
@@ -466,8 +542,8 @@ abstract class _CameraControllerBase extends ChangeNotifier {
     _platePromptShownAt = null;
     if (clearCarParts) {
       _latestCarPartClasses = {};
-      _latestCarPartDetections = [];
       _carPartLastSeenAt.clear();
+      _setCarPartBoxes(_noBoxes);
     }
   }
 
@@ -604,10 +680,14 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// carCorner/carPart luôn chạy. Chỉ gửi xuống native khi trạng thái đổi.
   void _setInspectionPhase(InspectionPhase? phase) {
     final wasInspection = _inspectionPhase != null;
+    final changed = _inspectionPhase != phase;
     // Rời hẳn inspection (đổi góc) → xoá bộ đếm frame liên tục để góc kế tiếp
     // bắt đầu đếm lại từ đầu.
     if (phase == null) _resetDamageStreak();
     _inspectionPhase = phase;
+    // Rời inspection → dọn box ngay thay vì chờ frame carDamage kế tiếp: native
+    // đã tắt hẳn model đó ở pha canh khung nên sẽ không có frame nào tới nữa.
+    if (phase == null) _setDamageBoxes(_noBoxes);
     final active = phase != null;
     if (_sentInspectionActive != active) {
       if (yoloController.setInspectionActive(active)) {
@@ -620,6 +700,12 @@ abstract class _CameraControllerBase extends ChangeNotifier {
     } else if (wasInspection && !isInspection) {
       unawaited(_stopContextStream());
     }
+    // Mọi điểm sửa _completedSegments (completeCurrentAngle,
+    // _autoSwitchToDetectedSegment, _triggerAutoCapture) đều đi kèm một lần đổi
+    // pha. Trước đây UI được làm mới nhờ notifyListeners() bắn theo từng frame
+    // inference; nay frame đi qua notifier riêng nên phải notify ở đây, nếu
+    // không vòng tròn góc và nút "Xem kết quả" sẽ hiển thị dữ liệu cũ.
+    if (changed && !_stopped) notifyListeners();
   }
 
   // ── Lifecycle ───────────────────────────────────────────────────────────────
@@ -629,12 +715,15 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// để tránh đơ UI vì cleanup nặng chạy trong dispose().
   void stopCamera() {
     if (_stopped) return;
+    // Dọn lớp vẽ TRƯỚC khi bật cờ _stopped — sau đó _setDamageBoxes /
+    // _setCarPartBoxes sẽ tự chặn mọi ghi muộn vào notifier.
+    _setDamageBoxes(_noBoxes);
+    _setCarPartBoxes(_noBoxes);
     _stopped = true;
     _captureStarted = false;
     unawaited(_stopContextStream());
     _cancelFlowTimers();
     _latestDetections = [];
-    _latestCarPartDetections = [];
     _latestCarPartClasses = {};
     _torchEnabled = false;
     unawaited(yoloController.stop().catchError((_) {}));
@@ -659,6 +748,9 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   void dispose() {
     _cancelFlowTimers();
     stopCamera(); // no-op nếu đã gọi trước đó
+    // Sau stopCamera() thì _stopped = true nên không còn ai ghi vào 2 notifier.
+    damageBoxes.dispose();
+    carPartBoxes.dispose();
     super.dispose();
   }
 
