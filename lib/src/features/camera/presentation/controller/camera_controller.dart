@@ -154,8 +154,10 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   _CameraControllerBase({
     required String sessionId,
     bool require4Angles = false,
+    bool debugMode = false,
   })  : _sessionId = sessionId,
-        _require4Angles = require4Angles;
+        _require4Angles = require4Angles,
+        _debugMode = debugMode;
 
   final String _sessionId;
 
@@ -164,6 +166,9 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// thất (vào thẳng scanning, không yêu cầu chụp toàn cảnh, không nhắc "di
   /// chuyển về góc chéo"). Vòng tròn góc: góc nào đã có ảnh thì hiện màu xanh.
   final bool _require4Angles;
+
+  /// Bật inject ảnh gallery như auto-capture (chỉ dùng khi debug).
+  final bool _debugMode;
 
   final yoloController = MultiTaskYOLOController();
 
@@ -799,6 +804,28 @@ abstract class _CameraControllerBase extends ChangeNotifier {
     int? segment,
     bool flashTick = true,
   });
+
+  /// [_CaptureMixin] — debug: copy ảnh gallery vào cache như một lần chụp.
+  Future<String?> capturePhotoFromGallery(
+    String sourcePath, {
+    int? segment,
+  });
+
+  /// [_PanoramicMixin] — debug: inject ảnh gallery như một lượt auto-capture toàn cảnh.
+  Future<void> injectGalleryPhotoAsAutoCapture(String sourcePath);
+
+  /// [_InspectionMixin] — debug: inject ảnh gallery như một lượt chụp tổn thất.
+  Future<void> injectGalleryPhotoAsInspectionDamage(String sourcePath);
+
+  /// Debug: inject ảnh gallery điều phối theo phase hiện tại (panoramic vs inspection).
+  Future<void> injectGalleryPhoto(String sourcePath) async {
+    if (!_debugMode || _isCapturing) return;
+    if (_inspectionPhase != null) {
+      await injectGalleryPhotoAsInspectionDamage(sourcePath);
+    } else {
+      await injectGalleryPhotoAsAutoCapture(sourcePath);
+    }
+  }
 
   /// [_ContextStreamMixin] — bật upload ngầm 1 frame/giây trong inspection.
   Future<void> _startContextStream();

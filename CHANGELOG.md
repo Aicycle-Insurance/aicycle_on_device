@@ -1,3 +1,6 @@
+## 0.1.16
+
+- add debug_mode for upload image from device.
 ## 0.1.15
 
 - enhance to fix timeout upload case.

@@ -150,6 +150,50 @@ mixin _CaptureMixin on _CameraControllerBase {
     await _showManualCaptureContinueGuide();
   }
 
+  /// Debug: copy ảnh từ gallery vào cache session — lưu + enqueue upload, không
+  /// chạy hiệu ứng flash/freeze để tránh lag khi inject nhanh nhiều ảnh.
+  @override
+  Future<String?> capturePhotoFromGallery(
+    String sourcePath, {
+    int? segment,
+  }) async {
+    if (_isCapturing) return null;
+    _isCapturing = true;
+    try {
+      final seg = segment ?? _activeSegmentIndex ?? 0;
+      final cachedPosition = LocationService.freshPosition();
+      final latitude = cachedPosition?.latitude;
+      final longitude = cachedPosition?.longitude;
+
+      final photoIndex = _capturedPhotos[seg]?.length ?? 0;
+      final imageOrder = ++_imageOrderCounter;
+      final path = await PhotoSessionCache.instance.createPhotoPath(
+        _sessionId,
+        seg,
+      );
+      await File(sourcePath).copy(path);
+      _capturedPhotos.putIfAbsent(seg, () => []).add(path);
+      _refreshPreviewPath();
+      if (!_require4Angles) _completedSegments.add(seg);
+      await PhotoUploadQueue.instance.enqueuePhoto(
+        sessionId: _sessionId,
+        angleId: seg,
+        photoIndex: photoIndex,
+        filePath: path,
+        imageOrder: imageOrder,
+        isCallEngine: true,
+        latitude: latitude,
+        longitude: longitude,
+      );
+      return path;
+    } catch (_) {
+      return null;
+    } finally {
+      _isCapturing = false;
+      if (!_stopped) notifyListeners();
+    }
+  }
+
   /// Called by ResultController after an angle's photos are successfully uploaded.
   /// Strips photos from memory and marks the angle completed so the progress
   /// ring stays green when the user backs out from the result screen.

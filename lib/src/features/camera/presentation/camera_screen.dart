@@ -3,6 +3,7 @@ import 'dart:async';
 import '../../../yolo/multi_task_yolo_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../../../aicycle_on_device.dart';
@@ -23,6 +24,7 @@ import 'widgets/camera_guide_sheet.dart';
 import 'widgets/camera_top_bar.dart';
 import 'widgets/capture_freeze_overlay.dart';
 import 'widgets/car_progress_dialog.dart';
+import 'widgets/icon_button.dart';
 import 'widgets/manual_capture_hint_hand.dart';
 import 'widgets/tool_tip.dart';
 import 'widgets/view_result_button.dart';
@@ -79,6 +81,7 @@ class _CameraScreenState extends State<CameraScreen>
       sessionId: sessionId,
       require4Angles:
           widget.aiCycleConfig.validateConfig.require4AnglePanoramicPhotos,
+      debugMode: widget.aiCycleConfig.generalConfig.debugMode,
     );
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _restoreAndStart());
@@ -267,6 +270,19 @@ class _CameraScreenState extends State<CameraScreen>
     widget.onViewResult?.call(photos);
   }
 
+  Future<void> _pickGalleryPhoto() async {
+    try {
+      final picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 90,
+      );
+      if (picked == null || !mounted) return;
+      await _cameraController.injectGalleryPhoto(picked.path);
+    } catch (_) {
+      // Picker có thể fail khi user từ chối quyền — bỏ qua im lặng.
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     ScreenUtil.init(context, forcePortrait: true);
@@ -430,6 +446,24 @@ class _CameraScreenState extends State<CameraScreen>
                             child: RotatedBox(
                               quarterTurns: 1,
                               child: ViewResultButton(onPressed: _goToResult),
+                            ),
+                          ),
+
+                        /// Debug: chọn ảnh từ thư viện như một lượt auto-capture.
+                        if (widget.aiCycleConfig.generalConfig.debugMode)
+                          Positioned(
+                            right: 24.w,
+                            bottom: 130.h,
+                            child: RotatedBox(
+                              quarterTurns: 1,
+                              child: CIconButton(
+                                onPressed: _pickGalleryPhoto,
+                                icon: Icon(
+                                  Icons.photo_library_outlined,
+                                  size: 24.r,
+                                  color: AppColors.white,
+                                ),
+                              ),
                             ),
                           ),
 

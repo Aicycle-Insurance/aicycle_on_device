@@ -343,4 +343,42 @@ mixin _InspectionMixin on _CameraControllerBase {
       updateMessage();
     }
   }
+
+  /// Debug: inject ảnh gallery như một lượt chụp tổn thất (tổng quan hoặc chi tiết).
+  @override
+  Future<void> injectGalleryPhotoAsInspectionDamage(String sourcePath) async {
+    if (!_debugMode || _isCapturing) return;
+    _autoCaptureTimer?.cancel();
+    _autoCaptureTimer = null;
+    _cancelNoDetectionWarningTimer();
+    _detailTimer?.cancel();
+    _detailTimer = null;
+
+    final wasDetail =
+        _inDetailStage || _inspectionPhase == InspectionPhase.detailGuide;
+    final isWarningState =
+        _message?.message == StringSheet.noDamageDetectedGuide;
+    _setInspectionPhase(InspectionPhase.capturingDamage);
+
+    final seg = _activeSegmentIndex ?? 0;
+    final path = await capturePhotoFromGallery(sourcePath, segment: seg);
+    if (path == null || _stopped) return;
+
+    _setMessage(
+      CameraMessage(
+        message: StringSheet.captureSuccess,
+        type: MessageType.success,
+      ),
+      immediate: true,
+    );
+    _flashCornerSuccess(_captureSuccessVisibleDuration);
+    await Future.delayed(_captureSuccessVisibleDuration);
+    if (_stopped) return;
+
+    if (isWarningState || wasDetail) {
+      unawaited(_showMessageThenScan(StringSheet.continueToNextDamage));
+    } else {
+      _enterDetailGuide();
+    }
+  }
 }

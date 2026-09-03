@@ -108,6 +108,9 @@ class GeneralConfig {
   /// Ví dụ: https://example.com
   final String? aicBaseUrl;
 
+  /// Bật công cụ debug trên màn camera (nút chọn ảnh từ thư viện).
+  final bool debugMode;
+
   GeneralConfig({
     required this.apiToken,
     required this.documentId,
@@ -117,6 +120,7 @@ class GeneralConfig {
     this.loggingEnabled = false,
     this.savePhotoAfterShot = true,
     this.alwaysCache = false,
+    this.debugMode = false,
     this.aicBaseUrl,
   })  : assert(
           aicBaseUrl == null || aicBaseUrl.isNotEmpty,

@@ -109,20 +109,40 @@ mixin _PanoramicMixin on _CameraControllerBase {
 
   @override
   Future<void> _triggerAutoCapture() async {
-    // Cờ "đọc được biển" chỉ dùng cho 1 lần chụp toàn cảnh; reset để góc sau
-    // phải đọc lại biển mới chụp.
-    _clearPlateRead();
-    _platePromptShownAt = null;
-    _cancelPlateReadTimer();
+    _resetAutoCaptureFramingState();
     // Nhịp chờ 3s đã nằm ở [_holdStillCaptureTimer] rồi ⇒ chụp NGAY (immediate,
     // bỏ delay 3s trong capturePhoto), tránh cộng dồn thành 6s.
     await capturePhoto(immediate: true);
     // Chụp mất vài trăm ms; mọi thứ dưới đây đều notify hoặc đổi state.
     if (_stopped) return;
-    if (_activeSegmentIndex != null) {
-      _panoramicCapturedSegments.add(_activeSegmentIndex!);
+    await _afterAutoCaptureSuccess();
+  }
+
+  /// Debug: inject ảnh gallery như một lượt auto-capture (bypass framing/ocr).
+  @override
+  Future<void> injectGalleryPhotoAsAutoCapture(String sourcePath) async {
+    if (!_debugMode || _isCapturing) return;
+    _resetAutoCaptureFramingState();
+    final seg = _activeSegmentIndex ?? 0;
+    final path = await capturePhotoFromGallery(sourcePath, segment: seg);
+    if (path == null || _stopped) return;
+    await _afterAutoCaptureSuccess(segment: seg);
+  }
+
+  void _resetAutoCaptureFramingState() {
+    // Cờ "đọc được biển" chỉ dùng cho 1 lần chụp toàn cảnh; reset để góc sau
+    // phải đọc lại biển mới chụp.
+    _clearPlateRead();
+    _platePromptShownAt = null;
+    _cancelPlateReadTimer();
+  }
+
+  Future<void> _afterAutoCaptureSuccess({int? segment}) async {
+    final seg = segment ?? _activeSegmentIndex;
+    if (seg != null) {
+      _panoramicCapturedSegments.add(seg);
       // Chụp toàn cảnh xong là góc đó đã được tính hoàn thành.
-      _completedSegments.add(_activeSegmentIndex!);
+      _completedSegments.add(seg);
     }
     // Mốc ảnh toàn cảnh đầu tiên đã xong → khi config 4 góc tắt, các góc sau
     // vào thẳng scanning.
