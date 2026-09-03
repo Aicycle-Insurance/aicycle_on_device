@@ -1,3 +1,6 @@
+## 0.1.15
+
+- enhance to fix timeout upload case.
 ## 0.1.14
 
 - add throttle logic for manual capture.
