@@ -230,7 +230,7 @@ class PhotoUploadQueue {
     double? longitude,
     required bool schedule,
   }) async {
-    final request = _buildUploadRequest();
+    final request = _buildUploadRequest(isCallEngine: isCallEngine);
     final fields = {
       ...request.fields,
       if (latitude != null) 'latitude': latitude.toString(),
@@ -238,6 +238,9 @@ class PhotoUploadQueue {
       if (imageOrder != null) 'imageOrder': imageOrder.toString(),
       'isCallEngine': isCallEngine ? 'true' : 'false',
     };
+    final fileName = isCallEngine
+        ? '${angleId}_$photoIndex.jpg'
+        : 'stream_${angleId}_$photoIndex.jpg';
     final item = PhotoUploadItem(
       id: _stableId('$sessionId|$angleId|$filePath'),
       sessionId: sessionId,
@@ -246,7 +249,7 @@ class PhotoUploadQueue {
       imageOrder: imageOrder,
       isCallEngine: isCallEngine,
       filePath: filePath,
-      fileName: '${angleId}_$photoIndex.jpg',
+      fileName: fileName,
       fileField: request.fileField,
       url: request.url,
       headers: request.headers,
@@ -296,6 +299,7 @@ class PhotoUploadQueue {
         photoIndex: photo.photoIndex,
         filePath: photo.path,
         imageOrder: idx + 1,
+        isCallEngine: true,
         schedule: false,
       );
     }
@@ -499,11 +503,11 @@ class PhotoUploadQueue {
     }
   }
 
-  _UploadRequest _buildUploadRequest() {
+  _UploadRequest _buildUploadRequest({required bool isCallEngine}) {
     final config = AICycleConfigHolder.config;
     final sessionId = config.generalConfig.documentId;
 
-    if (config.generalConfig.organization == AiCycleOrg.vbi) {
+    if (isCallEngine && config.generalConfig.organization == AiCycleOrg.vbi) {
       final vbi = config.vbiConfig!;
       return _UploadRequest(
         url:

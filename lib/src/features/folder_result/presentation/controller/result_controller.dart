@@ -77,20 +77,17 @@ class ResultController extends ChangeNotifier {
       return;
     }
 
-    _uploadedCount = 0;
-    _status = ResultStatus.uploading;
+    final allPaths = snapshot.values.expand((paths) => paths).toList();
+    final initialPending =
+        allPaths.where((path) => File(path).existsSync()).length;
+
+    _uploadedCount = _totalCount - initialPending;
+    _status =
+        initialPending == 0 ? ResultStatus.success : ResultStatus.uploading;
     _errorMessage = null;
     _notify();
 
     try {
-      if (!fetchResultAfterUpload) {
-        await _enqueueSnapshot(snapshot);
-        _uploadedCount = _totalCount;
-        _status = ResultStatus.success;
-        _notify();
-        return;
-      }
-
       await PhotoUploadQueue.instance.enqueueExistingPhotos(
         sessionId,
         snapshot,
@@ -98,14 +95,13 @@ class ResultController extends ChangeNotifier {
       await PhotoUploadQueue.instance.resumePendingUploads();
       await PhotoUploadQueue.instance.drainUploadedResponses(onImageUploaded);
 
-      final allPaths = snapshot.values.expand((paths) => paths).toList();
       while (!_disposed) {
         final pending =
             allPaths.where((path) => File(path).existsSync()).length;
         _uploadedCount = _totalCount - pending;
         _notify();
         if (pending == 0) break;
-        await Future<void>.delayed(const Duration(seconds: 1));
+        await Future<void>.delayed(const Duration(milliseconds: 500));
         await PhotoUploadQueue.instance.resumePendingUploads();
         await PhotoUploadQueue.instance.drainUploadedResponses(onImageUploaded);
       }
@@ -115,9 +111,8 @@ class ResultController extends ChangeNotifier {
       for (final angleId in snapshot.keys) {
         onAngleUploaded?.call(angleId);
       }
-      await PhotoUploadQueue.instance.clearSession(sessionId);
 
-      // Bỏ màn kết quả khỏi flow → chỉ upload xong là dừng.
+      // Bỏ màn kết quả khỏi flow → chỉ upload xong là dừng khi fetchResultAfterUpload == false.
       if (fetchResultAfterUpload) {
         _status = ResultStatus.fetchingResult;
         _notify();
@@ -129,19 +124,6 @@ class ResultController extends ChangeNotifier {
       _errorMessage = e.toString();
       _status = ResultStatus.error;
       _notify();
-    }
-  }
-
-  Future<void> _enqueueSnapshot(Map<int, List<String>> snapshot) async {
-    try {
-      await PhotoUploadQueue.instance.enqueueExistingPhotos(
-        sessionId,
-        snapshot,
-      );
-      await PhotoUploadQueue.instance.resumePendingUploads();
-      await PhotoUploadQueue.instance.drainUploadedResponses(onImageUploaded);
-    } catch (e) {
-      onError?.call(e.toString());
     }
   }
 

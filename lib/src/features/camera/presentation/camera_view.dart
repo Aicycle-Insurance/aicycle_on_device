@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 
@@ -133,6 +134,17 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera>
 
   void _openUploadView(Map<int, List<String>> photos) {
     if (_uploadPhotos != null) return;
+    final allPaths = photos.values.expand((p) => p).toList();
+    final hasPending = allPaths.any((p) => File(p).existsSync());
+    if (!hasPending) {
+      unawaited(PhotoUploadQueue.instance
+          .drainUploadedResponses(widget.onImageUploaded));
+      unawaited(PhotoSessionCache.instance
+          .clearUploadPending(widget.aiCycleConfig.generalConfig.documentId));
+      widget.onComplete?.call();
+      return;
+    }
+
     unawaited(PhotoSessionCache.instance
         .markUploadPending(widget.aiCycleConfig.generalConfig.documentId));
     setState(() {
