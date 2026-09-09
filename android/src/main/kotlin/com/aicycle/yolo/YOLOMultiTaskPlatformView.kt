@@ -126,26 +126,6 @@ class YOLOMultiTaskPlatformView(
                             result.error("bad_args", "active (bool) required", null)
                         }
                     }
-                    "startContextStream" -> {
-                        val args = call.arguments as? Map<*, *>
-                        val dirPath = args?.get("dirPath") as? String
-                        if (dirPath == null) {
-                            result.error("bad_args", "dirPath (String) is required", null)
-                            return@setMethodCallHandler
-                        }
-                        multiTaskView.startContextStream(dirPath)
-                        result.success(null)
-                    }
-                    "stopContextStream" -> {
-                        multiTaskView.stopContextStream()
-                        result.success(null)
-                    }
-                    "setCapturingAnchor" -> {
-                        val active = (call.arguments as? Map<*, *>)?.get("active") as? Boolean
-                            ?: run { result.error("bad_args", "active (bool) is required", null); return@setMethodCallHandler }
-                        multiTaskView.setCapturingAnchor(active)
-                        result.success(null)
-                    }
                     else -> result.notImplemented()
                 }
             }

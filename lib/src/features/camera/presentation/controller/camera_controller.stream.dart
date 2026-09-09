@@ -17,14 +17,6 @@ mixin _StreamMixin on _CameraControllerBase {
   void onStreamingData(Map<String, dynamic> data) {
     if (_stopped) return;
 
-    if (data['type'] == 'streamFrame') {
-      final path = data['filePath'];
-      if (path is String && path.isNotEmpty) {
-        _onContextStreamFrame(path);
-      }
-      return;
-    }
-
     final type = data['type'];
     // Bậc nhiệt không phải kết quả inference — nhận cả trước khi user bấm "Bắt
     // đầu chụp ảnh xe", vì native đã bắt đầu chạy model từ lúc camera lên hình.

@@ -71,18 +71,13 @@ mixin _CaptureMixin on _CameraControllerBase {
           _sessionId,
           seg,
         );
-        await yoloController.setCapturingAnchor(true);
-        try {
-          await yoloController.capturePhotoToFile(
-            filePath: path,
-            thumbnailPath: PhotoSessionCache.thumbnailPathForPhotoPath(path),
-            cropTop: _cropTop,
-            cropBottom: _cropBottom,
-            quality: 80,
-          );
-        } finally {
-          await yoloController.setCapturingAnchor(false);
-        }
+        await yoloController.capturePhotoToFile(
+          filePath: path,
+          thumbnailPath: PhotoSessionCache.thumbnailPathForPhotoPath(path),
+          cropTop: _cropTop,
+          cropBottom: _cropBottom,
+          quality: 80,
+        );
         _capturedPhotos.putIfAbsent(seg, () => []).add(path);
         // Ảnh mới nhất đổi → giải lại đường dẫn thumbnail (native đã ghi xong
         // thumbnail trước khi capturePhotoToFile trả về).

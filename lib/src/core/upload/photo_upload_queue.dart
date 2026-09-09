@@ -79,27 +79,19 @@ class PhotoUploadQueue {
       for (final item in items) {
         if (!item.hasPendingResponse) continue;
         final listener = _lastMatchingListener(item.sessionId);
-        final data = _decodeResponseMap(item);
+        if (listener == null) continue;
 
-        if (item.isCallEngine) {
-          if (listener == null) continue;
-          debugPrint(
-            'AICycle upload completed: session=${item.sessionId} '
-            'angle=${item.angleId} photo=${item.photoIndex} '
-            'status=${item.responseStatusCode}',
-          );
-          try {
-            listener.onData(data);
-          } catch (_) {
-            // Host callback errors must not block queue cleanup or replay.
-          }
-        } else {
-          debugPrint(
-            'AICycle context stream ok: imageOrder=${item.imageOrder} '
-            'httpCode=${item.responseStatusCode}',
-          );
+        final data = _decodeResponseMap(item);
+        debugPrint(
+          'AICycle upload completed: session=${item.sessionId} '
+          'angle=${item.angleId} photo=${item.photoIndex} '
+          'status=${item.responseStatusCode}',
+        );
+        try {
+          listener.onData(data);
+        } catch (_) {
+          // Host callback errors must not block queue cleanup or replay.
         }
-        _deleteStreamFileIfNeeded(item);
         deliveredIds.add(item.id);
       }
 
@@ -135,24 +127,16 @@ class PhotoUploadQueue {
       for (final item in items) {
         if (!item.hasPendingResponse) continue;
         final data = _decodeResponseMap(item);
-        if (item.isCallEngine) {
-          debugPrint(
-            'AICycle upload completed: session=${item.sessionId} '
-            'angle=${item.angleId} photo=${item.photoIndex} '
-            'status=${item.responseStatusCode}',
-          );
-          try {
-            onImageUploaded(data);
-          } catch (_) {
-            // Host callback errors must not block queue cleanup or replay.
-          }
-        } else {
-          debugPrint(
-            'AICycle context stream ok: imageOrder=${item.imageOrder} '
-            'httpCode=${item.responseStatusCode}',
-          );
+        debugPrint(
+          'AICycle upload completed: session=${item.sessionId} '
+          'angle=${item.angleId} photo=${item.photoIndex} '
+          'status=${item.responseStatusCode}',
+        );
+        try {
+          onImageUploaded(data);
+        } catch (_) {
+          // Host callback errors must not block queue cleanup or replay.
         }
-        _deleteStreamFileIfNeeded(item);
         deliveredIds.add(item.id);
       }
 
@@ -203,7 +187,7 @@ class PhotoUploadQueue {
     required int photoIndex,
     required String filePath,
     int? imageOrder,
-    bool isCallEngine = false,
+    bool isCallEngine = true,
     double? latitude,
     double? longitude,
   }) =>
@@ -225,12 +209,12 @@ class PhotoUploadQueue {
     required int photoIndex,
     required String filePath,
     int? imageOrder,
-    bool isCallEngine = false,
+    bool isCallEngine = true,
     double? latitude,
     double? longitude,
     required bool schedule,
   }) async {
-    final request = _buildUploadRequest(isCallEngine: isCallEngine);
+    final request = _buildUploadRequest();
     final fields = {
       ...request.fields,
       if (latitude != null) 'latitude': latitude.toString(),
@@ -238,9 +222,7 @@ class PhotoUploadQueue {
       if (imageOrder != null) 'imageOrder': imageOrder.toString(),
       'isCallEngine': isCallEngine ? 'true' : 'false',
     };
-    final fileName = isCallEngine
-        ? '${angleId}_$photoIndex.jpg'
-        : 'stream_${angleId}_$photoIndex.jpg';
+    final fileName = '${angleId}_$photoIndex.jpg';
     final item = PhotoUploadItem(
       id: _stableId('$sessionId|$angleId|$filePath'),
       sessionId: sessionId,
@@ -503,11 +485,11 @@ class PhotoUploadQueue {
     }
   }
 
-  _UploadRequest _buildUploadRequest({required bool isCallEngine}) {
+  _UploadRequest _buildUploadRequest() {
     final config = AICycleConfigHolder.config;
     final sessionId = config.generalConfig.documentId;
 
-    if (isCallEngine && config.generalConfig.organization == AiCycleOrg.vbi) {
+    if (config.generalConfig.organization == AiCycleOrg.vbi) {
       final vbi = config.vbiConfig!;
       return _UploadRequest(
         url:
@@ -587,17 +569,6 @@ class PhotoUploadQueue {
       if (rawBody != null && rawBody.isNotEmpty) 'rawBody': rawBody,
     };
   }
-
-  void _deleteStreamFileIfNeeded(PhotoUploadItem item) {
-    if (item.isCallEngine) return;
-    if (!item.filePath.contains('/_stream/')) return;
-    try {
-      final file = File(item.filePath);
-      if (file.existsSync()) file.deleteSync();
-    } catch (_) {
-      // Best-effort cleanup after upload.
-    }
-  }
 }
 
 class PhotoUploadItem {
@@ -607,7 +578,7 @@ class PhotoUploadItem {
     required this.angleId,
     required this.photoIndex,
     this.imageOrder,
-    this.isCallEngine = false,
+    this.isCallEngine = true,
     required this.filePath,
     required this.fileName,
     required this.fileField,
@@ -658,7 +629,7 @@ class PhotoUploadItem {
       photoIndex: json['photoIndex'] as int,
       imageOrder: json['imageOrder'] as int?,
       isCallEngine:
-          json['isCallEngine'] as bool? ?? json['isCapture'] as bool? ?? false,
+          json['isCallEngine'] as bool? ?? json['isCapture'] as bool? ?? true,
       filePath: json['filePath'] as String,
       fileName: json['fileName'] as String,
       fileField: json['fileField'] as String,

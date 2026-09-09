@@ -194,27 +194,6 @@ public final class SwiftYOLOMultiTaskPlatformView: NSObject,
         }
         self.multiTaskView?.setInspectionActive(active)
         result(nil)
-      case "startContextStream":
-        guard let args = call.arguments as? [String: Any],
-          let dirPath = args["dirPath"] as? String
-        else {
-          result(FlutterError(code: "bad_args", message: "dirPath (String) is required", details: nil))
-          return
-        }
-        self.multiTaskView?.startContextStream(dirPath: dirPath)
-        result(nil)
-      case "stopContextStream":
-        self.multiTaskView?.stopContextStream()
-        result(nil)
-      case "setCapturingAnchor":
-        guard let args = call.arguments as? [String: Any],
-          let active = args["active"] as? Bool
-        else {
-          result(FlutterError(code: "bad_args", message: "active (bool) is required", details: nil))
-          return
-        }
-        self.multiTaskView?.setCapturingAnchor(active)
-        result(nil)
       default:
         result(FlutterMethodNotImplemented)
       }
