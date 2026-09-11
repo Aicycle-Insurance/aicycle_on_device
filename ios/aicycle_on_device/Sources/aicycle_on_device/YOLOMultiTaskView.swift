@@ -68,10 +68,12 @@ public class YOLOMultiTaskView: UIView {
   /// Serial queue for camera delegate callbacks and busy-flag mutations only.
   let cameraQueue = DispatchQueue(label: "yolo.multi-task.camera", qos: .userInteractive)
 
-  /// Per-predictor inference queues — each predictor runs concurrently.
-  private let detectQueue  = DispatchQueue(label: "yolo.infer.detect",   qos: .userInteractive)
-  private let classifyQueue = DispatchQueue(label: "yolo.infer.classify", qos: .userInteractive)
-  private let thirdQueue   = DispatchQueue(label: "yolo.infer.third",    qos: .userInteractive)
+  /// Shared serial queue for all YOLO predictors — only one model executes on GPU/ANE
+  /// at any given time, eliminating resource contention and thermal/current spikes.
+  private let inferenceQueue = DispatchQueue(label: "yolo.infer.shared", qos: .userInteractive)
+
+  /// Identifies which predictor slot a result came from.
+  private enum Slot { case detect, classify, third }
 
   // MARK: Predictors
 
@@ -83,88 +85,47 @@ public class YOLOMultiTaskView: UIView {
   /// models apart (the primary detect model reports `modelId == "detect"`).
   var thirdModelId:      String = "detect2"
 
-  // MARK: License-plate OCR (gated by the carPart / third detector)
-
-  /// Standalone CoreML recognizer (not a YOLO predictor). When set, every carPart
-  /// frame that contains a `"Biển số xe"` box is cropped and run through OCR; the
-  /// result is streamed to Dart as a separate `type == "ocr"` event used purely as
-  /// a framing signal (a readable plate ⇒ this frame is a good panoramic shot).
-  private var ocrModel: LicensePlateOCR?
-  /// carPart's class name for the license plate (matches the Dart gating logic).
-  private static let licensePlateClass = "Biển số xe"
-  /// Visible viewport (preview-space vertical band, which maps to the box X axis —
-  /// see `_filterToViewport` in the Dart controller). OCR only considers plate
-  /// boxes fully inside this band so a readable plate is guaranteed to sit inside
-  /// the saved (viewport-cropped) photo. Defaults to the full frame until set.
-  private var ocrViewportTop: CGFloat = 0
-  private var ocrViewportBottom: CGFloat = 1
-  /// Inset from the viewport band edge (buffer X = preview-vertical). Rejects a
-  /// plate clipped near the top/bottom bar boundary (only half visible) — the whole
-  /// plate must sit inside the frame, not just touch it. Kept small: on a panoramic
-  /// full-car framing the plate sits low in the frame (bumper level), and a larger
-  /// inset silently prevented OCR from ever running there.
-  private static let ocrViewportMargin: CGFloat = 0.05
-  /// Inset on the PERPENDICULAR axis (preview-horizontal = buffer Y). The viewport
-  /// band only gates the buffer X axis, leaving plates flush against the LEFT/RIGHT
-  /// edge of the screen readable — which produced badly-framed / half-plate captures.
-  /// Require the plate to sit away from those edges too.
-  private static let ocrEdgeMargin: CGFloat = 0.05
-  /// Dedicated queue so OCR inference never blocks the camera/inference queues.
-  private let ocrQueue = DispatchQueue(label: "yolo.infer.ocr", qos: .userInitiated)
-  /// One-frame-deep back-pressure for OCR. Accessed only on cameraQueue.
-  private var ocrBusy = false
-  /// Pixel buffer of the frame currently in flight through the third predictor —
-  /// retained so the OCR step can crop the exact frame carPart saw. cameraQueue only.
-  private var thirdInFlightBuffer: CVPixelBuffer?
-
   // Phase-based gating (cameraQueue). Defaults match the initial framing phase:
-  //   panorama/framing  → carDamage OFF, OCR ON
-  //   inspection        → carDamage ON,  OCR OFF
+  //   panorama/framing  → carDamage OFF, isPanoramicPhase ON
+  //   inspection        → carDamage ON,  isPanoramicPhase OFF
   // carCorner (classify) and carPart (third) always run.
   private var detectEnabled = false
-  private var ocrEnabled = true
+  private var isPanoramicPhase = true
 
-  /// One-frame-deep back-pressure per predictor. Accessed only on cameraQueue.
-  var detectBusy   = false
-  var classifyBusy = false
-  var thirdBusy    = false
+  /// One-frame-deep back-pressure: true while any predictor is executing on inferenceQueue.
+  /// Accessed only on cameraQueue.
+  private var isInferring = false
+
+  /// Round-robin scheduling ring: 2 DETECT : 1 THIRD : 1 CLASSIFY.
+  /// In panoramic phase (detectEnabled = false), DETECT candidates are skipped
+  /// and execution naturally interleaves between THIRD and CLASSIFY.
+  private let rrCandidates: [Slot] = [.detect, .third, .detect, .classify]
+  private var rrCursor = 0
 
   // MARK: Nhịp chạy model theo bậc nhiệt (cameraQueue)
 
   // Mỗi bảng có 4 phần tử, index theo ThermalTier.rawValue:
   //   [normal, warm, hot, critical]
-  // Giá trị là khoảng cách tối thiểu (giây) giữa 2 lần chạy; 0 = không giới hạn
-  // (chạy mỗi frame khi predictor rảnh). Máy càng nóng, nhịp càng thưa → GPU/ANE
-  // có thời gian nghỉ giữa các lần inference.
-  //
-  // Ở bậc .normal: classify ~6–7 fps, carPart tối đa ~10 fps khi căn toàn cảnh
-  // rồi hạ về ~6–7 fps khi soi tổn thất, carDamage ~12.5 fps, OCR không giới hạn.
+  // Giá trị là khoảng cách tối thiểu (giây) giữa 2 lần chạy.
+  // Máy càng nóng, nhịp càng thưa → GPU/ANE có thời gian nghỉ giữa các lần inference.
+  // Ở bậc .normal: classify ~3.0 fps (0.33s), carPart 5.0 fps (0.20s) khi căn toàn cảnh
+  // rồi hạ về ~3.3 fps (0.30s) khi soi tổn thất, carDamage ~6.7 fps (0.15s).
 
-  /// carDamage — model chính, tốn nhiều nhất. Trước đây chạy MỖI FRAME (~30 fps)
-  /// khi máy mát; nay chặn ở ~12.5 fps ngay từ bậc .normal.
-  ///
-  /// 12.5 fps là đủ: luồng nghiệp vụ chỉ cần 5 frame liên tiếp có tổn thất mới
-  /// mở xác nhận → 400 ms, người dùng không nhận ra khác biệt. Đổi lại GPU/ANE
-  /// có khoảng nghỉ giữa các lần inference thay vì chạy bão hoà.
-  private static let detectMinInferenceIntervals: [CFTimeInterval] = [0.08, 0.15, 0.25, 0.40]
+  /// carDamage — model chính, tốn nhiều nhất.
+  private static let detectMinInferenceIntervals: [CFTimeInterval] = [0.15, 0.20, 0.30, 0.50]
 
   /// carCorner.
-  private static let classifyMinInferenceIntervals: [CFTimeInterval] = [0.15, 0.25, 0.35, 0.50]
+  private static let classifyMinInferenceIntervals: [CFTimeInterval] = [0.33, 0.40, 0.50, 0.65]
 
   // carPart phải chạy nhanh hơn `_carPartFlickerGrace` (600 ms) phía Dart — nếu
   // thưa hơn thì `_seenRecently` không bao giờ đúng và luồng canh khung ảnh toàn
-  // cảnh đứng hẳn. Vì vậy trần ở đây là 450 ms, kể cả bậc .critical.
-  private static let thirdPanoramicMinInferenceIntervals: [CFTimeInterval] = [0.10, 0.20, 0.30, 0.40]
-  private static let thirdInspectionMinInferenceIntervals: [CFTimeInterval] = [0.15, 0.25, 0.35, 0.45]
-
-  // OCR phải chạy nhanh hơn `_plateReadFreshDuration` (1200 ms) phía Dart, nếu
-  // không cờ "đọc được biển" hết hạn trước khi đủ điều kiện chụp.
-  private static let ocrMinInferenceIntervals: [CFTimeInterval] = [0, 0, 0.40, 0.70]
+  // cảnh đứng hẳn.
+  private static let thirdPanoramicMinInferenceIntervals: [CFTimeInterval] = [0.20, 0.25, 0.35, 0.45]
+  private static let thirdInspectionMinInferenceIntervals: [CFTimeInterval] = [0.30, 0.40, 0.50, 0.65]
 
   private var lastDetectTime: CFTimeInterval = 0
   private var lastClassifyTime: CFTimeInterval = 0
   private var lastThirdTime: CFTimeInterval = 0
-  private var lastOcrTime: CFTimeInterval = 0
 
   // MARK: Hạ nhiệt
 
@@ -183,7 +144,7 @@ public class YOLOMultiTaskView: UIView {
   }
 
   // Context stream sampling (cameraQueue only)
-  private static let streamInterval: CFTimeInterval = 1.0
+  private static let streamInterval: CFTimeInterval = 2.0
   private static let streamJpegQuality: CGFloat = 0.70
   private static let jpegEncodeContext = CIContext()
   private var streamEnabled = false
@@ -263,19 +224,17 @@ public class YOLOMultiTaskView: UIView {
 
   // MARK: - Result handling (cameraQueue)
 
-  /// Identifies which predictor slot a result came from. Bookkeeping (busy flags, FPS) is
-  /// keyed on the slot — not the task — so two detect models never clobber each other's state.
-  private enum Slot { case detect, classify, third }
-
   private func handleResult(_ result: YOLOResult, slot: Slot) {
     let now = CACurrentMediaTime()
     let task: String
     let modelId: String
     var taskFps: Double = 0
 
+    // Reset single inference busy state (cameraQueue)
+    isInferring = false
+
     switch slot {
     case .detect:
-      detectBusy = false
       detectPredictor?.isUpdating = false
       if detectLastResultTime > 0 {
         let dt = now - detectLastResultTime
@@ -286,7 +245,6 @@ public class YOLOMultiTaskView: UIView {
       task = "detect"
       modelId = "detect"
     case .classify:
-      classifyBusy = false
       classifyPredictor?.isUpdating = false
       if classifyLastResultTime > 0 {
         let dt = now - classifyLastResultTime
@@ -297,7 +255,6 @@ public class YOLOMultiTaskView: UIView {
       task = "classify"
       modelId = "classify"
     case .third:
-      thirdBusy = false
       thirdPredictor?.isUpdating = false
       if thirdLastResultTime > 0 {
         let dt = now - thirdLastResultTime
@@ -307,7 +264,6 @@ public class YOLOMultiTaskView: UIView {
       taskFps = thirdFps
       task = thirdTaskType
       modelId = thirdModelId
-      maybeRunOCR(on: result)
     }
 
     let camFpsSnapshot = camFps
@@ -319,121 +275,17 @@ public class YOLOMultiTaskView: UIView {
     }
   }
 
-  /// If carPart found a license-plate box and OCR is idle, crop that region from
-  /// the retained frame and recognize it off the camera queue. Emits a separate
-  /// `type == "ocr"` stream event with `readable` used as the framing signal.
-  /// Runs on cameraQueue (where `ocrBusy` / `thirdInFlightBuffer` are owned).
-  private func maybeRunOCR(on result: YOLOResult) {
-    guard let ocr = ocrModel, ocrEnabled, !ocrBusy, let buffer = thirdInFlightBuffer else { return }
-    thirdInFlightBuffer = nil
-
-    // Nhịp tối thiểu theo bậc nhiệt. Mốc chỉ được cập nhật khi thực sự chạy OCR
-    // bên dưới, để một frame không tìm thấy biển không "ăn" mất lượt kế tiếp.
-    let ocrMinInterval = Self.ocrMinInferenceIntervals[thermalTier.rawValue]
-    let nowOcr = CACurrentMediaTime()
-    guard ocrMinInterval == 0 || nowOcr - lastOcrTime >= ocrMinInterval else { return }
-
-    // Only the highest-confidence plate box that sits FULLY inside the exact
-    // aspect-fill crop rect used by capturePhoto. Comparing directly with
-    // ocrViewportTop/bottom is not enough because capturePhoto applies
-    // aspect-fill offsets before cropping.
-    let cropRect = ocrCropRectInFrame(
-      frameSize: result.orig_shape,
-      previewSize: previewLayer?.bounds.size ?? bounds.size)
-    let loX = cropRect.minX + Self.ocrViewportMargin
-    let hiX = cropRect.maxX - Self.ocrViewportMargin
-    let loY = cropRect.minY + Self.ocrEdgeMargin
-    let hiY = cropRect.maxY - Self.ocrEdgeMargin
-    guard loX < hiX, loY < hiY else { return }
-    let plateBox = result.boxes
-      .filter {
-        $0.cls == Self.licensePlateClass
-          && $0.xywhn.minX >= loX && $0.xywhn.maxX <= hiX
-          && $0.xywhn.minY >= loY && $0.xywhn.maxY <= hiY
-      }
-      .max { $0.conf < $1.conf }
-    guard let box = plateBox else { return }
-
-    let rect = box.xywhn  // normalized, top-left origin in the (landscape) buffer
-    ocrBusy = true
-    lastOcrTime = nowOcr
-    ocrQueue.async { [weak self] in
-      guard let self else { return }
-      let read = ocr.read(pixelBuffer: buffer, region: rect)
-      let event: [String: Any] = [
-        "type": "ocr",
-        "modelId": "ocr",
-        "plate": read?.plate ?? "",
-        "score": read?.score ?? 0.0,
-        "readable": read != nil,
-      ]
-      DispatchQueue.main.async { [weak self] in self?.onMultiTaskStream?(event) }
-      self.cameraQueue.async { [weak self] in self?.ocrBusy = false }
-    }
-  }
-
-  private func ocrCropRectInFrame(frameSize: CGSize, previewSize: CGSize) -> CGRect {
-    let wp = frameSize.width
-    let hp = frameSize.height
-    let wv = previewSize.width
-    let hv = previewSize.height
-    guard wp > 0, hp > 0, wv > 0, hv > 0 else {
-      return CGRect(x: 0, y: 0, width: 1, height: 1)
-    }
-
-    let left: CGFloat
-    let top: CGFloat
-    let right: CGFloat
-    let bottom: CGFloat
-    if (wp >= hp) != (wv >= hv) {
-      // Same mapping as capturePhoto: preview vertical band maps to frame/photo
-      // horizontal coordinates after the 90° transpose.
-      let s = max(wv / hp, hv / wp)
-      let offU = (hp * s - wv) / 2
-      let offV = (wp * s - hv) / 2
-      let u0 = offU / s
-      let u1 = (wv + offU) / s
-      let v0 = (ocrViewportTop * hv + offV) / s
-      let v1 = (ocrViewportBottom * hv + offV) / s
-      left = v0
-      right = v1
-      top = hp - u1
-      bottom = hp - u0
-    } else {
-      let s = max(wv / wp, hv / hp)
-      let offX = (wp * s - wv) / 2
-      let offY = (hp * s - hv) / 2
-      left = offX / s
-      right = (wv + offX) / s
-      top = (ocrViewportTop * hv + offY) / s
-      bottom = (ocrViewportBottom * hv + offY) / s
-    }
-
-    let l = min(max(left / wp, 0), 1)
-    let r = min(max(right / wp, 0), 1)
-    let t = min(max(top / hp, 0), 1)
-    let b = min(max(bottom / hp, 0), 1)
-    return CGRect(
-      x: min(l, r),
-      y: min(t, b),
-      width: abs(r - l),
-      height: abs(b - t))
-  }
-
-  /// Updates the visible viewport used to gate OCR (preview-space vertical band).
+  /// Updates the visible viewport (retained for backward compatibility).
   func setOcrViewport(top: CGFloat, bottom: CGFloat) {
-    cameraQueue.async { [weak self] in
-      self?.ocrViewportTop = top
-      self?.ocrViewportBottom = bottom
-    }
+    // No-op: OCR removed
   }
 
-  /// Phase-based gating: inspection runs carDamage and stops OCR; framing/panorama
-  /// runs OCR and stops carDamage. carCorner/carPart always run.
+  /// Phase-based gating: inspection runs carDamage; framing/panorama
+  /// sets isPanoramicPhase and stops carDamage. carCorner/carPart always run.
   func setInspectionActive(_ active: Bool) {
     cameraQueue.async { [weak self] in
       self?.detectEnabled = active
-      self?.ocrEnabled = !active
+      self?.isPanoramicPhase = !active
     }
   }
 
@@ -592,20 +444,6 @@ public class YOLOMultiTaskView: UIView {
     self.thirdTaskType = thirdModelTask
     expectedCount = thirdModelPath != nil ? 3 : 2
     loadedCount = 0
-
-    // OCR is not a YOLO predictor and must not gate camera start — load it on a
-    // background queue and attach when ready (frames before that simply skip OCR).
-    if let ocrPath = ocrModelPath, let ocrURL = resolveModelURL(ocrPath) {
-      DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-        let ocr = LicensePlateOCR(modelURL: ocrURL, threshold: ocrConfidenceThreshold)
-        DispatchQueue.main.async {
-          self?.ocrModel = ocr
-          NSLog(ocr == nil
-            ? "YOLOMultiTaskView: ⚠️ OCR model failed to load"
-            : "YOLOMultiTaskView: ✅ OCR model loaded")
-        }
-      }
-    }
 
     func tryDone() {
       loadedCount += 1
@@ -949,8 +787,6 @@ public class YOLOMultiTaskView: UIView {
     detectPredictor = nil
     classifyPredictor = nil
     thirdPredictor = nil
-    ocrModel = nil
-    thirdInFlightBuffer = nil
     DispatchQueue.global(qos: .utility).async {
       // Giữ strong ref tới hết block rồi mới thả → dealloc xảy ra ở nền (nếu đây
       // là tham chiếu cuối cùng).
@@ -988,53 +824,74 @@ extension YOLOMultiTaskView: AVCaptureVideoDataOutputSampleBufferDelegate, @unch
 
     maybeSampleContextStream(from: sampleBuffer, now: now)
 
-    // Snapshot một lần cho cả frame: bậc nhiệt có thể đổi giữa các nhánh dưới,
-    // và ba model nên cùng chạy theo một bậc để nhịp không lệch nhau.
-    let tier = thermalTier.rawValue
+    // Phase 1: Back-pressure check. Nếu inferenceQueue đang bận chạy model trước
+    // đó, bỏ qua frame hiện tại ngay lập tức để không tích tụ hàng đợi (zero lag).
+    if isInferring { return }
 
-    // Dispatch each predictor to its own queue so all run concurrently.
-    // carDamage is skipped (input blocked) during the framing/panorama phase, and
-    // rate-limited on top of that once the device gets hot.
-    let detectMinInterval = Self.detectMinInferenceIntervals[tier]
-    if let p = detectPredictor, detectEnabled, !detectBusy, !p.isUpdating,
-      detectMinInterval == 0 || now - lastDetectTime >= detectMinInterval
-    {
+    // Phase 2: Lập lịch xoay vòng (Round-Robin). Tìm candidate kế tiếp đủ điều kiện
+    // (đã load, đúng phase, đủ khoảng cách minInterval theo bậc nhiệt).
+    let tier = thermalTier.rawValue
+    guard let slot = nextEligibleSlot(now: now, tier: tier) else { return }
+
+    isInferring = true
+
+    let predictor: BasePredictor
+    let adapter: MultiTaskPredictorAdapter
+
+    switch slot {
+    case .detect:
+      guard let p = detectPredictor else { isInferring = false; return }
       lastDetectTime = now
-      detectBusy = true
-      p.isUpdating = true
-      let buf = sampleBuffer
-      let adapter = detectAdapter
-      detectQueue.async { p.predict(sampleBuffer: buf, onResultsListener: adapter, onInferenceTime: adapter) }
-    }
-    if let p = classifyPredictor, !classifyBusy, !p.isUpdating,
-      now - lastClassifyTime >= Self.classifyMinInferenceIntervals[tier]
-    {
+      predictor = p
+      adapter = detectAdapter
+    case .classify:
+      guard let p = classifyPredictor else { isInferring = false; return }
       lastClassifyTime = now
-      classifyBusy = true
-      p.isUpdating = true
-      let buf = sampleBuffer
-      let adapter = classifyAdapter
-      classifyQueue.async { p.predict(sampleBuffer: buf, onResultsListener: adapter, onInferenceTime: adapter) }
-    }
-    let thirdMinInterval = ocrEnabled
-      ? Self.thirdPanoramicMinInferenceIntervals[tier]
-      : Self.thirdInspectionMinInferenceIntervals[tier]
-    if let p = thirdPredictor, !thirdBusy, !p.isUpdating,
-      now - lastThirdTime >= thirdMinInterval
-    {
+      predictor = p
+      adapter = classifyAdapter
+    case .third:
+      guard let p = thirdPredictor else { isInferring = false; return }
       lastThirdTime = now
-      thirdBusy = true
-      p.isUpdating = true
-      let buf = sampleBuffer
-      let adapter = thirdAdapter
-      // Retain this frame's pixel buffer so the OCR step (run from the third
-      // result handler) can crop the exact frame carPart processed. Skipped when
-      // OCR is gated off (inspection phase).
-      if ocrModel != nil, ocrEnabled {
-        thirdInFlightBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
-      }
-      thirdQueue.async { p.predict(sampleBuffer: buf, onResultsListener: adapter, onInferenceTime: adapter) }
+      predictor = p
+      adapter = thirdAdapter
     }
+
+    predictor.isUpdating = true
+    let buf = sampleBuffer
+    inferenceQueue.async {
+      predictor.predict(sampleBuffer: buf, onResultsListener: adapter, onInferenceTime: adapter)
+    }
+  }
+
+  private func isEligible(slot: Slot, now: CFTimeInterval, tier: Int) -> Bool {
+    switch slot {
+    case .detect:
+      guard let p = detectPredictor, detectEnabled, !p.isUpdating else { return false }
+      let minInterval = Self.detectMinInferenceIntervals[tier]
+      return minInterval == 0 || now - lastDetectTime >= minInterval
+    case .classify:
+      guard let p = classifyPredictor, !p.isUpdating else { return false }
+      return now - lastClassifyTime >= Self.classifyMinInferenceIntervals[tier]
+    case .third:
+      guard let p = thirdPredictor, !p.isUpdating else { return false }
+      let minInterval = isPanoramicPhase
+        ? Self.thirdPanoramicMinInferenceIntervals[tier]
+        : Self.thirdInspectionMinInferenceIntervals[tier]
+      return now - lastThirdTime >= minInterval
+    }
+  }
+
+  private func nextEligibleSlot(now: CFTimeInterval, tier: Int) -> Slot? {
+    let size = rrCandidates.count
+    for step in 0..<size {
+      let index = (rrCursor + step) % size
+      let slot = rrCandidates[index]
+      if isEligible(slot: slot, now: now, tier: tier) {
+        rrCursor = (index + 1) % size
+        return slot
+      }
+    }
+    return nil
   }
 }
 

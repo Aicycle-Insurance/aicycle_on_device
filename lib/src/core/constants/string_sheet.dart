@@ -48,7 +48,7 @@ class StringSheet {
   static String downloadingModel(String name) => 'Đang tải mô hình $name';
   static const moveBackGuide = 'Lùi camera ra xa để chụp ảnh toàn cảnh xe';
   static const holdStillGuide =
-      'Hãy giữ yên điện thoại. Đang nhận diện biển số';
+      'Hãy giữ yên điện thoại để chụp ảnh toàn cảnh';
   static const movePlateClearGuide =
       'Vui lòng di chuyển camera để biển số rõ nét trong khung hình';
   static const plateValidCaptured = 'Biển số hợp lệ, chụp ảnh thành công';
@@ -61,7 +61,7 @@ class StringSheet {
   static const missingDamage = 'Thiếu tổn thất';
   static const confirm = 'Xác nhận';
   static const detailPhotoGuide =
-      'Di chuyển camera đến gần vùng có tổn thất để chụp ảnh chi tiết';
+      'Di chuyển camera đến gần vùng tổn thất để chụp ảnh chi tiết';
   static const continueToNextDamage =
       'Tiếp tục di chuyển camera đến vùng có tổn thất khác';
   static const moveCameraToMissing =
@@ -73,11 +73,16 @@ class StringSheet {
   static const cornerNeedsPhoto = 'Góc cần bổ sung ảnh';
   static const cornerCaptured = 'Đã chụp thành công';
 
-  // ----- Camera exit dialog -----
+  // ----- Camera exit / finish dialog -----
   static const exitCameraTitle = 'Thoát chụp ảnh?';
   static const exitCameraContent =
       'Các ảnh xe đã chụp sẽ không được lưu nếu bạn thoát ngay bây giờ.';
   static const exitConfirm = 'Thoát';
+  static const finishCaptureTitle = 'Kết thúc chụp ảnh?';
+  static const finishCaptureContent =
+      'Bạn có chắc chắn muốn Kết thúc quá trình chụp ảnh không?';
+  static const finishConfirm = 'Đồng ý';
+  static const agree = 'Đồng ý';
   static const carPhoto = 'Ảnh xe';
 
   // ----- Model list / card -----
@@ -95,7 +100,7 @@ class StringSheet {
   static const noDamageFound = 'Không phát hiện vết hỏng';
   static const addDamagePhoto = 'Thêm ảnh tổn thất';
   static const done = 'Xong';
-  static const viewResult = 'Xem kết quả';
+  static const viewResult = 'Kết thúc chụp ảnh';
 
   static const unknown = 'Không xác định';
 

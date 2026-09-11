@@ -10,9 +10,9 @@ import '../../../../aicycle_on_device.dart';
 import '../../../core/cache/photo_session_cache.dart';
 import '../../../core/constants/string_sheet.dart';
 import '../../../core/themes/app_colors.dart';
-import '../../../core/themes/app_textstyle.dart';
 import '../../../core/upload/photo_upload_queue.dart';
 import '../../../core/utils/screen_utils.dart';
+import '../../../core/widgets/confirm_dialog.dart';
 import '../data/model/camera_message.dart';
 import '../data/model/detection_output.dart';
 import 'controller/camera_controller.dart';
@@ -41,6 +41,7 @@ class CameraScreen extends StatefulWidget {
     required this.carPartModelPath,
     this.licensePlateModelPath,
     this.onComplete,
+    this.onClose,
     this.onViewResult,
   });
 
@@ -53,6 +54,9 @@ class CameraScreen extends StatefulWidget {
   /// Null → native bỏ qua OCR.
   final String? licensePlateModelPath;
   final Function()? onComplete;
+
+  /// Gọi khi user thoát camera (nút X hoặc Back).
+  final VoidCallback? onClose;
 
   /// Bấm "Xem kết quả": trả ảnh đã chụp lên bootstrap để chuyển sang pha upload
   /// (bootstrap sẽ gỡ camera này khỏi cây → giải phóng tài nguyên).
@@ -154,55 +158,34 @@ class _CameraScreenState extends State<CameraScreen>
       // Ảnh đã được ghi xuống PhotoSessionCache ngay sau mỗi lần chụp; khi bật
       // alwaysCache thì rời camera không hỏi xoá cache nữa.
       _cameraController.stopCamera();
+      widget.onClose?.call();
       return true;
     }
     final hasCachedSession =
         await PhotoSessionCache.instance.hasSessionData(sessionId);
     if (!mounted) return false;
     if (_cameraController.capturedPhotos.isEmpty && !hasCachedSession) {
+      _cameraController.stopCamera();
+      widget.onClose?.call();
       return true;
     }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => RotatedBox(
-        quarterTurns: 1,
-        child: AlertDialog(
-          title: Text(
-            StringSheet.exitCameraTitle,
-            style: AppTextStyles.base.s16.w600(),
-          ),
-          content: Text(
-            StringSheet.exitCameraContent,
-            style: AppTextStyles.base.s14.ink400Color,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: Text(
-                StringSheet.cancel,
-                style: AppTextStyles.base.s14.w600(),
-              ),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: Text(
-                StringSheet.exitConfirm,
-                style: AppTextStyles.base.s14.w600().copyWith(
-                      color: AppColors.redA400,
-                    ),
-              ),
-            ),
-          ],
-        ),
-      ),
+    final confirmed = await ConfirmDialog.show(
+      context,
+      title: StringSheet.exitCameraTitle,
+      content: StringSheet.exitCameraContent,
+      cancelText: StringSheet.cancel,
+      confirmText: StringSheet.exitConfirm,
+      confirmColor: AppColors.redA400,
+      quarterTurns: 1,
     );
-    if (confirmed == true) {
+    if (confirmed) {
       // Dừng camera trước khi pop để native cleanup không chặn UI trong dispose().
       _cameraController.stopCamera();
       await PhotoUploadQueue.instance.clearSession(sessionId);
       await PhotoSessionCache.instance.clearSession(sessionId);
+      widget.onClose?.call();
     }
-    return confirmed ?? false;
+    return confirmed;
   }
 
   Widget _buildTooltip() {
@@ -238,6 +221,21 @@ class _CameraScreenState extends State<CameraScreen>
       return completed.length >= 4;
     }
     return completed.isNotEmpty;
+  }
+
+  Future<void> _onFinishCapturePressed() async {
+    final confirmed = await ConfirmDialog.show(
+      context,
+      title: StringSheet.finishCaptureTitle,
+      content: StringSheet.finishCaptureContent,
+      cancelText: StringSheet.cancel,
+      confirmText: StringSheet.finishConfirm,
+      confirmColor: AppColors.primaryA500,
+      quarterTurns: 1,
+    );
+    if (confirmed) {
+      _goToResult();
+    }
   }
 
   void _showCarProgressDialog() {
@@ -438,14 +436,16 @@ class _CameraScreenState extends State<CameraScreen>
                             ),
                           ),
 
-                        /// Nút "Xem kết quả" (2 bước chống chạm nhầm) — góc dưới phải.
+                        /// Nút "Kết thúc chụp ảnh" — nổi trên khung camera khi đã có ảnh.
                         if (_canGoNext())
                           Positioned(
                             left: 24.w,
                             bottom: 130.h,
                             child: RotatedBox(
                               quarterTurns: 1,
-                              child: ViewResultButton(onPressed: _goToResult),
+                              child: ViewResultButton(
+                                onPressed: _onFinishCapturePressed,
+                              ),
                             ),
                           ),
 

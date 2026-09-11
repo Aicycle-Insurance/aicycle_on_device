@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:aicycle_on_device/src/core/constants/string_sheet.dart';
 import 'package:aicycle_on_device/src/features/camera/presentation/controller/camera_controller.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// Ảnh toàn cảnh chỉ được chụp sau khi tooltip "Hãy giữ yên điện thoại…" đã
@@ -9,12 +12,30 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  late Directory tempDir;
+  setUpAll(() {
+    tempDir = Directory.systemTemp.createTempSync('aicycle_panoramic_test');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+      const MethodChannel('plugins.flutter.io/path_provider'),
+      (_) async => tempDir.path,
+    );
+  });
+  tearDownAll(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+      const MethodChannel('plugins.flutter.io/path_provider'),
+      null,
+    );
+    if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
+  });
+
   // Test chạy trên đồng hồ thật: mốc "tooltip đã hiện" chỉ quan sát được ở nhịp
   // bơm frame kế tiếp nên luôn trễ hơn mốc thật vài chục ms. Cận dưới trừ đi sai
   // số đó — vẫn cách rất xa hành vi lỗi cũ (~0.6s).
   const samplingSlack = Duration(milliseconds: 150);
   final atLeastHoldStill = greaterThanOrEqualTo(
-      const Duration(seconds: 7) - samplingSlack);
+      const Duration(seconds: 3) - samplingSlack);
 
   const box = {'left': 0.4, 'top': 0.4, 'right': 0.6, 'bottom': 0.6};
 
@@ -42,15 +63,10 @@ void main() {
         ],
       };
 
-  Map<String, dynamic> ocrFrame({required bool readable}) => {
-        'type': 'ocr',
-        'readable': readable,
-      };
-
   const allParts = ['Biển số xe', 'Cánh cửa', 'Ba đờ sốc trước'];
 
   test(
-    'không chụp cho tới khi tooltip "giữ yên" đã hiển thị đủ 7s',
+    'không chụp cho tới khi tooltip "giữ yên" đã hiển thị đủ 3s',
     () async {
       final controller = CameraController(sessionId: 'test-session');
       addTearDown(controller.dispose);
@@ -77,7 +93,7 @@ void main() {
           reason: 'tooltip "Lùi camera ra xa…" phải được hiển thị');
 
       // Chờ một nhịp NGẮN hơn thời gian giữ tooltip tối thiểu (3s), rồi căn đủ
-      // bộ phận + OCR đọc được biển ngay. Đây là kịch bản khiến bug xuất hiện:
+      // bộ phận. Đây là kịch bản khiến bug xuất hiện:
       // holdStill bị hoãn vì "Lùi camera ra xa…" chưa hiển thị đủ tối thiểu.
       await Future<void>.delayed(const Duration(milliseconds: 600));
 
@@ -88,7 +104,6 @@ void main() {
       final deadline = DateTime.now().add(const Duration(seconds: 16));
       while (capturedAt == null && DateTime.now().isBefore(deadline)) {
         controller.onStreamingData(carPartFrame(allParts));
-        controller.onStreamingData(ocrFrame(readable: true));
 
         if (holdStillShownAt == null &&
             controller.message?.message == StringSheet.holdStillGuide) {
@@ -110,18 +125,18 @@ void main() {
         reason: 'holdStill bị hoãn tới khi tooltip trước hiển thị đủ tối thiểu',
       );
 
-      // Điểm mấu chốt: 7s được tính TỪ LÚC TOOLTIP HIỆN.
+      // Điểm mấu chốt: 3s được tính TỪ LÚC TOOLTIP HIỆN.
       expect(
         capturedAt!.difference(holdStillShownAt),
         atLeastHoldStill,
-        reason: 'phải chờ đủ 7s kể từ khi user nhìn thấy "Hãy giữ yên…"',
+        reason: 'phải chờ đủ 3s kể từ khi user nhìn thấy "Hãy giữ yên…"',
       );
     },
     timeout: const Timeout(Duration(seconds: 60)),
   );
 
   test(
-    'đã hiện "giữ yên" thì vẫn chụp sau 7s dù bộ phận rời khung',
+    'đã hiện "giữ yên" thì vẫn chụp sau 3s dù bộ phận rời khung',
     () async {
       final controller = CameraController(sessionId: 'test-session-2');
       addTearDown(controller.dispose);
@@ -142,8 +157,7 @@ void main() {
       expect(holdStillShownAt, isNotNull);
       expect(controller.captureFlashTick, 0);
 
-      // Từ đây user lia máy đi: KHÔNG còn bộ phận nào, OCR không bao giờ đọc
-      // được biển. Lời hứa "7s nữa chụp" vẫn phải được giữ.
+      // Từ đây user lia máy đi: KHÔNG còn bộ phận nào. Lời hứa "3s nữa chụp" vẫn phải được giữ.
       DateTime? capturedAt;
       final captureDeadline = DateTime.now().add(const Duration(seconds: 12));
       while (capturedAt == null && DateTime.now().isBefore(captureDeadline)) {
@@ -153,21 +167,21 @@ void main() {
       }
 
       expect(capturedAt, isNotNull,
-          reason: 'phải chụp dù bộ phận đã rời khung và OCR không đọc được biển');
+          reason: 'phải chụp dù bộ phận đã rời khung');
       final waited = capturedAt!.difference(holdStillShownAt!);
       expect(waited, atLeastHoldStill);
-      expect(waited, lessThan(const Duration(milliseconds: 7600)),
-          reason: 'chụp ngay khi hết 7s, không chờ thêm');
+      expect(waited, lessThan(const Duration(milliseconds: 3600)),
+          reason: 'chụp ngay khi hết 3s, không chờ thêm');
 
       // Tooltip không bị hướng dẫn khác chen ngang trong lúc chờ.
       expect(controller.message?.message,
-          anyOf(StringSheet.holdStillGuide, StringSheet.plateValidCaptured));
+          anyOf(StringSheet.holdStillGuide, StringSheet.captureSuccess));
     },
     timeout: const Timeout(Duration(seconds: 60)),
   );
 
   test(
-    'vẫn chụp sau 7s kể cả khi stream ngừng bắn frame',
+    'vẫn chụp sau 3s kể cả khi stream ngừng bắn frame',
     () async {
       final controller = CameraController(sessionId: 'test-session-3');
       addTearDown(controller.dispose);
@@ -187,7 +201,7 @@ void main() {
       expect(holdStillShownAt, isNotNull);
 
       // Không bơm thêm frame nào nữa — chụp phải do timer tự kích hoạt.
-      await Future<void>.delayed(const Duration(milliseconds: 7400));
+      await Future<void>.delayed(const Duration(milliseconds: 3400));
       expect(controller.captureFlashTick, greaterThan(0),
           reason: 'timer phải tự chụp kể cả khi không còn frame nào tới');
     },

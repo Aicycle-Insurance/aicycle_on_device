@@ -10,7 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  // Vào pha inspection sẽ mở context stream (upload ngầm 1 frame/giây), và nó
+  // Vào pha inspection sẽ mở context stream (upload ngầm 1 frame mỗi 2 giây), và nó
   // hỏi path_provider chỗ ghi file. Trong unit test không có plugin thật nên
   // trả về thư mục tạm — chỉ để đường đó không ném, test này không quan tâm
   // tới upload.

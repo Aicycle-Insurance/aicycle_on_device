@@ -103,6 +103,10 @@ extension CFontSize on TextStyle {
         fontSize: 14.sp,
       );
 
+  TextStyle get s15 => copyWith(
+    fontSize: 15.sp,
+  );
+
   /// fontSize: 16
   TextStyle get s16 => copyWith(
         fontSize: 16.sp,

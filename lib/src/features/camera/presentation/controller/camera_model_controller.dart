@@ -43,6 +43,13 @@ class CameraModelController extends ChangeNotifier {
   bool get folderReady => _folderReady;
   String? get folderError => _folderError;
 
+  /// Các model bắt buộc để khởi động camera (đã bỏ licensePlate OCR)
+  static const requiredModelTypes = [
+    AiModelType.carCorner,
+    AiModelType.carDamage,
+    AiModelType.carPart,
+  ];
+
   bool get isPreparing => _isPreparing;
   String? get modelError => _modelError;
 
@@ -50,7 +57,7 @@ class CameraModelController extends ChangeNotifier {
       _folderReady &&
       !_isPreparing &&
       _modelError == null &&
-      AiModelType.values.every(_modelPaths.containsKey);
+      requiredModelTypes.every(_modelPaths.containsKey);
 
   AiModelType? get downloadingType => _downloadingType;
   double get downloadProgress => _downloadProgress;
@@ -171,7 +178,7 @@ class CameraModelController extends ChangeNotifier {
       final remoteTypes = <AiModelType>[];
       final invalidLocalIds = <int>{};
 
-      for (final type in AiModelType.values) {
+      for (final type in requiredModelTypes) {
         final provided = paths[type];
         if (provided != null && _pathExists(provided)) {
           final downloaded = manifest.downloaded

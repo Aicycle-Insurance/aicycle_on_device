@@ -41,21 +41,6 @@ mixin _PanoramicMixin on _CameraControllerBase {
     final hasPlate = _seenRecently(licencePlate);
     final hasDoor = _seenRecently(door);
     final allPresent = hasPlate && hasDoor && _seenRecently(frontBumper);
-    final plateReadable = _hasFreshPlateRead;
-    final now = DateTime.now();
-    if (_platePromptShown) _platePromptShownAt ??= now;
-    final platePromptVisibleLongEnough = !_platePromptShown ||
-        now.difference(_platePromptShownAt!) >= _plateClearPromptMinDuration;
-    final keepPlatePromptVisible =
-        allPresent && _platePromptShown && !platePromptVisibleLongEnough;
-
-    // Chỉ giữ timer nhắc khi đang ở trạng thái "đã căn đủ, chờ OCR". Rời trạng
-    // thái này (di chuyển làm mất bộ phận) → huỷ timer + reset cờ nhắc. Nếu
-    // warning căn biển rõ vừa xuất hiện thì giữ tối thiểu một nhịp, kể cả khi OCR đã
-    // đọc lại được biển.
-    if (!(allPresent && (!plateReadable || keepPlatePromptVisible))) {
-      _cancelPlateReadTimer();
-    }
 
     if (!hasPlate) {
       _setMessage(
@@ -64,47 +49,12 @@ mixin _PanoramicMixin on _CameraControllerBase {
       _setMessage(CameraMessage(
           message: StringSheet.moveBackGuide, type: MessageType.info));
     } else if (allPresent) {
-      // Bộ phận đã căn đủ → hiện "Hãy giữ yên điện thoại…". Nhánh này KHÔNG
-      // quyết định thời điểm chụp: [_syncHoldStillCaptureTimer] hẹn giờ ngay khi
-      // tooltip thật sự hiện và chụp sau đúng [_holdStillMinDuration], dù sau đó
-      // bộ phận rời khung, OCR không đọc được biển, hay stream ngừng bắn frame.
-      //
-      // LƯU Ý: vì lời hứa 3s là tuyệt đối và [_plateReadPromptDelay] (5s) dài
-      // hơn, nhắc "biển số chưa rõ" bên dưới hiện KHÔNG BAO GIỜ chạy tới — giữ
-      // lại để dễ khôi phục nếu muốn chụp có điều kiện OCR trở lại.
-      if (_platePromptShown) {
-        // Chưa đọc được biển → giữ nhắc di chuyển cho biển rõ nét.
-        _setMessage(CameraMessage(
-            message: StringSheet.movePlateClearGuide,
-            type: MessageType.warning));
-      } else {
-        _setMessage(CameraMessage(
-            message: StringSheet.holdStillGuide, type: MessageType.loading));
-        if (_holdStillGuideShownAt != null) _ensurePlateReadTimer();
-      }
-    }
-  }
-
-  /// Bắt đầu đếm chờ OCR (nếu chưa chạy). Hết thời gian mà chưa đọc được biển →
-  /// bật cờ nhắc + hiển thị message di chuyển cho biển rõ.
-  void _ensurePlateReadTimer() {
-    if (_plateReadTimer != null) return;
-    _plateReadTimer = Timer(_plateReadPromptDelay, () {
-      _plateReadTimer = null;
-      _platePromptShown = true;
-      _platePromptShownAt = DateTime.now();
+      // Bộ phận đã căn đủ → hiện "Hãy giữ yên điện thoại…".
+      // [_syncHoldStillCaptureTimer] hẹn giờ ngay khi tooltip thật sự hiện và
+      // chụp sau đúng [_holdStillMinDuration].
       _setMessage(CameraMessage(
-        message: StringSheet.movePlateClearGuide,
-        type: MessageType.warning,
-      ));
-    });
-  }
-
-  void _cancelPlateReadTimer() {
-    _plateReadTimer?.cancel();
-    _plateReadTimer = null;
-    _platePromptShown = false;
-    _platePromptShownAt = null;
+          message: StringSheet.holdStillGuide, type: MessageType.loading));
+    }
   }
 
   @override
@@ -118,7 +68,7 @@ mixin _PanoramicMixin on _CameraControllerBase {
     await _afterAutoCaptureSuccess();
   }
 
-  /// Debug: inject ảnh gallery như một lượt auto-capture (bypass framing/ocr).
+  /// Debug: inject ảnh gallery như một lượt auto-capture (bypass framing).
   @override
   Future<void> injectGalleryPhotoAsAutoCapture(String sourcePath) async {
     if (!_debugMode || _isCapturing) return;
@@ -130,11 +80,7 @@ mixin _PanoramicMixin on _CameraControllerBase {
   }
 
   void _resetAutoCaptureFramingState() {
-    // Cờ "đọc được biển" chỉ dùng cho 1 lần chụp toàn cảnh; reset để góc sau
-    // phải đọc lại biển mới chụp.
-    _clearPlateRead();
-    _platePromptShownAt = null;
-    _cancelPlateReadTimer();
+    // Reset trạng thái framing nếu cần trước lần chụp kế tiếp
   }
 
   Future<void> _afterAutoCaptureSuccess({int? segment}) async {
@@ -148,12 +94,12 @@ mixin _PanoramicMixin on _CameraControllerBase {
     // vào thẳng scanning.
     _firstPanoramicCaptured = true;
     _classificationLocked = true;
-    // Biển hợp lệ + đã chụp → báo thành công 3s rồi mới sang pha inspection.
+    // Đã chụp toàn cảnh thành công → báo thành công 3s rồi mới sang pha inspection.
     // (Segment đã nằm trong _panoramicCapturedSegments nên updateMessage bị chặn
     // → message thành công không bị frame carPart kế tiếp ghi đè.)
     _setMessage(
       CameraMessage(
-        message: StringSheet.plateValidCaptured,
+        message: StringSheet.captureSuccess,
         type: MessageType.success,
       ),
       immediate: true,

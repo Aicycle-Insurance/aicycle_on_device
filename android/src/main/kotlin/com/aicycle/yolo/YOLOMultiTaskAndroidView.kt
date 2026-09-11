@@ -42,76 +42,45 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     companion object {
         private const val TAG = "YOLOMultiTaskAndroidView"
         private val CLASS_NAMES = listOf("Móp/bẹp", "Vỡ/nứt", "Thủng/rách", "Trầy/xước")
-        /** carPart's class name for the license plate (matches the Dart gating logic). */
-        private const val LICENSE_PLATE_CLASS = "Biển số xe"
-        /**
-         * Inset from the viewport band edge (buffer X = preview-vertical). Rejects a
-         * plate clipped near the top/bottom bar boundary (only half visible) — the
-         * whole plate must sit inside the frame, not just touch it. Kept small: on a
-         * panoramic full-car framing the plate sits low in the frame (bumper level),
-         * and a larger inset silently prevented OCR from ever running there.
-         */
-        private const val OCR_VIEWPORT_MARGIN = 0.05f
-        /**
-         * Inset on the PERPENDICULAR axis (preview-horizontal = buffer Y). The
-         * viewport band only gates the buffer X axis, leaving plates flush against the
-         * LEFT/RIGHT edge of the screen readable — which produced badly-framed /
-         * half-plate captures. Require the plate to sit away from those edges too.
-         */
-        private const val OCR_EDGE_MARGIN = 0.05f
         private const val REQUEST_CODE_PERMISSIONS = 1001
         private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
 
         // ── Nhịp chạy model theo bậc nhiệt ───────────────────────────────────
         // Mỗi bảng có 4 cột, index theo ThermalTier.ordinal:
         //   [NORMAL, WARM, HOT, CRITICAL]
-        // Giá trị là khoảng cách tối thiểu (ms) giữa 2 lần chạy; 0 = không giới
-        // hạn (chạy mỗi frame khi predictor rảnh). Máy càng nóng, nhịp càng thưa
-        // → GPU/NPU có thời gian nghỉ giữa các lần inference.
-        //
-        // Ở bậc NORMAL: classify ~6–7 fps, carPart tối đa ~10 fps khi căn toàn
-        // cảnh rồi hạ về ~6–7 fps khi soi tổn thất, carDamage ~12.5 fps, OCR
-        // không giới hạn.
+        // Giá trị là khoảng cách tối thiểu (ms) giữa 2 lần chạy.
+        // Máy càng nóng, nhịp càng thưa → GPU/NPU có thời gian nghỉ giữa các lần inference.
+        // Ở bậc NORMAL: classify ~3.0 fps (330ms), carPart 5.0 fps (200ms) khi căn toàn
+        // cảnh rồi hạ về ~3.3 fps (300ms) khi soi tổn thất, carDamage ~6.7 fps (150ms).
 
         // Context stream (inspection phase background upload)
-        private const val STREAM_INTERVAL_MS = 1000L
+        private const val STREAM_INTERVAL_MS = 2000L
         private const val STREAM_JPEG_QUALITY = 70
 
         /**
-         * carDamage — model chính, tốn nhiều nhất. Trước đây chạy MỖI FRAME
-         * (~30 fps) khi máy mát; nay chặn ở ~12.5 fps ngay từ bậc NORMAL.
-         *
-         * 12.5 fps là đủ: luồng nghiệp vụ chỉ cần [_damageConfirmFrameCount] = 5
-         * frame liên tiếp có tổn thất mới mở xác nhận → 400 ms, người dùng
-         * không nhận ra khác biệt. Đổi lại GPU có khoảng nghỉ giữa các lần
-         * inference thay vì chạy bão hoà.
+         * carDamage — model chính, tốn nhiều nhất.
+         * Giới hạn nhịp chạy theo bậc nhiệt để GPU/NPU nghỉ ngơi, tránh quá nhiệt.
          */
-        private val DETECT_MIN_INTERVAL_MS = longArrayOf(80L, 150L, 250L, 400L)
+        private val DETECT_MIN_INTERVAL_MS = longArrayOf(150L, 200L, 300L, 500L)
 
         /** carCorner. */
-        private val CLASSIFY_MIN_INTERVAL_MS = longArrayOf(150L, 250L, 350L, 500L)
+        private val CLASSIFY_MIN_INTERVAL_MS = longArrayOf(330L, 400L, 500L, 650L)
 
         // carPart phải chạy nhanh hơn _carPartFlickerGrace (600 ms) phía Dart —
         // nếu thưa hơn thì `_seenRecently` không bao giờ đúng và luồng canh
-        // khung ảnh toàn cảnh đứng hẳn. Vì vậy trần ở đây là 450 ms, kể cả bậc
-        // CRITICAL.
-        private val THIRD_PANORAMIC_INTERVAL_MS = longArrayOf(100L, 200L, 300L, 400L)
-        private val THIRD_INSPECTION_INTERVAL_MS = longArrayOf(150L, 250L, 350L, 450L)
-
-        // OCR phải chạy nhanh hơn _plateReadFreshDuration (1200 ms) phía Dart,
-        // nếu không cờ "đọc được biển" hết hạn trước khi đủ điều kiện chụp.
-        private val OCR_MIN_INTERVAL_MS = longArrayOf(0L, 0L, 400L, 700L)
+        // khung ảnh toàn cảnh đứng hẳn.
+        private val THIRD_PANORAMIC_INTERVAL_MS = longArrayOf(200L, 250L, 350L, 450L)
+        private val THIRD_INSPECTION_INTERVAL_MS = longArrayOf(300L, 400L, 500L, 650L)
 
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val previewView = PreviewView(context)
 
-    // Each predictor gets its own single-thread executor so all run in parallel.
-    private val detectExecutor:   ExecutorService = Executors.newSingleThreadExecutor()
-    private val classifyExecutor: ExecutorService = Executors.newSingleThreadExecutor()
-    private val thirdExecutor:    ExecutorService = Executors.newSingleThreadExecutor()
-    private val cameraExecutor:   ExecutorService = Executors.newSingleThreadExecutor()
+    // Single shared inference executor so all YOLO models execute sequentially,
+    // eliminating resource contention and thermal/current spikes on GPU/NPU.
+    private val inferenceExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val cameraExecutor:    ExecutorService = Executors.newSingleThreadExecutor()
 
     // Chuẩn hoá ảnh still (decode → xoay → crop → encode → ghi file) tốn hàng
     // trăm ms. Phải nằm ngoài [cameraExecutor]: đó là analyzer của ImageAnalysis,
@@ -124,25 +93,12 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     private var thirdPredictor:    Predictor? = null
     private var thirdTaskType:     String = "detect"
 
-    // License-plate OCR (gated by the carPart / third detector). Not a YOLO
-    // predictor; runs on its own executor so it never blocks inference/camera.
-    @Volatile private var ocrModel: LicensePlateOCR? = null
-    private val ocrExecutor: ExecutorService = Executors.newSingleThreadExecutor()
-    private val ocrBusy = AtomicBoolean(false)
-
-    // Visible viewport (preview-space vertical band, which maps to the box X axis —
-    // see _filterToViewport in the Dart controller). OCR only considers plate boxes
-    // fully inside this band so a readable plate is guaranteed to sit inside the
-    // saved (viewport-cropped) photo. Defaults to the full frame until set.
-    @Volatile private var ocrViewportTop = 0f
-    @Volatile private var ocrViewportBottom = 1f
-
     // Phase-based gating. Defaults match the initial framing phase:
-    //   panorama/framing → carDamage OFF, OCR ON
-    //   inspection       → carDamage ON,  OCR OFF
+    //   panorama/framing → carDamage OFF, isPanoramicPhase ON
+    //   inspection       → carDamage ON,  isPanoramicPhase OFF
     // carCorner (classify) and carPart (third) always run.
     @Volatile private var detectEnabled = false
-    @Volatile private var ocrEnabled = true
+    @Volatile private var isPanoramicPhase = true
     /** Stable id for the third predictor's results so consumers can tell two detect models apart. */
     private var thirdModelId:      String = "detect2"
 
@@ -150,10 +106,14 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
      *  so two detect models never clobber each other's state. */
     private enum class Slot { DETECT, CLASSIFY, THIRD }
 
-    // One-frame-deep back-pressure: skip if previous frame is still being processed.
-    private val detectBusy   = AtomicBoolean(false)
-    private val classifyBusy = AtomicBoolean(false)
-    private val thirdBusy    = AtomicBoolean(false)
+    // One-frame-deep back-pressure: skip frame if previous inference is still running.
+    private val isInferring = AtomicBoolean(false)
+
+    // Round-robin scheduling ring: 2 DETECT : 1 THIRD : 1 CLASSIFY.
+    // In panoramic phase (detectEnabled = false), DETECT candidates are skipped
+    // and execution naturally interleaves between THIRD and CLASSIFY.
+    private val rrCandidates = arrayOf(Slot.DETECT, Slot.THIRD, Slot.DETECT, Slot.CLASSIFY)
+    private var rrCursor = 0
 
     // Mốc thời gian lần chạy gần nhất (chỉ truy cập trên cameraExecutor) — dùng
     // để giới hạn nhịp chạy của từng model theo *_MIN_INTERVAL_MS.
@@ -161,12 +121,9 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
     private var lastClassifyMs = 0L
     private var lastThirdMs = 0L
 
-    /** Mốc lần OCR gần nhất — chỉ ghi sau khi giành được [ocrBusy], trên thirdExecutor. */
-    @Volatile private var lastOcrMs = 0L
-
     // ── Hạ nhiệt ──────────────────────────────────────────────────────────────
     // Bậc nhiệt hiện tại, dùng để tra các bảng *_MIN_INTERVAL_MS. Ghi trên main
-    // thread (callback của governor), đọc trên cameraExecutor/thirdExecutor.
+    // thread (callback của governor), đọc trên cameraExecutor/inferenceExecutor.
     @Volatile private var thermalTier = ThermalTier.NORMAL
 
     private val thermalGovernor = ThermalGovernor(context) { tier ->
@@ -239,25 +196,6 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         val totalModels = if (thirdModelPath != null) 3 else 2
         val loadedCount = AtomicInteger(0)
 
-        // OCR is not a YOLO predictor and must not gate camera start — load it on
-        // its own executor and attach when ready (frames before that skip OCR).
-        if (ocrModelPath != null) {
-            ocrExecutor.execute {
-                ocrModel = try {
-                    // Force CPU (Float32): the GPU delegate runs fp16, whose lower
-                    // precision flips argmax on the CCT transformer and misreads
-                    // plates (mirrors the iOS ANE issue). OCR runs gated/infrequently
-                    // so CPU is fine. Matches the Python pipeline's CPU execution.
-                    LicensePlateOCR(context, ocrModelPath, false, ocrConfidenceThreshold).also {
-                        Log.d(TAG, "✅ OCR model loaded")
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "⚠️ OCR load failed: ${e.message}")
-                    null
-                }
-            }
-        }
-
         fun tryDone() {
             if (loadedCount.incrementAndGet() == totalModels) {
                 mainHandler.post {
@@ -267,7 +205,7 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
             }
         }
 
-        detectExecutor.execute {
+        inferenceExecutor.execute {
             try {
                 val p = ObjectDetector(context, detectPath, emptyList(), useGpu)
                 p.setConfidenceThreshold(detectConfidenceThreshold)
@@ -280,7 +218,7 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
             tryDone()
         }
 
-        classifyExecutor.execute {
+        inferenceExecutor.execute {
             try {
                 val p = Classifier(context, classifyPath, emptyList(), useGpu)
                 p.setConfidenceThreshold(classifyConfidenceThreshold)
@@ -293,7 +231,7 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         }
 
         if (thirdModelPath != null) {
-            thirdExecutor.execute {
+            inferenceExecutor.execute {
                 try {
                     val p = createPredictor(thirdModelTask, thirdModelPath, useGpu)
                     if (p != null) {
@@ -356,14 +294,12 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         // Snapshot rồi xoá tham chiếu ngay để onFrame (đã bị chặn bởi isStopped)
         // không còn dùng tới. Việc đóng model nặng làm ở luồng nền bên dưới.
         val executors = listOf(
-            detectExecutor, classifyExecutor, thirdExecutor, cameraExecutor, captureExecutor, ocrExecutor
+            inferenceExecutor, cameraExecutor, captureExecutor
         )
         val predictors = listOf(detectPredictor, classifyPredictor, thirdPredictor)
-        val ocr = ocrModel
         detectPredictor = null
         classifyPredictor = null
         thirdPredictor = null
-        ocrModel = null
 
         // Đóng model/GPU delegate có thể tốn hàng trăm ms; chạy trên main thread sẽ
         // treo UI đúng lúc rời màn camera. Đẩy sang luồng nền: chờ inference đang
@@ -373,7 +309,6 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
             executors.forEach { it.shutdownNow() }
             executors.forEach { runCatching { it.awaitTermination(2, TimeUnit.SECONDS) } }
             predictors.forEach { (it as? BasePredictor)?.close() }
-            ocr?.close()
         }.apply { isDaemon = true; name = "yolo-release" }.start()
     }
 
@@ -637,229 +572,107 @@ class YOLOMultiTaskAndroidView(context: Context) : FrameLayout(context) {
         val h = bitmap.height
         val camFpsNow = camFps
 
-        // Phase 1 — claim slots ngay trên cameraExecutor (đơn luồng): áp giới hạn
-        // nhịp theo model + back-pressure. Chưa chạy inference ở đây.
-        // Snapshot một lần cho cả frame: bậc nhiệt có thể đổi giữa 3 lệnh claim,
-        // và ba model nên cùng chạy theo một bậc để nhịp không lệch nhau.
+        // Phase 1: Back-pressure check. Nếu inferenceExecutor đang bận chạy model
+        // trước đó, bỏ qua frame hiện tại ngay lập tức để không sinh hàng đợi (zero lag).
+        if (isInferring.get()) {
+            bitmap.recycle()
+            return
+        }
+
+        // Phase 2: Lập lịch xoay vòng (Round-Robin). Tìm candidate kế tiếp đủ điều kiện
+        // (đã load, đúng phase, đủ khoảng cách minInterval theo bậc nhiệt).
         val tier = thermalTier.ordinal
-        val runDetect = claimDetect(now, tier)
-        val runClassify = claimClassify(now, tier)
-        val runThird = claimThird(now, tier)
-
-        val count = (if (runDetect) 1 else 0) +
-            (if (runClassify) 1 else 0) +
-            (if (runThird) 1 else 0)
-        if (count == 0) { bitmap.recycle(); return }
-
-        // Phase 2 — dùng CHUNG một bitmap (predictor chỉ đọc), giải phóng đúng một
-        // lần khi predictor cuối cùng xong. Bỏ hẳn 3 bản copy/ frame trước đây.
-        val refCount = AtomicInteger(count)
-        val release = Runnable { if (refCount.decrementAndGet() == 0) bitmap.recycle() }
-
-        if (runDetect) {
-            launchPredict(detectExecutor, detectPredictor!!, detectBusy, Slot.DETECT, bitmap, w, h, camFpsNow, release)
+        val slot = nextEligibleSlot(now, tier) ?: run {
+            bitmap.recycle()
+            return
         }
-        if (runClassify) {
-            launchPredict(classifyExecutor, classifyPredictor!!, classifyBusy, Slot.CLASSIFY, bitmap, w, h, camFpsNow, release)
+
+        if (!isInferring.compareAndSet(false, true)) {
+            bitmap.recycle()
+            return
         }
-        if (runThird) {
-            launchPredict(thirdExecutor, thirdPredictor!!, thirdBusy, Slot.THIRD, bitmap, w, h, camFpsNow, release)
+
+        when (slot) {
+            Slot.DETECT -> lastDetectMs = now
+            Slot.CLASSIFY -> lastClassifyMs = now
+            Slot.THIRD -> lastThirdMs = now
         }
-    }
 
-    /**
-     * carDamage: chạy mỗi frame khi rảnh — trừ pha panorama (input bị chặn) và
-     * trừ khi máy đã nóng (bậc nhiệt > NORMAL áp thêm nhịp tối thiểu).
-     */
-    private fun claimDetect(now: Long, tier: Int): Boolean {
-        if (detectPredictor == null || !detectEnabled) return false
-        val minInterval = DETECT_MIN_INTERVAL_MS[tier]
-        if (minInterval > 0 && now - lastDetectMs < minInterval) return false
-        if (!detectBusy.compareAndSet(false, true)) return false
-        lastDetectMs = now
-        return true
-    }
-
-    private fun claimClassify(now: Long, tier: Int): Boolean {
-        if (classifyPredictor == null) return false
-        if (now - lastClassifyMs < CLASSIFY_MIN_INTERVAL_MS[tier]) return false
-        if (!classifyBusy.compareAndSet(false, true)) return false
-        lastClassifyMs = now
-        return true
-    }
-
-    private fun claimThird(now: Long, tier: Int): Boolean {
-        if (thirdPredictor == null) return false
-        val minInterval = if (ocrEnabled) {
-            THIRD_PANORAMIC_INTERVAL_MS[tier]
-        } else {
-            THIRD_INSPECTION_INTERVAL_MS[tier]
+        val predictor = when (slot) {
+            Slot.DETECT -> detectPredictor
+            Slot.CLASSIFY -> classifyPredictor
+            Slot.THIRD -> thirdPredictor
+        } ?: run {
+            isInferring.set(false)
+            bitmap.recycle()
+            return
         }
-        if (now - lastThirdMs < minInterval) return false
-        if (!thirdBusy.compareAndSet(false, true)) return false
-        lastThirdMs = now
-        return true
-    }
 
-    private fun launchPredict(
-        executor: ExecutorService,
-        predictor: Predictor,
-        busy: AtomicBoolean,
-        slot: Slot,
-        bitmap: Bitmap,
-        w: Int,
-        h: Int,
-        camFpsNow: Double,
-        release: Runnable,
-    ) {
-        executor.execute {
+        // Phase 3: Thực thi inference đơn luồng trên inferenceExecutor.
+        // Chỉ duy nhất 1 model chạy trên GPU/NPU tại bất kỳ thời điểm nào.
+        // Bitmap được tái chế an toàn trong khối finally.
+        inferenceExecutor.execute {
             try {
                 val result = predictor.predict(bitmap, w, h, rotateForCamera = false, isLandscape = true)
                 val data = buildTaskData(result, slot, camFpsNow)
                 mainHandler.post { onMultiTaskStream?.invoke(data) }
-                // carPart frame → try to OCR the license plate (gated, off-thread).
-                // Done before `release` so the shared bitmap is still alive to crop.
-                if (slot == Slot.THIRD) maybeRunOcr(result, bitmap)
             } catch (e: Exception) {
                 Log.e(TAG, "$slot predict error: ${e.message}")
             } finally {
-                busy.set(false)
-                release.run()
+                isInferring.set(false)
+                bitmap.recycle()
             }
         }
     }
 
-    /**
-     * If carPart found a license-plate box and OCR is idle, crop that region from
-     * the (still-alive) shared bitmap and recognize it on the OCR executor. Emits a
-     * separate `type == "ocr"` stream event with `readable` used as the framing
-     * signal (a readable plate ⇒ this frame is a good panoramic shot).
-     */
-    private fun maybeRunOcr(result: YOLOResult, bitmap: Bitmap) {
-        val ocr = ocrModel ?: return
-        if (!ocrEnabled) return // gated off during inspection
-        if (!ocrBusy.compareAndSet(false, true)) return
-
-        // Nhịp tối thiểu theo bậc nhiệt — kiểm tra SAU khi đã giành được cờ bận
-        // để chỉ một luồng đọc/ghi lastOcrMs tại một thời điểm.
-        val now = System.currentTimeMillis()
-        val ocrMinInterval = OCR_MIN_INTERVAL_MS[thermalTier.ordinal]
-        if (ocrMinInterval > 0 && now - lastOcrMs < ocrMinInterval) { ocrBusy.set(false); return }
-
-        // Only the highest-confidence plate box that sits FULLY inside the exact
-        // aspect-fill crop rect used by capturePhoto. Comparing directly with
-        // ocrViewportTop/bottom is not enough because capturePhoto applies
-        // aspect-fill offsets before cropping.
-        val cropRect = ocrCropRectInFrame(result)
-        val loX = cropRect.left + OCR_VIEWPORT_MARGIN
-        val hiX = cropRect.right - OCR_VIEWPORT_MARGIN
-        val loY = cropRect.top + OCR_EDGE_MARGIN
-        val hiY = cropRect.bottom - OCR_EDGE_MARGIN
-        if (loX >= hiX || loY >= hiY) { ocrBusy.set(false); return }
-        val box = result.boxes
-            .filter {
-                it.cls == LICENSE_PLATE_CLASS &&
-                    it.xywhn.left >= loX && it.xywhn.right <= hiX &&
-                    it.xywhn.top >= loY && it.xywhn.bottom <= hiY
+    private fun isEligible(slot: Slot, now: Long, tier: Int): Boolean {
+        return when (slot) {
+            Slot.DETECT -> {
+                if (detectPredictor == null || !detectEnabled) return false
+                val minInterval = DETECT_MIN_INTERVAL_MS[tier]
+                now - lastDetectMs >= minInterval
             }
-            .maxByOrNull { it.conf }
-        if (box == null) { ocrBusy.set(false); return }
-
-        val bw = bitmap.width
-        val bh = bitmap.height
-        val left = (box.xywhn.left.coerceIn(0f, 1f) * bw).toInt()
-        val top = (box.xywhn.top.coerceIn(0f, 1f) * bh).toInt()
-        val right = (box.xywhn.right.coerceIn(0f, 1f) * bw).toInt()
-        val bottom = (box.xywhn.bottom.coerceIn(0f, 1f) * bh).toInt()
-        val cw = right - left
-        val ch = bottom - top
-        if (cw < 1 || ch < 1) { ocrBusy.set(false); return }
-
-        // Copy the plate region into an independent bitmap so it survives the shared
-        // bitmap being recycled once all predictors finish this frame.
-        val crop = try {
-            Bitmap.createBitmap(bitmap, left, top, cw, ch)
-        } catch (e: Exception) {
-            ocrBusy.set(false)
-            return
-        }
-
-        lastOcrMs = now
-        ocrExecutor.execute {
-            try {
-                val read = ocr.read(crop)
-                val event = mapOf(
-                    "type" to "ocr",
-                    "modelId" to "ocr",
-                    "plate" to (read?.first ?: ""),
-                    "score" to (read?.second ?: 0.0),
-                    "readable" to (read != null),
-                )
-                mainHandler.post { onMultiTaskStream?.invoke(event) }
-            } finally {
-                crop.recycle()
-                ocrBusy.set(false)
+            Slot.CLASSIFY -> {
+                if (classifyPredictor == null) return false
+                now - lastClassifyMs >= CLASSIFY_MIN_INTERVAL_MS[tier]
+            }
+            Slot.THIRD -> {
+                if (thirdPredictor == null) return false
+                val minInterval = if (isPanoramicPhase) {
+                    THIRD_PANORAMIC_INTERVAL_MS[tier]
+                } else {
+                    THIRD_INSPECTION_INTERVAL_MS[tier]
+                }
+                now - lastThirdMs >= minInterval
             }
         }
     }
 
-    private fun ocrCropRectInFrame(result: YOLOResult): RectF {
-        val wp = result.origShape.width.toFloat()
-        val hp = result.origShape.height.toFloat()
-        val wv = previewView.width.toFloat()
-        val hv = previewView.height.toFloat()
-        if (wp <= 0f || hp <= 0f || wv <= 0f || hv <= 0f) {
-            return RectF(0f, 0f, 1f, 1f)
+    private fun nextEligibleSlot(now: Long, tier: Int): Slot? {
+        val size = rrCandidates.size
+        for (step in 0 until size) {
+            val index = (rrCursor + step) % size
+            val slot = rrCandidates[index]
+            if (isEligible(slot, now, tier)) {
+                rrCursor = (index + 1) % size
+                return slot
+            }
         }
-
-        val left: Float
-        val top: Float
-        val right: Float
-        val bottom: Float
-        if ((wp >= hp) != (wv >= hv)) {
-            // Same mapping as cropToViewport(): preview vertical band maps to
-            // frame/photo horizontal coordinates after the 90° transpose.
-            val s = maxOf(wv / hp, hv / wp)
-            val offU = (hp * s - wv) / 2f
-            val offV = (wp * s - hv) / 2f
-            val u0 = offU / s
-            val u1 = (wv + offU) / s
-            val v0 = (ocrViewportTop * hv + offV) / s
-            val v1 = (ocrViewportBottom * hv + offV) / s
-            left = v0
-            right = v1
-            top = hp - u1
-            bottom = hp - u0
-        } else {
-            val s = maxOf(wv / wp, hv / hp)
-            val offX = (wp * s - wv) / 2f
-            val offY = (hp * s - hv) / 2f
-            left = offX / s
-            right = (wv + offX) / s
-            top = (ocrViewportTop * hv + offY) / s
-            bottom = (ocrViewportBottom * hv + offY) / s
-        }
-
-        val l = (left / wp).coerceIn(0f, 1f)
-        val r = (right / wp).coerceIn(0f, 1f)
-        val t = (top / hp).coerceIn(0f, 1f)
-        val b = (bottom / hp).coerceIn(0f, 1f)
-        return RectF(minOf(l, r), minOf(t, b), maxOf(l, r), maxOf(t, b))
+        return null
     }
 
-    /** Updates the visible viewport used to gate OCR (preview-space vertical band). */
+    /** Updates the visible viewport (retained for backward compatibility). */
     fun setOcrViewport(top: Float, bottom: Float) {
-        ocrViewportTop = top
-        ocrViewportBottom = bottom
+        // No-op: OCR removed
     }
 
     /**
-     * Phase-based gating: inspection runs carDamage and stops OCR; framing/panorama
-     * runs OCR and stops carDamage. carCorner/carPart always run.
+     * Phase-based gating: inspection runs carDamage; framing/panorama
+     * runs in panoramic phase and stops carDamage. carCorner/carPart always run.
      */
     fun setInspectionActive(active: Boolean) {
         detectEnabled = active
-        ocrEnabled = !active
+        isPanoramicPhase = !active
     }
 
     fun startContextStream(dirPath: String) {

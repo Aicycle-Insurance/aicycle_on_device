@@ -60,7 +60,11 @@ class CameraToolTip extends StatelessWidget {
             Flexible(
               child: Text(
                 message,
-                style: TextStyle(fontSize: 14.sp, color: AppColors.black),
+                style: TextStyle(
+                  fontSize: 14.sp,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.black,
+                ),
               ),
             ),
             if (showSecondaryButton && onSecondaryButtonPressed != null) ...[

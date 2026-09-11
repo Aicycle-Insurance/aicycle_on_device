@@ -32,6 +32,7 @@ class AICycleOnDeviceCamera extends StatefulWidget {
     this.onError,
     this.onComplete,
     this.onImageUploaded,
+    this.onClose,
     this.carCornerModelPath,
     this.carDamageModelPath,
     this.carPartModelPath,
@@ -44,6 +45,9 @@ class AICycleOnDeviceCamera extends StatefulWidget {
 
   /// Gọi mỗi khi một ảnh upload thành công, kèm data server trả về.
   final OnImageUploaded? onImageUploaded;
+
+  /// Gọi khi user đóng/thoát camera (nút X hoặc Back).
+  final VoidCallback? onClose;
   final String? carCornerModelPath;
   final String? carDamageModelPath;
   final String? carPartModelPath;
@@ -185,6 +189,7 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera>
         licensePlateModelPath:
             _modelController.modelPathOf(AiModelType.licensePlate),
         onComplete: widget.onComplete,
+        onClose: widget.onClose,
         // Bấm "Xem kết quả" → chuyển sang pha upload: bootstrap render
         // UploadView ngay, rồi mới gỡ camera sau một nhịp ngắn.
         onViewResult: _openUploadView,
@@ -325,7 +330,10 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera>
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   OutlinedButton(
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: () {
+                      widget.onClose?.call();
+                      Navigator.of(context).pop();
+                    },
                     child: Text(
                       StringSheet.cancel,
                       style: AppTextStyles.base.s14.w600(),

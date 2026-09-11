@@ -710,6 +710,17 @@ class _ExampleHomePageState extends State<ExampleHomePage>
           completionRequested = true;
           Navigator.of(cameraContext).pop(true);
         },
+        onClose: () {
+          if (!mounted) return;
+          ScaffoldMessenger.of(homeContext)
+            ..clearSnackBars()
+            ..showSnackBar(
+              const SnackBar(
+                content: Text('Đã nhận sự kiện onClose: người dùng đã thoát SDK'),
+                duration: Duration(seconds: 2),
+              ),
+            );
+        },
         onError: (error) {
           if (!mounted) return;
           ScaffoldMessenger.of(
