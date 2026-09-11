@@ -20,12 +20,16 @@ class AICycleOnDevice extends StatefulWidget {
     required this.aiCycleConfig,
     this.onError,
     this.onComplete,
+    this.onClose,
     this.onImageUploaded,
   });
 
   final AICycleConfig aiCycleConfig;
   final Function(String error)? onError;
   final Function()? onComplete;
+
+  /// Gọi khi user thoát SDK (nút X hoặc Back).
+  final VoidCallback? onClose;
 
   /// Gọi mỗi khi một ảnh upload thành công, kèm data server trả về.
   final OnImageUploaded? onImageUploaded;
@@ -112,6 +116,7 @@ class _AICycleOnDeviceState extends State<AICycleOnDevice>
                   aiCycleConfig: widget.aiCycleConfig,
                   onError: widget.onError,
                   onComplete: widget.onComplete,
+                  onClose: widget.onClose,
                   onImageUploaded: widget.onImageUploaded,
                   carCornerModelPath:
                       selectedModels[AiModelType.carCorner]?.filePath,
@@ -174,7 +179,10 @@ class _AICycleOnDeviceState extends State<AICycleOnDevice>
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   OutlinedButton(
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: () {
+                      widget.onClose?.call();
+                      Navigator.of(context).pop();
+                    },
                     child: Text(
                       StringSheet.cancel,
                       style: AppTextStyles.base.s14.w600(),

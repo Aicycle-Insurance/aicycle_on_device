@@ -45,11 +45,6 @@ mixin _StreamMixin on _CameraControllerBase {
       return;
     }
 
-    if (type == 'ocr') {
-      _handleOcr(data);
-      return;
-    }
-
     if (type == 'detect' && modelId == 'detect2') {
       _handleCarPart(data);
       return;
@@ -109,20 +104,6 @@ mixin _StreamMixin on _CameraControllerBase {
     }
   }
 
-  /// OCR (native) — tín hiệu canh khung. Đọc được biển ⇒ frame đủ tốt để
-  /// làm ảnh toàn cảnh; cập nhật cờ rồi re-evaluate để có thể kích hoạt chụp.
-  void _handleOcr(Map<String, dynamic> data) {
-    final readable = data['readable'] == true;
-    if (readable) {
-      _latestPlateReadable = readable;
-      _latestPlateReadableAt = DateTime.now();
-      updateMessage(); // tự notify khi message đổi / tự chụp nếu đủ điều kiện
-    } else if (_latestPlateReadable) {
-      _clearPlateRead();
-      updateMessage();
-    }
-  }
-
   /// carPart — model detect bộ phận, dùng để căn ảnh toàn cảnh.
   void _handleCarPart(Map<String, dynamic> data) {
     final output = DetectionOutput.fromJson(data);
@@ -133,11 +114,6 @@ mixin _StreamMixin on _CameraControllerBase {
     final now = DateTime.now();
     for (final className in _latestCarPartClasses) {
       _carPartLastSeenAt[className] = now;
-    }
-    // Biển vắng mặt quá grace period (không phải flicker 1-2 frame) → cờ
-    // "đọc được" cũ không còn hiệu lực.
-    if (!_seenRecently(_licensePlateClass)) {
-      _clearPlateRead();
     }
     updateMessage(); // tự notify khi message đổi
     // Nhãn bộ phận đi qua notifier riêng — không kéo theo rebuild thanh

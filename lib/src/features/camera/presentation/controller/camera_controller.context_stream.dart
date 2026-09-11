@@ -1,6 +1,6 @@
 part of 'camera_controller.dart';
 
-/// Upload ngầm 1 frame preview/giây trong pha inspection để BE có context
+/// Upload ngầm 1 frame preview mỗi 2 giây trong pha inspection để BE có context
 /// trước/sau ảnh tổn thất sát crop.
 mixin _ContextStreamMixin on _CameraControllerBase {
   bool _contextStreamActive = false;

@@ -17,8 +17,8 @@ công và điều hướng sau thao tác của người dùng.
 
 ```mermaid
 flowchart TD
-    A["GIAI ĐOẠN 1: CHỤP ẢNH TOÀN CẢNH<br/>inspectionPhase == null<br/>carDamage OFF · OCR ON<br/>Mục tiêu: đủ bộ phận + đọc được biển số → tự chụp"]
-    B["GIAI ĐOẠN 2: SOI TỔN THẤT<br/>inspectionPhase != null<br/>carDamage ON · OCR OFF<br/>panoramicGuide → scanning → detectionReady → detailGuide"]
+    A["GIAI ĐOẠN 1: CHỤP ẢNH TOÀN CẢNH<br/>inspectionPhase == null<br/>carDamage OFF<br/>Mục tiêu: đủ bộ phận (Cửa, Cản, Biển) → tự chụp"]
+    B["GIAI ĐOẠN 2: SOI TỔN THẤT<br/>inspectionPhase != null<br/>carDamage ON<br/>panoramicGuide → scanning → detectionReady → detailGuide"]
 
     A -->|"chụp toàn cảnh xong"| B
     B -->|"classifier nhận diện góc khác<br/>ở pha cho phép auto-switch"| A
@@ -45,8 +45,7 @@ flowchart TD
     C1 -->|"góc đã có ảnh / 4-góc OFF & đã có ảnh đầu"| C2["startDamageScanning() → GĐ2"]
     C1 -->|"ngược lại"| C3["updateMessage() → GĐ1"]
 
-    T -->|"ocr"| O["readable? cập nhật _latestPlateReadable<br/>readable → updateMessage()"]
-    T -->|"detect2 (carPart)"| P["lọc viewport, cập nhật bộ phận thấy được<br/>biển rời khung → readable=false → updateMessage()"]
+    T -->|"detect2 (carPart)"| P["lọc viewport, cập nhật bộ phận thấy được → updateMessage()"]
     T -->|"detect (carDamage)"| D["lọc viewport → _maybeShowDetectionReady()"]
 ```
 
@@ -65,21 +64,20 @@ flowchart TD
     Q1 -->|không| M1["msg: initialGuide (guide)<br/>'Vui lòng di chuyển về góc chéo ...'"]
     Q1 -->|có| Q2{"thấy cửa?"}
     Q2 -->|chưa| M2["msg: moveBackGuide (info)<br/>'Lùi camera ra xa để chụp ảnh toàn cảnh xe'"]
-    Q2 -->|"có (allPresent)"| M4["msg: holdStillGuide (loading)<br/>'Hãy giữ yên điện thoại. Đang nhận diện biển số'"]
+    Q2 -->|"có (allPresent)"| M4["msg: holdStillGuide (loading)<br/>'Hãy giữ yên điện thoại để chụp ảnh toàn cảnh'"]
 
     M4 --> T3["tooltip THỰC SỰ hiện → _syncHoldStillCaptureTimer()<br/>hẹn giờ 3s (_holdStillCaptureTimer)"]
     T3 --> FREEZE["updateMessage() bị đóng băng<br/>(_holdStillCapturePending) — không tooltip nào chen vào"]
-    FREEZE --> CAP["hết 3s → _triggerAutoCapture()<br/>CHẮC CHẮN chụp, không cần đủ bộ phận / OCR / frame mới"]
+    FREEZE --> CAP["hết 3s → _triggerAutoCapture()<br/>CHẮC CHẮN chụp, không cần đủ bộ phận / frame mới"]
 ```
 
 ### `_triggerAutoCapture()` — ảnh toàn cảnh
 
 ```mermaid
 flowchart TD
-    T0["_triggerAutoCapture()"] --> T1["reset OCR/readable, holdStill, plate timer"]
-    T1 --> T2["capturePhoto(immediate:true)<br/>blink trắng, lưu ảnh"]
+    T0["_triggerAutoCapture()"] --> T2["capturePhoto(immediate:true)<br/>blink trắng, lưu ảnh"]
     T2 --> T3["đánh dấu segment có panoramic<br/>_firstPanoramicCaptured=true<br/>_classificationLocked=true"]
-    T3 --> T4["msg: plateValidCaptured (success)<br/>'Biển số hợp lệ, chụp ảnh thành công'<br/>giữ 3s"]
+    T3 --> T4["msg: captureSuccess (success)<br/>'Chụp thành công'<br/>giữ 3s"]
     T4 --> T5["setInspectionPhase(panoramicGuide)<br/>msg: inspectDamageGuide (info)<br/>+ noDetectionWarningTimer(10s)"]
 ```
 

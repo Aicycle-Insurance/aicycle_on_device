@@ -64,26 +64,11 @@ const List<DetectionResult> _noBoxes = [];
 /// thay vì bị chụp ngay khi OCR vừa đọc được biển.
 const _holdStillMinDuration = Duration(seconds: 3);
 
-/// OCR đọc được biển số chỉ có hiệu lực rất ngắn. Nếu user lia máy làm biển
-/// lệch/lẹm sau frame OCR đó thì controller phải chờ OCR đọc lại ở frame mới,
-/// không dùng trạng thái cũ để auto-capture.
-const _plateReadFreshDuration = Duration(milliseconds: 1200);
-
-/// Model carPart (~6.7fps) nhấp nháy giữa các frame: một bộ phận vẫn được coi
-/// là "đang thấy" nếu xuất hiện trong khoảng này (~4 frame), để một frame nhiễu
-/// không reset đồng hồ giữ yên 3s / xoá cờ đọc biển. User thực sự lia máy đi
+/// Model carPart (~5.0fps) nhấp nháy giữa các frame: một bộ phận vẫn được coi
+/// là "đang thấy" nếu xuất hiện trong khoảng này (~3-4 frame), để một frame nhiễu
+/// không reset đồng hồ giữ yên 3s. User thực sự lia máy đi
 /// thì bộ phận biến mất quá khoảng này và trạng thái reset như cũ.
 const _carPartFlickerGrace = Duration(milliseconds: 600);
-
-/// Giữ message yêu cầu căn biển rõ tối thiểu khoảng này trước khi cho phép
-/// auto-capture lại, để user kịp đọc và điều chỉnh camera.
-const _plateClearPromptMinDuration = Duration(seconds: 1);
-
-/// Khi đã căn đủ thân xe nhưng OCR chưa đọc được biển, nhắc điều chỉnh thay vì
-/// để user giữ máy chờ mà không biết nguyên nhân. Phải dài hơn
-/// [_holdStillMinDuration] để nhắc này không chen ngang nhịp giữ yên bình
-/// thường (OCR đọc được biển trong lúc đang chờ đủ 7s).
-const _plateReadPromptDelay = Duration(seconds: 9);
 
 /// Giữ thông báo chụp thành công đủ lâu để user kịp đọc trước khi chuyển sang
 /// hướng dẫn tiếp theo.
@@ -252,38 +237,6 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   /// Thời điểm thấy gần nhất của từng bộ phận (trong khung nhìn). Dùng cùng
   /// [_carPartFlickerGrace] để làm mượt tín hiệu detect vốn nhấp nháy từng frame.
   final Map<String, DateTime> _carPartLastSeenAt = {};
-
-  /// OCR (native) đọc được biển số ở frame mới nhất hay chưa. Là tín hiệu canh
-  /// khung: đọc được biển ⇒ khung đủ rõ/đủ gần để dùng làm ảnh toàn cảnh.
-  bool _latestPlateReadable = false;
-
-  /// Thời điểm frame OCR mới nhất đọc được biển. Dùng để loại tín hiệu OCR cũ
-  /// khi camera đã dịch khỏi vị trí vừa đọc biển.
-  DateTime? _latestPlateReadableAt;
-
-  /// Timer ngắn: khi đã căn đủ bộ phận nhưng OCR chưa đọc được biển hợp lệ thì
-  /// nhắc user di chuyển cho biển rõ nét.
-  Timer? _plateReadTimer;
-
-  /// Đã hiển thị nhắc "di chuyển cho biển rõ" hay chưa — để frame carPart kế
-  /// tiếp không ghi đè message về holdStill.
-  bool _platePromptShown = false;
-
-  /// Mốc bắt đầu hiển thị nhắc "di chuyển cho biển rõ". Dùng để giữ warning đủ
-  /// lâu trước khi auto-capture lại nếu OCR đọc được biển ngay sau đó.
-  DateTime? _platePromptShownAt;
-
-  /// Mốc thời điểm tooltip "Hãy giữ yên điện thoại…" THỰC SỰ hiện trên màn
-  /// hình, hoặc null khi nó chưa hiện.
-  ///
-  /// Không dùng mốc "đã căn đủ bộ phận": [_setMessage] có thể hoãn holdStill tới
-  /// [_tooltipMinVisibleDuration] để tooltip trước đó (vd "Lùi camera ra xa…")
-  /// kịp hiển thị đủ lâu. Nếu đếm từ lúc căn đủ, đồng hồ chạy trong lúc holdStill
-  /// còn nằm trong hàng đợi → ảnh có thể được chụp ngay khi user vừa nhìn thấy
-  /// "Hãy giữ yên điện thoại…". Đếm từ [_messageShownAt] đảm bảo user luôn có
-  /// trọn [_holdStillMinDuration] kể từ khi thật sự đọc được thông báo.
-  DateTime? get _holdStillGuideShownAt =>
-      _message?.message == StringSheet.holdStillGuide ? _messageShownAt : null;
 
   /// Đếm [_holdStillMinDuration] kể từ khi tooltip "Hãy giữ yên điện thoại…"
   /// hiện, rồi CHẮC CHẮN chụp ảnh toàn cảnh.
@@ -467,21 +420,6 @@ abstract class _CameraControllerBase extends ChangeNotifier {
         .toList();
   }
 
-  bool get _hasFreshPlateRead {
-    final readAt = _latestPlateReadableAt;
-    if (!_latestPlateReadable || readAt == null) return false;
-    if (DateTime.now().difference(readAt) <= _plateReadFreshDuration) {
-      return true;
-    }
-    _clearPlateRead();
-    return false;
-  }
-
-  void _clearPlateRead() {
-    _latestPlateReadable = false;
-    _latestPlateReadableAt = null;
-  }
-
   /// Bộ phận [className] có được thấy trong khoảng [_carPartFlickerGrace] gần
   /// đây không — tín hiệu "đang thấy" đã làm mượt qua các frame nhiễu.
   bool _seenRecently(String className) {
@@ -554,11 +492,6 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   }
 
   void _resetPanoramicFramingState({bool clearCarParts = false}) {
-    _clearPlateRead();
-    _plateReadTimer?.cancel();
-    _plateReadTimer = null;
-    _platePromptShown = false;
-    _platePromptShownAt = null;
     if (clearCarParts) {
       _latestCarPartClasses = {};
       _carPartLastSeenAt.clear();
@@ -755,8 +688,6 @@ abstract class _CameraControllerBase extends ChangeNotifier {
     _noDetectionWarningTimer = null;
     _detailTimer?.cancel();
     _detailTimer = null;
-    _plateReadTimer?.cancel();
-    _plateReadTimer = null;
     _cancelHoldStillCaptureTimer();
     _cornerSuccessTimer?.cancel();
     _cornerSuccessTimer = null;
@@ -827,7 +758,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
     }
   }
 
-  /// [_ContextStreamMixin] — bật upload ngầm 1 frame/giây trong inspection.
+  /// [_ContextStreamMixin] — bật upload ngầm 1 frame mỗi 2 giây trong inspection.
   Future<void> _startContextStream();
 
   /// [_ContextStreamMixin] — tắt context stream.
