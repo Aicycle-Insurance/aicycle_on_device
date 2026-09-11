@@ -1,3 +1,6 @@
+## 0.1.17
+
+- enhance performance.
 ## 0.1.16
 
 - add debug_mode for upload image from device.
