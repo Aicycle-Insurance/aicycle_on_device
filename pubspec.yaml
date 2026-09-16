@@ -1,6 +1,6 @@
 name: aicycle_on_device
 description: "An AICycle On-Device SDK for Flutter."
-version: 0.1.16
+version: 0.1.17
 homepage:
 
 environment:
