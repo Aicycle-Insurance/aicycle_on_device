@@ -35,6 +35,9 @@ abstract class AiModelRepository {
   /// Chọn [model] làm model sử dụng cho loại tương ứng.
   Future<Result<void, Failure>> selectModel(AiModel model);
 
+  /// Chọn model theo [type] và [modelId] làm model sử dụng cho loại tương ứng.
+  Future<Result<void, Failure>> selectModelById(AiModelType type, int modelId);
+
   /// Ghi nhận task đã được xác nhận hoặc tin cậy cho model [modelId], để các
   /// lần chuẩn bị model sau bỏ qua bước inspect trùng lặp.
   Future<Result<void, Failure>> markModelValidated(
