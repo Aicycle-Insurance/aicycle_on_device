@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../../../../config/aicycle_config.dart';
 import '../../../../core/cache/session_cache.dart';
 import '../../../ai_model_manager/data/model/ai_model.dart';
+import '../../../ai_model_manager/data/model/declared_model_manifest.dart';
 import '../../../ai_model_manager/data/model/downloaded_model_info.dart';
 import '../../../ai_model_manager/data/model/model_manifest.dart';
 import '../../../ai_model_manager/domain/entity/ai_model_type.dart';
@@ -178,6 +179,9 @@ class CameraModelController extends ChangeNotifier {
       final remoteTypes = <AiModelType>[];
       final invalidLocalIds = <int>{};
 
+      // Tải manifest khai báo ngoài từ assets (Phương án A)
+      final declaredManifest = await DeclaredModelManifest.loadFromAsset();
+
       for (final type in requiredModelTypes) {
         final provided = paths[type];
         if (provided != null && _pathExists(provided)) {
@@ -190,6 +194,39 @@ class CameraModelController extends ChangeNotifier {
           continue;
         }
 
+        final declared = declaredManifest.models[type];
+        if (declared != null) {
+          // Kiểm tra xem trong máy đã nạp chính xác model đúng version này chưa
+          final matching = _findMatchingDownloadedModel(
+            manifest,
+            type,
+            declared,
+          );
+
+          if (matching != null) {
+            try {
+              final validPath = await _validPathOfDownloaded(matching, type);
+              await _modelRepository.selectModelById(type, matching.id);
+              _modelPaths[type] = validPath;
+
+              // Dọn dẹp các model cũ khác version của loại này
+              final oldVersions = manifest.downloaded.where(
+                (e) => e.type == type && e.id != matching.id,
+              );
+              for (final old in oldVersions) {
+                await _modelRepository.deleteModel(old.id);
+              }
+              continue;
+            } on _PrepareException {
+              invalidLocalIds.add(matching.id);
+              await _modelRepository.deleteModel(matching.id);
+            }
+          }
+          remoteTypes.add(type);
+          continue;
+        }
+
+        // Fallback khi không có khai báo trong declared manifest
         final local = _preferredLocalModel(manifest, type);
         if (local != null) {
           try {
@@ -219,8 +256,9 @@ class CameraModelController extends ChangeNotifier {
           (failure) => throw _PrepareException(failure.message),
           (models) => models,
         );
+        final declared = declaredManifest.models[type];
         _modelPaths[type] =
-            await _ensureLatestModel(type, models, usableManifest);
+            await _ensureTargetModel(type, models, declared, usableManifest);
       }
     } on _PrepareException catch (e) {
       _modelError = e.message;
@@ -230,6 +268,20 @@ class CameraModelController extends ChangeNotifier {
       _downloadingType = null;
       notifyListeners();
     }
+  }
+
+  /// Tìm model trong danh sách đã tải khớp chính xác với version (và id nếu có)
+  /// trong manifest khai báo ngoài.
+  DownloadedModelInfo? _findMatchingDownloadedModel(
+    ModelManifest manifest,
+    AiModelType type,
+    DeclaredModelItem declared,
+  ) {
+    return manifest.downloaded.where((item) {
+      if (item.type != type) return false;
+      if (declared.id != null && item.id != declared.id) return false;
+      return item.version == declared.version;
+    }).firstOrNull;
   }
 
   /// Returns the explicitly selected local model, falling back to the newest
@@ -257,40 +309,50 @@ class CameraModelController extends ChangeNotifier {
   bool _pathExists(String path) =>
       FileSystemEntity.typeSync(path) != FileSystemEntityType.notFound;
 
-  /// Ensures the latest model of a given type is available locally.
+  /// Đảm bảo đúng model mục tiêu (khớp version declared hoặc latest) sẵn sàng tại máy.
   ///
-  /// Process:
-  /// 1. Finds the newest version (by version number, then by creation date)
-  ///    among [models] fetched from the repository
-  /// 2. Checks if this model is already downloaded (per [manifest])
-  /// 3. If not, downloads it with progress tracking
-  /// 4. Deletes older versions of the same type
-  /// 5. Marks the latest model as selected
-  ///
-  /// Returns the file path to the model.
-  ///
-  /// Throws _PrepareException if any step fails.
-  ///
-  /// Parameters:
-  ///   - type: The AI model type to ensure
-  ///   - models: Available models of this type, already fetched from server
-  ///   - manifest: Local state, already read from disk
-  Future<String> _ensureLatestModel(
+  /// Sau khi tải thành công model mới, tự động xoá toàn bộ phiên bản cũ của loại đó
+  /// trên bộ nhớ máy và trong manifest.json.
+  Future<String> _ensureTargetModel(
     AiModelType type,
     List<AiModel> models,
+    DeclaredModelItem? declared,
     ModelManifest manifest,
   ) async {
     if (models.isEmpty) {
       throw _PrepareException('No model available for ${type.apiValue}');
     }
-    final latest = models.reduce(_newer);
+
+    late final AiModel target;
+    if (declared != null) {
+      final exactMatch = models.where((m) {
+        if (declared.id != null && m.id != declared.id) return false;
+        return m.version == declared.version;
+      }).firstOrNull;
+
+      if (exactMatch != null) {
+        target = exactMatch;
+      } else {
+        final versionMatch =
+            models.where((m) => m.version == declared.version).firstOrNull;
+        if (versionMatch != null) {
+          target = versionMatch;
+        } else {
+          throw _PrepareException(
+            'Model version ${declared.version} for ${type.apiValue} not found on server.',
+          );
+        }
+      }
+    } else {
+      target = models.reduce(_newer);
+    }
 
     final existing =
-        manifest.downloaded.where((e) => e.id == latest.id).firstOrNull;
+        manifest.downloaded.where((e) => e.id == target.id).firstOrNull;
     if (existing != null) {
       try {
         final validPath = await _validPathOfDownloaded(existing, type);
-        await _modelRepository.selectModel(latest);
+        await _modelRepository.selectModelById(type, target.id);
         return validPath;
       } on _PrepareException {
         await _modelRepository.deleteModel(existing.id);
@@ -302,7 +364,7 @@ class CameraModelController extends ChangeNotifier {
     notifyListeners();
 
     final info = (await _modelRepository.downloadModel(
-      latest,
+      target,
       onProgress: (progress) {
         if (progress - _downloadProgress >= 0.01) {
           _downloadProgress = progress;
@@ -325,12 +387,12 @@ class CameraModelController extends ChangeNotifier {
     }
 
     final oldVersions =
-        manifest.downloaded.where((e) => e.type == type && e.id != latest.id);
+        manifest.downloaded.where((e) => e.type == type && e.id != target.id);
     for (final old in oldVersions) {
       await _modelRepository.deleteModel(old.id);
     }
 
-    await _modelRepository.selectModel(latest);
+    await _modelRepository.selectModelById(type, target.id);
     return preparedPath;
   }
 

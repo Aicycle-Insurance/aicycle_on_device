@@ -77,8 +77,16 @@ class AiModelRepositoryImpl implements AiModelRepository {
 
   @override
   Future<Result<void, Failure>> selectModel(AiModel model) async {
+    return selectModelById(model.type, model.id);
+  }
+
+  @override
+  Future<Result<void, Failure>> selectModelById(
+    AiModelType type,
+    int modelId,
+  ) async {
     try {
-      await _local.setSelectedModel(model.type, model.id);
+      await _local.setSelectedModel(type, modelId);
       return const Success(null);
     } catch (e) {
       return FailureResult(_mapError(e));

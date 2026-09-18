@@ -1,0 +1,13 @@
+{
+  "models": {
+    "CarCorner": {
+      "version": "1.0.6"
+    },
+    "CarDamage": {
+      "version": "1.0.7"
+    },
+    "CarPart": {
+      "version": "1.0.5"
+    }
+  }
+}
