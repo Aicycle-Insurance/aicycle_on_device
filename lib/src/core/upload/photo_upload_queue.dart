@@ -203,6 +203,7 @@ class PhotoUploadQueue {
     required int photoIndex,
     required String filePath,
     int? imageOrder,
+    String? captureSessionId,
     bool isCallEngine = false,
     double? latitude,
     double? longitude,
@@ -213,6 +214,7 @@ class PhotoUploadQueue {
         photoIndex: photoIndex,
         filePath: filePath,
         imageOrder: imageOrder,
+        captureSessionId: captureSessionId,
         isCallEngine: isCallEngine,
         latitude: latitude,
         longitude: longitude,
@@ -225,6 +227,7 @@ class PhotoUploadQueue {
     required int photoIndex,
     required String filePath,
     int? imageOrder,
+    String? captureSessionId,
     bool isCallEngine = false,
     double? latitude,
     double? longitude,
@@ -236,6 +239,7 @@ class PhotoUploadQueue {
       if (latitude != null) 'latitude': latitude.toString(),
       if (longitude != null) 'longitude': longitude.toString(),
       if (imageOrder != null) 'imageOrder': imageOrder.toString(),
+      if (captureSessionId != null) 'captureSessionId': captureSessionId,
       'isCallEngine': isCallEngine ? 'true' : 'false',
     };
     final fileName = isCallEngine
@@ -247,6 +251,7 @@ class PhotoUploadQueue {
       angleId: angleId,
       photoIndex: photoIndex,
       imageOrder: imageOrder,
+      captureSessionId: captureSessionId,
       isCallEngine: isCallEngine,
       filePath: filePath,
       fileName: fileName,
@@ -265,7 +270,8 @@ class PhotoUploadQueue {
         ]);
     debugPrint(
       'AICycle upload queued: session=$sessionId angle=$angleId '
-      'photo=$photoIndex imageOrder=$imageOrder isCallEngine=$isCallEngine '
+      'photo=$photoIndex imageOrder=$imageOrder '
+      'captureSessionId=$captureSessionId isCallEngine=$isCallEngine '
       'file=${item.fileName}',
     );
     await enforceCacheLimit();
@@ -274,8 +280,9 @@ class PhotoUploadQueue {
 
   Future<void> enqueueExistingPhotos(
     String sessionId,
-    Map<int, List<String>> photoPaths,
-  ) async {
+    Map<int, List<String>> photoPaths, {
+    String? captureSessionId,
+  }) async {
     final allPhotos = <_ExistingPhotoInfo>[];
     for (final entry in photoPaths.entries) {
       for (var i = 0; i < entry.value.length; i++) {
@@ -299,6 +306,7 @@ class PhotoUploadQueue {
         photoIndex: photo.photoIndex,
         filePath: photo.path,
         imageOrder: idx + 1,
+        captureSessionId: captureSessionId,
         isCallEngine: true,
         schedule: false,
       );
@@ -607,6 +615,7 @@ class PhotoUploadItem {
     required this.angleId,
     required this.photoIndex,
     this.imageOrder,
+    this.captureSessionId,
     this.isCallEngine = false,
     required this.filePath,
     required this.fileName,
@@ -629,6 +638,7 @@ class PhotoUploadItem {
   final int angleId;
   final int photoIndex;
   final int? imageOrder;
+  final String? captureSessionId;
   final bool isCallEngine;
   final String filePath;
   final String fileName;
@@ -657,6 +667,10 @@ class PhotoUploadItem {
       angleId: json['angleId'] as int,
       photoIndex: json['photoIndex'] as int,
       imageOrder: json['imageOrder'] as int?,
+      captureSessionId: json['captureSessionId'] as String? ??
+          (json['fields'] is Map
+              ? (json['fields'] as Map)['captureSessionId'] as String?
+              : null),
       isCallEngine:
           json['isCallEngine'] as bool? ?? json['isCapture'] as bool? ?? false,
       filePath: json['filePath'] as String,
@@ -685,6 +699,7 @@ class PhotoUploadItem {
         'angleId': angleId,
         'photoIndex': photoIndex,
         if (imageOrder != null) 'imageOrder': imageOrder,
+        if (captureSessionId != null) 'captureSessionId': captureSessionId,
         'isCallEngine': isCallEngine,
         'filePath': filePath,
         'fileName': fileName,

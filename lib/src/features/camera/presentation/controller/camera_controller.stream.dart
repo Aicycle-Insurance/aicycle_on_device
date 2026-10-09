@@ -110,15 +110,15 @@ mixin _StreamMixin on _CameraControllerBase {
     // Chỉ giữ bộ phận nằm trong vùng user thực sự nhìn thấy (giữa top/bottom
     // bar) — model xử lý cả phần bị che nên phải lọc lại.
     final visible = _filterToViewport(output.detections);
+    _latestCarParts = visible;
     _latestCarPartClasses = visible.map((d) => d.className).toSet();
     final now = DateTime.now();
     for (final className in _latestCarPartClasses) {
       _carPartLastSeenAt[className] = now;
     }
     updateMessage(); // tự notify khi message đổi
-    // Nhãn bộ phận đi qua notifier riêng — không kéo theo rebuild thanh
-    // trên/dưới. Hai frame cùng rỗng không sinh sự kiện (xem [_setCarPartBoxes]).
-    _setCarPartBoxes(visible);
+    // Cập nhật nhãn bộ phận: chỉ hiển thị các bộ phận có tổn thất.
+    _updateDamagedPartBoxes();
   }
 
   /// carDamage — model detect tổn thất (model chính).
@@ -134,6 +134,11 @@ mixin _StreamMixin on _CameraControllerBase {
     // Bounding box chỉ vẽ khi đang trong pha inspection. Đọc showBoundingBoxes
     // SAU _maybeShowDetectionReady() để dùng đúng pha vừa chuyển. Đi qua
     // notifier riêng nên không kéo theo rebuild thanh trên/dưới.
-    _setDamageBoxes(showBoundingBoxes ? _latestDetections : _noBoxes);
+    // Áp dụng gộp không gian (DamageBoxSpatialMerger) để tránh chồng lấn box rối mắt.
+    final displayBoxes = showBoundingBoxes
+        ? DamageBoxSpatialMerger.merge(_latestDetections)
+        : _noBoxes;
+    _setDamageBoxes(displayBoxes);
+    _updateDamagedPartBoxes();
   }
 }

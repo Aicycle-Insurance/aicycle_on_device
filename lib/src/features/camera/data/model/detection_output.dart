@@ -5,6 +5,8 @@ Thủng, rách
 Trầy, xước
 */
 
+import 'dart:math' as math;
+
 /// Output từ model detect (YOLO detect).
 class DetectionOutput {
   final double fps;
@@ -93,6 +95,22 @@ class NormalizedBox {
   double get height => bottom - top;
   double get centerX => (left + right) / 2;
   double get centerY => (top + bottom) / 2;
+
+  /// Kiểm tra 2 box có giao nhau (chạm nhau dù chỉ 1 pixel) hay không.
+  bool overlaps(NormalizedBox other) {
+    final interLeft = math.max(left, other.left);
+    final interTop = math.max(top, other.top);
+    final interRight = math.min(right, other.right);
+    final interBottom = math.min(bottom, other.bottom);
+    return (interRight > interLeft) && (interBottom > interTop);
+  }
+
+  /// Khoảng cách Euclidean giữa tâm của 2 box.
+  double distanceTo(NormalizedBox other) {
+    final dx = centerX - other.centerX;
+    final dy = centerY - other.centerY;
+    return math.sqrt(dx * dx + dy * dy);
+  }
 
   factory NormalizedBox.fromJson(Map<String, dynamic> json) {
     return NormalizedBox(

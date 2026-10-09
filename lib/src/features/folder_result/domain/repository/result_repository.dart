@@ -12,6 +12,7 @@ abstract class ResultRepository {
     required Uint8List photoBytes,
     required int photoIndex,
     int? imageOrder,
+    String? captureSessionId,
   });
 
   /// Fetches the inspection result after all photos are uploaded.

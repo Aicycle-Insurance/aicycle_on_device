@@ -23,6 +23,7 @@ class ResultRemoteDataSource {
     required Uint8List photoBytes,
     required int photoIndex,
     int? imageOrder,
+    String? captureSessionId,
   }) async {
     final config = AICycleConfigHolder.config;
     final sessionId = config.generalConfig.documentId;
@@ -34,6 +35,7 @@ class ResultRemoteDataSource {
         photoBytes: photoBytes,
         photoIndex: photoIndex,
         imageOrder: imageOrder,
+        captureSessionId: captureSessionId,
       );
     } else {
       // Upload to AICycle server
@@ -43,6 +45,7 @@ class ResultRemoteDataSource {
         if (config.generalConfig.organization != AiCycleOrg.aicycle)
           'externalSessionId': sessionId,
         if (imageOrder != null) 'imageOrder': imageOrder,
+        if (captureSessionId != null) 'captureSessionId': captureSessionId,
         'img': MultipartFile.fromBytes(
           photoBytes,
           filename: '${angleId}_$photoIndex.jpg',
@@ -64,6 +67,7 @@ class ResultRemoteDataSource {
     required Uint8List photoBytes,
     required int photoIndex,
     int? imageOrder,
+    String? captureSessionId,
   }) async {
     final config = AICycleConfigHolder.config;
     final vbi = config.vbiConfig;
@@ -103,6 +107,7 @@ class ResultRemoteDataSource {
       'dia_chi': vbi.diaChi,
       'sdk': vbi.sdk,
       if (imageOrder != null) 'imageOrder': imageOrder,
+      if (captureSessionId != null) 'captureSessionId': captureSessionId,
     });
 
     /// Chắc chắn != null do org VBI bắt buộc khai báo
