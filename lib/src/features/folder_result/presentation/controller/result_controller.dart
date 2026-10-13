@@ -2,8 +2,12 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show AppLifecycleState;
 
+import '../../../../core/cache/photo_session_cache.dart';
+import '../../../../core/constants/string_sheet.dart';
 import '../../../../core/upload/photo_upload_queue.dart';
+import '../../../../core/upload/upload_health.dart';
 import '../../domain/entity/inspection_result.dart';
 import '../../domain/repository/result_repository.dart';
 
@@ -40,6 +44,16 @@ class ResultController extends ChangeNotifier {
 
   final void Function(String)? onError;
 
+  static const _kickInterval = Duration(seconds: 10);
+
+  final _waitPolicy = UploadWaitAlertPolicy();
+  List<String> _allPaths = const [];
+  UploadAlert? _alert;
+  bool _isRetrying = false;
+
+  /// This controller paused the queue for the error screen.
+  bool _pausedUploads = false;
+
   ResultStatus _status = ResultStatus.uploading;
   int _uploadedCount = 0;
   int _totalCount = 0;
@@ -52,6 +66,12 @@ class ResultController extends ChangeNotifier {
   int get totalCount => _totalCount;
   List<VehiclePart>? get result => _result;
   String? get errorMessage => _errorMessage;
+
+  /// Set when uploads are failing and the error screen is shown.
+  UploadAlert? get alert => _alert;
+
+  /// A request failed and is being retried ("Kết nối chậm, đang thử lại…").
+  bool get isRetrying => _isRetrying;
 
   double get uploadProgress =>
       _totalCount == 0 ? 0 : _uploadedCount / _totalCount;
@@ -78,35 +98,74 @@ class ResultController extends ChangeNotifier {
     }
 
     final allPaths = snapshot.values.expand((paths) => paths).toList();
-    final initialPending =
-        allPaths.where((path) => File(path).existsSync()).length;
+    _allPaths = allPaths;
+    final initialPending = _pendingCount();
 
     _uploadedCount = _totalCount - initialPending;
     _status =
         initialPending == 0 ? ResultStatus.success : ResultStatus.uploading;
     _errorMessage = null;
+    _alert = null;
+    _isRetrying = false;
     _notify();
 
+    final queue = PhotoUploadQueue.instance;
     try {
-      await PhotoUploadQueue.instance.enqueueExistingPhotos(
-        sessionId,
-        snapshot,
-      );
-      await PhotoUploadQueue.instance.resumePendingUploads();
-      await PhotoUploadQueue.instance.drainUploadedResponses(onImageUploaded);
+      // The user is now waiting: short timeouts, quick retries, and photos
+      // that failed while capturing are retried right away.
+      await queue.setMode(UploadMode.fast);
+      await queue.enqueueExistingPhotos(sessionId, snapshot);
+      await queue.resumeUploads();
+      await queue.drainUploadedResponses(onImageUploaded);
+      _waitPolicy.reset();
 
+      var firstCheck = true;
+      var lastKick = DateTime.now();
       while (!_disposed) {
-        final pending =
-            allPaths.where((path) => File(path).existsSync()).length;
+        final pending = _pendingCount();
         _uploadedCount = _totalCount - pending;
-        _notify();
         if (pending == 0) break;
+
+        final health = await queue.healthForSession(sessionId);
+        if (_disposed) return;
+        final online = await NetworkStatus.instance.refresh();
+        // Discarded meanwhile: must not pause the queue after cancelSession.
+        if (_disposed) return;
+        final alert = _waitPolicy.evaluate(
+          online: online,
+          pending: pending,
+          health: health,
+          reportOfflineImmediately: firstCheck,
+        );
+        firstCheck = false;
+
+        // Once shown, the error screen stays and uploads stay paused until
+        // the user taps "Thử lại" or "Huỷ", even if the network comes back.
+        if (_alert == null && alert != null) {
+          _alert = alert;
+          _errorMessage = _messageFor(alert);
+          _status = ResultStatus.error;
+          onError?.call(_errorMessage!);
+          _pausedUploads = true;
+          await queue.pauseUploads();
+        }
+        _isRetrying = _alert == null && health.streak != null;
+        _notify();
+
         await Future<void>.delayed(const Duration(milliseconds: 500));
-        await PhotoUploadQueue.instance.resumePendingUploads();
-        await PhotoUploadQueue.instance.drainUploadedResponses(onImageUploaded);
+        // Native normally drives itself; this periodic kick covers a worker
+        // that was stopped by the OS (e.g. Android's 10-minute limit).
+        if (DateTime.now().difference(lastKick) >= _kickInterval) {
+          lastKick = DateTime.now();
+          await queue.resumePendingUploads();
+        }
+        await queue.drainUploadedResponses(onImageUploaded);
       }
       if (_disposed) return;
-      await PhotoUploadQueue.instance.drainUploadedResponses(onImageUploaded);
+      await queue.drainUploadedResponses(onImageUploaded);
+      await queue.setMode(UploadMode.background);
+      _alert = null;
+      _isRetrying = false;
 
       for (final angleId in snapshot.keys) {
         onAngleUploaded?.call(angleId);
@@ -143,15 +202,73 @@ class ResultController extends ChangeNotifier {
     }
   }
 
-  Future<void> retry() => start();
+  /// "Thử lại" on the error screen. While [start] is still polling (upload
+  /// errors) it only resets the backoff; otherwise it restarts [start].
+  Future<void> retry() async {
+    if (_alert != null && !_disposed) return _retryUploads();
+    return start();
+  }
+
+  Future<void> _retryUploads() async {
+    _alert = null;
+    _errorMessage = null;
+    _status = ResultStatus.uploading;
+    _waitPolicy.reset();
+    _notify();
+    _pausedUploads = false;
+    await PhotoUploadQueue.instance.resumeUploads();
+  }
+
+  /// "Huỷ" confirmed: stop every upload and delete the session's photos.
+  Future<void> discardSession() async {
+    _disposed = true;
+    // cancelSession lifts the pause itself.
+    _pausedUploads = false;
+    final queue = PhotoUploadQueue.instance;
+    await queue.cancelSession(sessionId);
+    await queue.setMode(UploadMode.background);
+    await PhotoSessionCache.instance.clearSession(sessionId);
+  }
+
+  /// Captured photos still on disk, i.e. not yet accepted or rejected.
+  int get pendingCount => _pendingCount();
+
+  int _pendingCount() =>
+      _allPaths.where((path) => File(path).existsSync()).length;
+
+  String _messageFor(UploadAlert alert) => switch (alert) {
+        UploadAlert.offline => StringSheet.uploadOffline,
+        UploadAlert.server => StringSheet.uploadServerError,
+        UploadAlert.stalled => StringSheet.uploadStalled,
+      };
 
   void _notify() {
     if (!_disposed) notifyListeners();
   }
 
+  /// App went to background / came back while the user waits on uploads.
+  /// iOS foreground-session uploads cannot run in background, so fall back to
+  /// the background session meanwhile.
+  Future<void> onAppLifecycleChanged(AppLifecycleState state) async {
+    if (_disposed || _status == ResultStatus.success) return;
+    final queue = PhotoUploadQueue.instance;
+    if (state == AppLifecycleState.paused) {
+      await queue.setMode(UploadMode.background);
+      await queue.resumePendingUploads();
+    } else if (state == AppLifecycleState.resumed) {
+      await queue.setMode(UploadMode.fast);
+      await queue.retryFailedNow();
+      _waitPolicy.reset();
+    }
+  }
+
   @override
   void dispose() {
     _disposed = true;
+    final queue = PhotoUploadQueue.instance;
+    unawaited(queue.setMode(UploadMode.background));
+    // Left without "Thử lại"/"Huỷ": photos keep uploading in the background.
+    if (_pausedUploads) unawaited(queue.resumeUploads());
     super.dispose();
   }
 }

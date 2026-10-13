@@ -31,6 +31,7 @@ mixin _ContextStreamMixin on _CameraControllerBase {
         photoIndex: order,
         filePath: filePath,
         imageOrder: order,
+        captureSessionId: _captureSessionId,
         isCallEngine: false,
       ),
     );

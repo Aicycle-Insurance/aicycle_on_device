@@ -8,11 +8,13 @@ import '../../../../core/cache/photo_session_cache.dart';
 import '../../../../core/constants/string_sheet.dart';
 import '../../../../core/upload/photo_upload_queue.dart';
 import '../../../../core/utils/location_services.dart';
+import '../../../../core/utils/uuid_util.dart';
 import '../../data/model/camera_message.dart';
 import '../../data/model/car_angle.dart';
 import '../../data/model/classify_output.dart';
 import '../../data/model/detection_output.dart';
 import '../../data/model/thermal_status.dart';
+import '../../domain/utils/damage_box_spatial_merger.dart';
 
 part 'camera_controller.stream.dart';
 part 'camera_controller.capture.dart';
@@ -138,13 +140,18 @@ class CameraController = _CameraControllerBase
 abstract class _CameraControllerBase extends ChangeNotifier {
   _CameraControllerBase({
     required String sessionId,
+    String? captureSessionId,
     bool require4Angles = false,
     bool debugMode = false,
   })  : _sessionId = sessionId,
+        _captureSessionId = captureSessionId ?? UuidUtil.v4(),
         _require4Angles = require4Angles,
         _debugMode = debugMode;
 
   final String _sessionId;
+  final String _captureSessionId;
+
+  String get captureSessionId => _captureSessionId;
 
   /// Config "Require 4-angle panoramic photos". Khi TẮT (false): chỉ ảnh đầu
   /// tiên cần là ảnh toàn cảnh đọc rõ biển số; các góc sau chỉ ghi nhận tổn
@@ -233,6 +240,9 @@ abstract class _CameraControllerBase extends ChangeNotifier {
 
   /// Class names bộ phận từ frame car-part detect (model thứ 2) mới nhất.
   Set<String> _latestCarPartClasses = {};
+
+  /// Detections bộ phận từ frame car-part detect mới nhất (trong viewport).
+  List<DetectionResult> _latestCarParts = const [];
 
   /// Thời điểm thấy gần nhất của từng bộ phận (trong khung nhìn). Dùng cùng
   /// [_carPartFlickerGrace] để làm mượt tín hiệu detect vốn nhấp nháy từng frame.
@@ -336,6 +346,26 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   bool? _sentInspectionActive;
 
   bool _stopped = false;
+
+  /// Dialog cảnh báo upload đang mở → giữ các lượt chụp lại tới khi đóng, để
+  /// không chụp ngầm phía sau dialog.
+  bool _autoCapturePaused = false;
+  Completer<void>? _autoCaptureResumed;
+
+  void setAutoCapturePaused(bool paused) {
+    if (_autoCapturePaused == paused) return;
+    _autoCapturePaused = paused;
+    if (!paused) {
+      _autoCaptureResumed?.complete();
+      _autoCaptureResumed = null;
+    }
+  }
+
+  Future<void> _waitWhileAutoCapturePaused() async {
+    while (_autoCapturePaused && !_stopped) {
+      await (_autoCaptureResumed ??= Completer<void>()).future;
+    }
+  }
 
   // ── Getters ──────────────────────────────────────────────────────────────
 
@@ -443,6 +473,50 @@ abstract class _CameraControllerBase extends ChangeNotifier {
     carPartBoxes.value = boxes.isEmpty ? _noBoxes : boxes;
   }
 
+  /// Lọc và cập nhật nhãn bộ phận: chỉ hiển thị các bộ phận có tổn thất.
+  ///
+  /// Quy tắc:
+  /// 1. Chạm là hiện: bất kỳ bộ phận nào có bounding box chạm vào vết tổn thất
+  ///    (overlaps == true) đều được thêm vào danh sách hiển thị.
+  /// 2. Cứu cánh Fallback: nếu vết tổn thất không chạm vào bộ phận nào (do box
+  ///    bộ phận vẽ hụt hoặc góc chụp nghiêng), tự động gán cho bộ phận có tâm
+  ///    gần nhất. Đảm bảo cứ có tổn thất là có bộ phận được hiển thị.
+  void _updateDamagedPartBoxes() {
+    if (_stopped) return;
+    if (!showBoundingBoxes ||
+        _latestDetections.isEmpty ||
+        _latestCarParts.isEmpty) {
+      _setCarPartBoxes(_noBoxes);
+      return;
+    }
+
+    final visibleParts = <DetectionResult>{};
+
+    for (final damage in _latestDetections) {
+      var hasAnyTouch = false;
+      DetectionResult? nearestPart;
+      var minDistance = double.infinity;
+
+      for (final part in _latestCarParts) {
+        if (part.normalizedBox.overlaps(damage.normalizedBox)) {
+          visibleParts.add(part);
+          hasAnyTouch = true;
+        }
+        final dist = damage.normalizedBox.distanceTo(part.normalizedBox);
+        if (dist < minDistance) {
+          minDistance = dist;
+          nearestPart = part;
+        }
+      }
+
+      if (!hasAnyTouch && nearestPart != null) {
+        visibleParts.add(nearestPart);
+      }
+    }
+
+    _setCarPartBoxes(visibleParts.toList());
+  }
+
   // ── Thumbnail ─────────────────────────────────────────────────────────────
 
   /// Giải lại đường dẫn ảnh cho ô thumbnail. Gọi ở đúng 3 mốc danh sách ảnh đổi:
@@ -494,6 +568,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
   void _resetPanoramicFramingState({bool clearCarParts = false}) {
     if (clearCarParts) {
       _latestCarPartClasses = {};
+      _latestCarParts = const [];
       _carPartLastSeenAt.clear();
       _setCarPartBoxes(_noBoxes);
     }
@@ -639,7 +714,10 @@ abstract class _CameraControllerBase extends ChangeNotifier {
     _inspectionPhase = phase;
     // Rời inspection → dọn box ngay thay vì chờ frame carDamage kế tiếp: native
     // đã tắt hẳn model đó ở pha canh khung nên sẽ không có frame nào tới nữa.
-    if (phase == null) _setDamageBoxes(_noBoxes);
+    if (phase == null) {
+      _setDamageBoxes(_noBoxes);
+      _setCarPartBoxes(_noBoxes);
+    }
     final active = phase != null;
     if (_sentInspectionActive != active) {
       if (yoloController.setInspectionActive(active)) {
@@ -673,10 +751,12 @@ abstract class _CameraControllerBase extends ChangeNotifier {
     _setCarPartBoxes(_noBoxes);
     _stopped = true;
     _captureStarted = false;
+    setAutoCapturePaused(false);
     unawaited(_stopContextStream());
     _cancelFlowTimers();
     _latestDetections = [];
     _latestCarPartClasses = {};
+    _latestCarParts = const [];
     _torchEnabled = false;
     unawaited(yoloController.stop().catchError((_) {}));
   }

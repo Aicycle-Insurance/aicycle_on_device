@@ -10,7 +10,9 @@ import '../../../../aicycle_on_device.dart';
 import '../../../core/cache/photo_session_cache.dart';
 import '../../../core/constants/string_sheet.dart';
 import '../../../core/themes/app_colors.dart';
+import '../../../core/themes/app_textstyle.dart';
 import '../../../core/upload/photo_upload_queue.dart';
+import '../../../core/upload/upload_health.dart';
 import '../../../core/utils/screen_utils.dart';
 import '../../../core/widgets/confirm_dialog.dart';
 import '../data/model/camera_message.dart';
@@ -32,6 +34,8 @@ import 'widgets/view_result_button.dart';
 /// Màn camera thuần — chụp ảnh giám định. Nhận các đường dẫn model đã được
 /// chuẩn bị sẵn (folder + tải model do màn bootstrap [AICycleOnDeviceCamera]
 /// lo trước đó).
+enum _UploadAlertAction { continueCapture, exit }
+
 class CameraScreen extends StatefulWidget {
   const CameraScreen({
     super.key,
@@ -42,6 +46,7 @@ class CameraScreen extends StatefulWidget {
     this.licensePlateModelPath,
     this.onComplete,
     this.onClose,
+    this.onError,
     this.onViewResult,
   });
 
@@ -58,6 +63,9 @@ class CameraScreen extends StatefulWidget {
   /// Gọi khi user thoát camera (nút X hoặc Back).
   final VoidCallback? onClose;
 
+  /// Báo host khi hiện dialog lỗi upload trong lúc chụp.
+  final Function(String error)? onError;
+
   /// Bấm "Xem kết quả": trả ảnh đã chụp lên bootstrap để chuyển sang pha upload
   /// (bootstrap sẽ gỡ camera này khỏi cây → giải phóng tài nguyên).
   final void Function(Map<int, List<String>> photos)? onViewResult;
@@ -69,6 +77,11 @@ class CameraScreen extends StatefulWidget {
 class _CameraScreenState extends State<CameraScreen>
     with WidgetsBindingObserver {
   late final CameraController _cameraController;
+  late final CaptureUploadWatcher _uploadWatcher;
+  BuildContext? _uploadAlertContext;
+
+  /// The upload alert paused the queue; lifted by "Chụp tiếp" or on dispose.
+  bool _uploadsPausedByAlert = false;
   bool _guideShown = false;
   bool _resultRequested = false;
 
@@ -87,6 +100,9 @@ class _CameraScreenState extends State<CameraScreen>
           widget.aiCycleConfig.validateConfig.require4AnglePanoramicPhotos,
       debugMode: widget.aiCycleConfig.generalConfig.debugMode,
     );
+    _uploadWatcher = CaptureUploadWatcher(sessionId: sessionId)
+      ..addListener(_onUploadAlertChanged)
+      ..start();
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _restoreAndStart());
   }
@@ -94,6 +110,11 @@ class _CameraScreenState extends State<CameraScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _uploadWatcher
+      ..removeListener(_onUploadAlertChanged)
+      ..dispose();
+    // Left with the dialog still up: photos keep uploading in the background.
+    _resumeUploadsAfterAlert();
     // Cho phép màn hình tự tắt trở lại khi rời camera.
     WakelockPlus.disable();
     _cameraController.dispose();
@@ -181,11 +202,111 @@ class _CameraScreenState extends State<CameraScreen>
     if (confirmed) {
       // Dừng camera trước khi pop để native cleanup không chặn UI trong dispose().
       _cameraController.stopCamera();
-      await PhotoUploadQueue.instance.clearSession(sessionId);
+      // Huỷ cả các upload native đang chạy, không chỉ xoá hàng đợi phía Dart.
+      await PhotoUploadQueue.instance.cancelSession(sessionId);
       await PhotoSessionCache.instance.clearSession(sessionId);
       widget.onClose?.call();
     }
     return confirmed;
+  }
+
+  /// Giai đoạn đang chụp, lỗi upload hiện dialog (upload vẫn retry ngầm):
+  ///  - Mất mạng: [Huỷ] thoát SDK + xoá ảnh, [Chụp tiếp] đóng dialog. Có mạng
+  ///    lại dialog vẫn giữ nguyên, chờ user chọn.
+  ///  - Lỗi máy chủ: chỉ có [Đóng] → thoát SDK + xoá ảnh.
+  void _onUploadAlertChanged() {
+    final alert = _uploadWatcher.alert;
+    if (alert != null && _uploadAlertContext == null && !_resultRequested) {
+      _showUploadAlert(alert);
+    }
+  }
+
+  Future<void> _showUploadAlert(UploadAlert alert) async {
+    final offline = alert == UploadAlert.offline;
+    final title = offline
+        ? StringSheet.uploadOffline
+        : StringSheet.captureServerErrorTitle;
+    widget.onError?.call(title);
+    _cameraController.setAutoCapturePaused(true);
+    // Nothing is sent while the dialog is up, even if the network comes back.
+    _uploadsPausedByAlert = true;
+    unawaited(PhotoUploadQueue.instance.pauseUploads());
+    final action = await showDialog<_UploadAlertAction>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        _uploadAlertContext = dialogContext;
+        return RotatedBox(
+          quarterTurns: 1,
+          child: AlertDialog(
+            title: Text(title, style: AppTextStyles.base.s16.w600()),
+            content: Text(
+              offline
+                  ? StringSheet.captureOfflineContent
+                  : StringSheet.captureServerErrorContent,
+              style: AppTextStyles.base.s14.ink400Color,
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => _closeUploadAlert(_UploadAlertAction.exit),
+                child: Text(
+                  offline ? StringSheet.cancel : StringSheet.close,
+                  style: offline
+                      ? AppTextStyles.base.s14.w600()
+                      : AppTextStyles.base.s14.w600().primaryColor,
+                ),
+              ),
+              if (offline)
+                TextButton(
+                  onPressed: () =>
+                      _closeUploadAlert(_UploadAlertAction.continueCapture),
+                  child: Text(
+                    StringSheet.continueCapture,
+                    style: AppTextStyles.base.s14.w600().primaryColor,
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+    _uploadAlertContext = null;
+    if (!mounted) return;
+    // Nút Back hệ thống: mất mạng coi như "Chụp tiếp", lỗi máy chủ coi như "Đóng".
+    final exit =
+        action == _UploadAlertAction.exit || (action == null && !offline);
+    if (exit) {
+      // cancelSession inside lifts the pause.
+      _uploadsPausedByAlert = false;
+      await _exitDiscardingSession();
+      return;
+    }
+    _resumeUploadsAfterAlert();
+    _cameraController.setAutoCapturePaused(false);
+    _uploadWatcher.dismiss();
+  }
+
+  void _resumeUploadsAfterAlert() {
+    if (!_uploadsPausedByAlert) return;
+    _uploadsPausedByAlert = false;
+    unawaited(PhotoUploadQueue.instance.resumeUploads());
+  }
+
+  void _closeUploadAlert(_UploadAlertAction action) {
+    final dialogContext = _uploadAlertContext;
+    if (dialogContext == null || !dialogContext.mounted) return;
+    Navigator.of(dialogContext).pop(action);
+  }
+
+  /// Thoát SDK do lỗi upload: không hỏi lại (dialog đã báo ảnh sẽ bị xoá).
+  Future<void> _exitDiscardingSession() async {
+    final nav = Navigator.of(context);
+    final sessionId = widget.aiCycleConfig.generalConfig.documentId;
+    _cameraController.stopCamera();
+    await PhotoUploadQueue.instance.cancelSession(sessionId);
+    await PhotoSessionCache.instance.clearSession(sessionId);
+    widget.onClose?.call();
+    nav.pop();
   }
 
   Widget _buildTooltip() {

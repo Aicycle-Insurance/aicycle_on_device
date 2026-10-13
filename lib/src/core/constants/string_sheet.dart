@@ -102,6 +102,28 @@ class StringSheet {
   static const done = 'Xong';
   static const viewResult = 'Kết thúc chụp ảnh';
 
+  // ----- Upload errors -----
+  static const uploadOffline = 'Thiết bị đã mất kết nối internet';
+  static const uploadServerError =
+      'Không thể kết nối đến máy chủ. Vui lòng thử lại';
+  static const uploadStalled = 'Không thể tải ảnh lên. Vui lòng thử lại';
+  static const uploadRetrying = 'Kết nối chậm, đang thử lại…';
+  static const captureOfflineContent =
+      'Ảnh đã chụp vẫn được lưu và sẽ tự tải lên khi có mạng. Bạn có thể chụp '
+      'tiếp hoặc huỷ phiên chụp (toàn bộ ảnh sẽ bị xoá).';
+  static const captureServerErrorTitle = 'Không thể kết nối đến máy chủ';
+  static const captureServerErrorContent =
+      'Phiên chụp sẽ kết thúc và các ảnh đã chụp sẽ không được lưu. Vui lòng '
+      'kiểm tra kết nối internet và thử lại sau.';
+  static const continueCapture = 'Chụp tiếp';
+  static const close = 'Đóng';
+  static const cancelUploadTitle = 'Huỷ tải ảnh?';
+  static String cancelUploadContent(int pending, int total) =>
+      'Còn $pending/$total ảnh chưa được tải lên. Nếu huỷ, toàn bộ ảnh sẽ bị '
+      'xoá và không thể khôi phục.';
+  static const goBack = 'Quay lại';
+  static const discardAndExit = 'Xoá và thoát';
+
   static const unknown = 'Không xác định';
 
   static String modelVersion(String version) => 'Phiên bản $version';

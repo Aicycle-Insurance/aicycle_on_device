@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../core/cache/photo_session_cache.dart';
@@ -6,6 +8,7 @@ import '../../../core/di/injection.dart';
 import '../../../core/themes/app_colors.dart';
 import '../../../core/themes/app_textstyle.dart';
 import '../../../core/utils/screen_utils.dart';
+import '../../../core/widgets/confirm_dialog.dart';
 import '../../folder_result/presentation/controller/result_controller.dart';
 
 /// Màn splash upload: nhận ảnh đã chụp từ camera (camera đã bị đóng để giải
@@ -17,13 +20,19 @@ class UploadView extends StatefulWidget {
     required this.sessionId,
     required this.capturedPhotos,
     this.onComplete,
+    this.onClose,
     this.onImageUploaded,
     this.onError,
   });
 
   final String sessionId;
   final Map<int, List<String>> capturedPhotos;
+
+  /// Chỉ gọi khi toàn bộ ảnh đã có kết quả cuối từ server.
   final Function()? onComplete;
+
+  /// User bấm "Huỷ" và xác nhận xoá ảnh → thoát SDK.
+  final VoidCallback? onClose;
   final Function(String)? onError;
 
   /// Gọi mỗi khi một ảnh upload thành công, kèm data server trả về.
@@ -33,14 +42,16 @@ class UploadView extends StatefulWidget {
   State<UploadView> createState() => _UploadViewState();
 }
 
-class _UploadViewState extends State<UploadView> {
+class _UploadViewState extends State<UploadView> with WidgetsBindingObserver {
   late final ResultController _controller;
   bool _isRunning = false;
   bool _completeNotified = false;
+  bool _discarding = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _controller = ResultController(
       sessionId: widget.sessionId,
       capturedPhotos: widget.capturedPhotos,
@@ -60,9 +71,10 @@ class _UploadViewState extends State<UploadView> {
     } finally {
       _isRunning = false;
     }
-    if (!mounted) return;
+    if (!mounted || _discarding) return;
     if (_controller.status == ResultStatus.error) {
-      // Hiếm khi xảy ra (lỗi từng ảnh đã được skip) — để UI hiện retry.
+      // Lỗi cục bộ (đọc/ghi hàng đợi) — để UI hiện retry. Lỗi mạng/máy chủ
+      // không tới đây: start() vẫn chạy và tự hiện màn lỗi.
       setState(() {});
       return;
     }
@@ -77,8 +89,48 @@ class _UploadViewState extends State<UploadView> {
     widget.onComplete?.call();
   }
 
+  void _onRetryPressed() {
+    if (_controller.alert != null) {
+      unawaited(_controller.retry());
+    } else {
+      unawaited(_run());
+    }
+  }
+
+  /// "Huỷ": xác nhận trước vì toàn bộ ảnh chưa tải lên sẽ bị xoá.
+  Future<void> _onCancelPressed() async {
+    final confirmed = await ConfirmDialog.show(
+      context,
+      title: StringSheet.cancelUploadTitle,
+      content: StringSheet.cancelUploadContent(
+        _controller.pendingCount,
+        _controller.totalCount,
+      ),
+      cancelText: StringSheet.goBack,
+      confirmText: StringSheet.discardAndExit,
+      confirmColor: AppColors.redA400,
+    );
+    if (!confirmed || !mounted || _discarding) return;
+    _discarding = true;
+    try {
+      await _controller.discardSession();
+    } catch (error) {
+      // User chose to leave: a cleanup failure must not keep them here.
+      debugPrint('AICycle discard session failed: $error');
+    }
+    if (!mounted) return;
+    widget.onClose?.call();
+    Navigator.of(context).pop();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    unawaited(_controller.onAppLifecycleChanged(state));
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.dispose();
     super.dispose();
   }
@@ -126,6 +178,14 @@ class _UploadViewState extends State<UploadView> {
             style: AppTextStyles.base.s14.ink400Color,
             textAlign: TextAlign.center,
           ),
+          if (_controller.isRetrying) ...[
+            8.verticalSpace,
+            Text(
+              StringSheet.uploadRetrying,
+              style: AppTextStyles.base.s12.ink400Color,
+              textAlign: TextAlign.center,
+            ),
+          ],
         ],
       ),
     );
@@ -150,10 +210,7 @@ class _UploadViewState extends State<UploadView> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 OutlinedButton(
-                  onPressed: () {
-                    _notifyComplete();
-                    Navigator.of(context).pop();
-                  },
+                  onPressed: _onCancelPressed,
                   child: Text(
                     StringSheet.cancel,
                     style: AppTextStyles.base.s14.w600(),
@@ -161,7 +218,7 @@ class _UploadViewState extends State<UploadView> {
                 ),
                 12.horizontalSpace,
                 FilledButton(
-                  onPressed: _run,
+                  onPressed: _onRetryPressed,
                   style: FilledButton.styleFrom(
                     backgroundColor: AppColors.primaryA500,
                   ),

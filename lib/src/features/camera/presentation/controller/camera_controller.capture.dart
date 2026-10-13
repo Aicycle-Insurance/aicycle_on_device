@@ -46,6 +46,9 @@ mixin _CaptureMixin on _CameraControllerBase {
       /// Chụp tự động quá nhanh, người dùng chưa kịp đọc message -> delay 3s.
       /// Chụp thủ công ([immediate]) thì chụp ngay.
       if (!immediate) await Future.delayed(const Duration(seconds: 3));
+      // Các lượt chụp tự động đều đi qua đây (kể cả immediate); chụp tay không
+      // thể bấm khi dialog đang che nên chặn chung là đủ.
+      await _waitWhileAutoCapturePaused();
       // 3 s là đủ để user bấm thoát; _flashCornerSuccess bên dưới notify và mở
       // Timer nên phải dừng ở đây.
       if (_stopped) return null;
@@ -106,6 +109,7 @@ mixin _CaptureMixin on _CameraControllerBase {
           photoIndex: photoIndex,
           filePath: path,
           imageOrder: imageOrder,
+          captureSessionId: _captureSessionId,
           isCallEngine: true,
           latitude: latitude,
           longitude: longitude,
@@ -181,6 +185,7 @@ mixin _CaptureMixin on _CameraControllerBase {
         photoIndex: photoIndex,
         filePath: path,
         imageOrder: imageOrder,
+        captureSessionId: _captureSessionId,
         isCallEngine: true,
         latitude: latitude,
         longitude: longitude,

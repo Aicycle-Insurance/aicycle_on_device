@@ -1,6 +1,6 @@
 name: aicycle_on_device
 description: "An AICycle On-Device SDK for Flutter."
-version: 0.1.17
+version: 0.1.18
 homepage:
 
 environment:
@@ -26,6 +26,7 @@ dependencies:
   image_picker: ^1.2.3
   permission_handler: ^11.3.1
   wakelock_plus: ^1.6.1
+  connectivity_plus: ^7.3.1
 
 dev_dependencies:
   flutter_test:
