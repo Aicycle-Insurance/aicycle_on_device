@@ -347,6 +347,26 @@ abstract class _CameraControllerBase extends ChangeNotifier {
 
   bool _stopped = false;
 
+  /// Dialog cảnh báo upload đang mở → giữ các lượt chụp lại tới khi đóng, để
+  /// không chụp ngầm phía sau dialog.
+  bool _autoCapturePaused = false;
+  Completer<void>? _autoCaptureResumed;
+
+  void setAutoCapturePaused(bool paused) {
+    if (_autoCapturePaused == paused) return;
+    _autoCapturePaused = paused;
+    if (!paused) {
+      _autoCaptureResumed?.complete();
+      _autoCaptureResumed = null;
+    }
+  }
+
+  Future<void> _waitWhileAutoCapturePaused() async {
+    while (_autoCapturePaused && !_stopped) {
+      await (_autoCaptureResumed ??= Completer<void>()).future;
+    }
+  }
+
   // ── Getters ──────────────────────────────────────────────────────────────
 
   bool get isTorchEnabled => _torchEnabled;
@@ -731,6 +751,7 @@ abstract class _CameraControllerBase extends ChangeNotifier {
     _setCarPartBoxes(_noBoxes);
     _stopped = true;
     _captureStarted = false;
+    setAutoCapturePaused(false);
     unawaited(_stopContextStream());
     _cancelFlowTimers();
     _latestDetections = [];

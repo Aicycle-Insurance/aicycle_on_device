@@ -426,6 +426,16 @@ public final class YOLOPlugin: NSObject, @preconcurrency FlutterPlugin, @uncheck
           }
         }
 
+      case "retryPhotoUploadsNow":
+        AICycleBackgroundUploader.shared.retryNow {
+          DispatchQueue.main.async { result(nil) }
+        }
+
+      case "cancelPhotoUploads":
+        AICycleBackgroundUploader.shared.cancelAll {
+          DispatchQueue.main.async { result(nil) }
+        }
+
       case "inspectModel":
         guard let args = call.arguments as? [String: Any],
           let modelPath = args["modelPath"] as? String

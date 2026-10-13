@@ -190,6 +190,7 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera>
             _modelController.modelPathOf(AiModelType.licensePlate),
         onComplete: widget.onComplete,
         onClose: widget.onClose,
+        onError: widget.onError,
         // Bấm "Xem kết quả" → chuyển sang pha upload: bootstrap render
         // UploadView ngay, rồi mới gỡ camera sau một nhịp ngắn.
         onViewResult: _openUploadView,
@@ -243,6 +244,7 @@ class _AICycleOnDeviceCameraState extends State<AICycleOnDeviceCamera>
             sessionId: widget.aiCycleConfig.generalConfig.documentId,
             capturedPhotos: photos,
             onComplete: widget.onComplete,
+            onClose: widget.onClose,
             onImageUploaded: widget.onImageUploaded,
             onError: widget.onError,
           ),

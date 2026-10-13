@@ -428,18 +428,39 @@ class YOLOPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandler
         }
       }
 
-      "schedulePhotoUploadQueue" -> {
-        try {
-          val args = call.arguments as? Map<*, *>
-          val queueFilePath = args?.get("queueFilePath") as? String
-          if (queueFilePath == null) {
-            result.error("bad_args", "Missing queueFilePath", null)
-            return
+      "schedulePhotoUploadQueue", "retryPhotoUploadsNow" -> {
+        val args = call.arguments as? Map<*, *>
+        val queueFilePath = args?.get("queueFilePath") as? String
+        if (queueFilePath == null) {
+          result.error("bad_args", "Missing queueFilePath", null)
+          return
+        }
+        val retryNow = call.method == "retryPhotoUploadsNow"
+        // WorkManager queries block on its database; keep them off the UI thread.
+        GlobalScope.launch(Dispatchers.IO) {
+          val error = runCatching {
+            if (retryNow) {
+              AICycleUploadScheduler.retryNow(applicationContext, queueFilePath)
+            } else {
+              AICycleUploadScheduler.schedule(applicationContext, queueFilePath)
+            }
+          }.exceptionOrNull()
+          withContext(Dispatchers.Main) {
+            if (error == null) {
+              result.success(null)
+            } else {
+              result.error("upload_queue_error", "Failed to schedule upload queue: ${error.message}", null)
+            }
           }
-          AICycleUploadScheduler.schedule(applicationContext, queueFilePath)
+        }
+      }
+
+      "cancelPhotoUploads" -> {
+        try {
+          AICycleUploadScheduler.cancelAll(applicationContext)
           result.success(null)
         } catch (e: Exception) {
-          result.error("upload_queue_error", "Failed to schedule upload queue: ${e.message}", null)
+          result.error("upload_queue_error", "Failed to cancel uploads: ${e.message}", null)
         }
       }
 

@@ -117,14 +117,12 @@ class PhotoSessionCache {
   /// Deletes all cached photos for a single [angleId] within [sessionId].
   Future<void> clearAngle(String sessionId, int angleId) async {
     final sessionDir = await _sessionDir(sessionId);
-    final dir = Directory('${sessionDir.path}/$angleId');
-    if (dir.existsSync()) await dir.delete(recursive: true);
+    await _deleteDir(Directory('${sessionDir.path}/$angleId'));
   }
 
   /// Deletes all cached photos for [sessionId].
   Future<void> clearSession(String sessionId) async {
-    final dir = await _sessionDir(sessionId);
-    if (dir.existsSync()) await dir.delete(recursive: true);
+    await _deleteDir(await _sessionDir(sessionId));
   }
 
   Future<void> markUploadPending(String sessionId) async {
@@ -161,7 +159,16 @@ class PhotoSessionCache {
 
   /// Deletes the entire photo cache directory.
   Future<void> clearAll() async {
-    final dir = await rootDir();
-    if (dir.existsSync()) await dir.delete(recursive: true);
+    await _deleteDir(await rootDir());
+  }
+
+  /// Native uploader deletes photo files on its own thread (a task finishing
+  /// right after cancel), so the tree can vanish mid-delete.
+  Future<void> _deleteDir(Directory dir) async {
+    try {
+      await dir.delete(recursive: true);
+    } on PathNotFoundException {
+      // Already gone.
+    }
   }
 }
